@@ -1,5 +1,5 @@
 """
-PdFOL v2.2  (visor de PDF con pestanas + organizar, aplanar, foliar y comprimir) · by Meneses999
+PdFOL v2.3  (visor de PDF con pestanas + organizar, aplanar, foliar y comprimir) · by Meneses999
 ========
 VISOR    : cada PDF se abre en su pestana, con miniaturas a la izquierda y
            desplazamiento continuo. Las paginas se dibujan en un proceso aparte
@@ -352,12 +352,16 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v2.2"
-VERSION_INTERNA = "2.2"
+VERSION = "v2.3"
+VERSION_INTERNA = "2.3"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v2.3", [
+        "Color del tema en Apariencia: Azul gris (el de siempre) o Verde gris, en claro y en oscuro.",
+        "Primera versión que se actualiza con el actualizador nuevo (sin ventana negra).",
+    ]),
     ("v2.2", [
         "Cierre limpio: al cerrar, PdFOL termina por completo (en Windows podía quedar corriendo escondido).",
         "Actualizador mejorado: no muestra ventana negra y, si PdFOL tarda en cerrarse, lo cierra él.",
@@ -429,6 +433,10 @@ def pantalla_de_inicio():
     tarjeta, borde, texto, texto2, acento, suave = (
         ("#232931", "#3A4350", "#E7EBF0", "#9AA6B4", "#7096C8", "#2C333D") if oscuro else
         ("#FFFFFF", "#D9E0E9", "#1E2730", "#6A7685", "#4C6F9F", "#E7ECF3"))
+    if tema_guardado() == "Verde gris":
+        tarjeta, borde, texto, texto2, acento, suave = (
+            ("#232A27", "#3A4640", "#E6ECE8", "#9FB0A6", "#9FB0A6", "#2C3531") if oscuro else
+            ("#FFFFFF", "#D5DFD9", "#1F2A25", "#66766D", "#5F7D6C", "#E5EDE8"))
 
     def hx(c_):
         c_ = c_.lstrip("#")
@@ -2344,6 +2352,38 @@ C = {
     "suave_h": ("#DCE3EC", "#353D48"),
     "campo": ("#F4F6F9", "#1D2228"),
 }
+# Colores del tema (Apariencia › Color del tema). Cada clave: (claro, oscuro)
+TEMAS = {
+    "Azul gris": dict(C),
+    "Verde gris": {  # basado en #9FB0A6
+        "lat_ini": ("#EEF3F0", "#27302C"), "lat_fin": ("#D2DED7", "#1D2421"), "lat_sel": ("#BFD0C6", "#36423C"),
+        "fondo": ("#F5F8F6", "#1A1F1D"), "tarjeta": ("#FFFFFF", "#232A27"), "borde": ("#DCE5E0", "#323C37"),
+        "linea": ("#ECF1EE", "#2C3531"), "texto": ("#1F2A25", "#E6ECE8"), "texto2": ("#66766D", "#9FB0A6"),
+        "acento": ("#5F7D6C", "#6F8A7B"), "acento_h": ("#4F6B5C", "#62796C"), "suave": ("#E5EDE8", "#2C3531"),
+        "suave_h": ("#D8E3DC", "#36403B"), "campo": ("#F2F6F3", "#1D2321"),
+    },
+}
+
+
+def tema_guardado():
+    """Nombre del color del tema guardado en las preferencias."""
+    import json as _json
+    base = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+    for carpeta in (base, os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "PdFOL")):
+        try:
+            with open(os.path.join(carpeta, "PdFOL_perfiles.json"), encoding="utf-8") as f:
+                t_ = _json.load(f).get("tema", "Azul gris")
+            return t_ if t_ in TEMAS else "Azul gris"
+        except Exception:
+            pass
+    return "Azul gris"
+
+
+def aplicar_tema(nombre):
+    """Cambia la paleta antes de armar la ventana."""
+    C.update(TEMAS.get(nombre, TEMAS["Azul gris"]))
+
+
 ICONOS = [  # clave, titulo, color del icono, grupo, texto corto (barra de arriba)
     ("abrir", "Abrir", "#2563EB", 0, "Abrir"),
     ("documento", "Documento", "#3B82F6", 0, "Documento"),
@@ -2730,6 +2770,7 @@ def iniciar_interfaz():
         cerrar_pantalla_de_inicio()
         return
     almacen = AlmacenPerfiles()
+    aplicar_tema(almacen.datos.get("tema", "Azul gris"))
     modo_ini = almacen.datos.get("apariencia", "Automático")
     ctk.set_appearance_mode({"Claro": "light", "Oscuro": "dark"}.get(modo_ini, "system"))
     ctk.set_default_color_theme("blue")
@@ -3433,8 +3474,45 @@ def iniciar_interfaz():
         botones_tema[modo] = b
     ctk.CTkLabel(t, text="Automático sigue el modo de Windows (claro u oscuro).", font=F(11),
                  text_color=C["texto2"], anchor="w").grid(row=1, column=0, columnspan=2, sticky="w", padx=20, pady=(0, 14))
-    seccion(p, "Actualizaciones", 2)
+    seccion(p, "Color del tema", 2)
     t = Tarjeta(p, 3)
+    caja_col_tema = ctk.CTkFrame(t, fg_color="transparent")
+    caja_col_tema.grid(row=0, column=0, columnspan=2, sticky="w", padx=18, pady=16)
+    tema_actual = almacen.datos.get("tema", "Azul gris")
+    v_tema = tk.StringVar(value=tema_actual)
+    botones_color_tema = {}
+
+    def muestra_tema(nombre, oscuro_):
+        pal = TEMAS[nombre]
+        k_ = 1 if oscuro_ else 0
+        W_, H_, E_ = 96, 64, 3
+        im_ = Image.new("RGB", (W_ * E_, H_ * E_), _hex(pal["fondo"][k_]))
+        d_ = ImageDraw.Draw(im_)
+        d_.rectangle([0, 0, W_ * E_, 14 * E_], fill=_hex(pal["lat_fin"][k_]))
+        d_.rounded_rectangle([6 * E_, 20 * E_, 30 * E_, 58 * E_], radius=4 * E_, fill=_hex(pal["tarjeta"][k_]))
+        d_.rounded_rectangle([36 * E_, 20 * E_, 90 * E_, 58 * E_], radius=4 * E_, fill=_hex(pal["tarjeta"][k_]))
+        d_.rounded_rectangle([42 * E_, 44 * E_, 70 * E_, 52 * E_], radius=3 * E_, fill=_hex(pal["acento"][k_]))
+        d_.rounded_rectangle([42 * E_, 28 * E_, 84 * E_, 32 * E_], radius=2 * E_, fill=_hex(pal["suave"][k_]))
+        d_.rounded_rectangle([0, 0, W_ * E_ - 1, H_ * E_ - 1], radius=6 * E_, outline=_hex(pal["borde"][k_]), width=E_)
+        return im_.resize((W_, H_), Image.LANCZOS)
+
+    for k, nombre in enumerate(TEMAS):
+        img = ctk.CTkImage(light_image=muestra_tema(nombre, False), dark_image=muestra_tema(nombre, True),
+                           size=(96, 64))
+        b = ctk.CTkButton(caja_col_tema, text="", image=img, width=108, height=74, corner_radius=10,
+                          fg_color="transparent", hover_color=C["suave"], border_width=2,
+                          border_color=C["acento"] if nombre == tema_actual else C["tarjeta"],
+                          command=lambda n_=nombre: elegir_tema(n_))
+        b.grid(row=0, column=k, padx=10)
+        ctk.CTkLabel(caja_col_tema, text=nombre, font=F(12), text_color=C["texto"]).grid(row=1, column=k, pady=(4, 0))
+        botones_color_tema[nombre] = b
+    v_aviso_tema = tk.StringVar(value="Cada color tiene su versión clara y oscura (según el Modo de arriba).")
+    ctk.CTkLabel(t, textvariable=v_aviso_tema, font=F(11), text_color=C["texto2"], anchor="w").grid(
+        row=1, column=0, sticky="w", padx=20, pady=(0, 14))
+    b_reiniciar_tema = boton(t, "Reiniciar ahora", primario=True, ancho=140)
+
+    seccion(p, "Actualizaciones", 4)
+    t = Tarjeta(p, 5)
     b_buscar_act = boton(t, "Buscar actualizaciones", ancho=190)
     b_pdf_def = boton(t, "Abrir los PDF con PdFOL", ancho=190)
     t.fila(f"Versión: {VERSION}  ·  by {AUTOR}", b_buscar_act,
@@ -7367,6 +7445,39 @@ def iniciar_interfaz():
         salir_del_todo()
 
     b_buscar_act.configure(command=lambda: buscar_actualizacion(manual=True))
+
+    # ================= color del tema (se aplica al volver a abrir)
+    def elegir_tema(nombre):
+        almacen.datos["tema"] = nombre
+        almacen.guardar()
+        for n_, b_ in botones_color_tema.items():
+            b_.configure(border_color=C["acento"] if n_ == nombre else C["tarjeta"])
+        if nombre == tema_actual:
+            v_aviso_tema.set("Cada color tiene su versión clara y oscura (según el Modo de arriba).")
+            b_reiniciar_tema.grid_forget()
+        else:
+            v_aviso_tema.set(f"«{nombre}» se aplica al volver a abrir PdFOL.")
+            b_reiniciar_tema.grid(row=1, column=1, sticky="e", padx=(10, 16), pady=(0, 12))
+
+    def reiniciar_pdfol():
+        for t_ in list(pest):
+            if not confirmar_cierre(t_):
+                return
+        import subprocess
+        try:  # se suelta la «instancia unica» antes, asi el nuevo PdFOL no se la pasa a este
+            if instancia not in (None, False):
+                instancia.close()
+        except Exception:
+            pass
+        cmd = [sys.executable] + ([] if getattr(sys, "frozen", False) else [os.path.abspath(__file__)])
+        try:
+            subprocess.Popen(cmd, close_fds=True)
+        except Exception as e:
+            messagebox.showerror(NOMBRE, f"No se pudo volver a abrir PdFOL:\n{e}")
+            return
+        salir_del_todo()
+
+    b_reiniciar_tema.configure(command=reiniciar_pdfol)
 
     # ================= menu del husky (arriba a la izquierda)
     def menu_husky():

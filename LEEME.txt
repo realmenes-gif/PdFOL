@@ -1,4 +1,4 @@
-PdFOL v2.2  -  Visor de PDF · Organizar · Unir · Aplanar · Foliar · Comprimir
+PdFOL v2.3  -  Visor de PDF · Organizar · Unir · Aplanar · Foliar · Comprimir
 =============================================================================
 by Meneses999
 
@@ -7,7 +7,7 @@ CREAR EL PORTABLE Y EL INSTALADOR (una sola vez)
 2. Doble clic en "crear_portable.bat" y esperá a que diga LISTO (3 a 6 minutos).
 3. Se crean:
    - la carpeta "PdFOL_portable" con "PdFOL.exe" (portable: se copia y se usa, sin instalar);
-   - "PdFOL_v2.2_instalador.exe" (instalable).
+   - "PdFOL_v2.3_instalador.exe" (instalable).
    (Desde la v2.0 el programa se llama PdFOL.exe, sin número: así se puede actualizar solo.)
    Para el instalador el .bat usa Inno Setup (gratis): si no lo tenés, lo baja e instala
    solo para tu usuario la primera vez. Si no hay internet, el portable igual queda listo.
@@ -120,6 +120,11 @@ IMPRIMIR (Ctrl+P)
 - Orientación automática: las horizontales se paran con el encabezado hacia la
   perforación. Casilla «Con folio». Vista previa chica con el conteo de hojas carta y A3.
 - Imprime en un proceso aparte; el avance se ve abajo y «Cancelar» la corta.
+
+APARIENCIA
+- Modo: Claro, Oscuro o Automático (sigue a Windows).
+- Color del tema: Azul gris o Verde gris, cada uno en claro y oscuro. Se aplica al
+  volver a abrir PdFOL («Reiniciar ahora»).
 
 ACTUALIZACIONES
 - Tocá el husky (arriba a la izquierda): Buscar actualizaciones, Novedades de esta
