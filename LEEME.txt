@@ -1,0 +1,190 @@
+PdFOL v2.0  -  Visor de PDF · Organizar · Unir · Aplanar · Foliar · Comprimir
+=============================================================================
+(versión de prueba de la v2.0, completa)
+
+CREAR EL PORTABLE Y EL INSTALADOR (una sola vez)
+1. Descomprimí este .zip completo en una carpeta.
+2. Doble clic en "crear_portable.bat" y esperá a que diga LISTO (3 a 6 minutos).
+3. Se crean:
+   - la carpeta "PdFOL_portable" con "PdFOL.exe" (portable: se copia y se usa, sin instalar);
+   - "PdFOL_v2.0_instalador.exe" (instalable).
+   (Desde la v2.0 el programa se llama PdFOL.exe, sin número: así se puede actualizar solo.)
+   Para el instalador el .bat usa Inno Setup (gratis): si no lo tenés, lo baja e instala
+   solo para tu usuario la primera vez. Si no hay internet, el portable igual queda listo.
+
+INSTALADOR
+- Se instala solo para tu usuario (no pide administrador) en
+  %LOCALAPPDATA%\Programs\PdFOL, con acceso en el menú Inicio (y en el escritorio,
+  si lo marcás), desinstalador en «Agregar o quitar programas» y PdFOL en «Abrir con»
+  para los PDF.
+- Al abrir la versión instalada, PdFOL pregunta «¿Querés abrir siempre los PDF con
+  PdFOL?». «Sí» abre la ventana de Windows de aplicaciones predeterminadas para que
+  elijas PdFOL (Windows exige que lo confirmes vos). «No volver a preguntar» la apaga.
+  También está en Apariencia › «Abrir los PDF con PdFOL».
+- Las actualizaciones funcionan igual en la instalada y en el portable.
+
+USAR EN OTRAS PC
+- Copiá la carpeta "PdFOL_portable" COMPLETA (no solo el .exe).
+- Funciona en Windows 10 y 11 de 64 bits, sin Python ni instalación.
+- Si Windows muestra "Windows protegió su PC": "Más información" -> "Ejecutar de todas formas".
+
+PERFILES
+- Si venís de la v1.1: copiá «PdFOL_perfiles.json» de la carpeta PdFOL_v1.1_portable
+  a la carpeta PdFOL_portable para conservar tus perfiles. (Si la carpeta de la v1.1
+  está al lado de este .bat, el .bat los trae solo.)
+- Se guardan en "PdFOL_perfiles.json" dentro de la carpeta del programa
+  (viajan con la carpeta). Al volver a crear el portable se conservan.
+
+VISOR (nuevo en la v2.0)
+- PdFOL abre los PDF como un visor: cada archivo en su pestaña (Abrir, Ctrl+O,
+  o arrastrando uno o varios PDF sobre PdFOL.exe). Si PdFOL ya está abierto, el PDF
+  entra como pestaña nueva en la misma ventana. Ctrl+W cierra la pestaña, Ctrl+Tab
+  pasa a la siguiente, clic con la rueda sobre la pestaña también la cierra.
+- Miniaturas a la izquierda («☰ Miniaturas» las oculta o muestra); la página actual
+  va marcada. Clic va a la página; Ctrl+clic y Shift eligen varias.
+- Al abrir aparece enseguida el husky animado («Abriendo…») mientras se cargan las
+  librerías; la ventana de PdFOL aparece cuando está completa.
+- PdFOL abre maximizado (y recuerda si lo dejaste en otro tamaño).
+- El documento se recorre de corrido con la rueda. ◀ ▶, RePág/AvPág, Inicio/Fin,
+  o el número de página y Enter.
+- SELECCIONAR (arranca así) o MANO, arriba del documento:
+    · Seleccionar: arrastrá sobre el texto para marcarlo (celeste) y Ctrl+C lo copia.
+      Doble clic: la palabra. Triple clic: el renglón. Ctrl+A: toda la página.
+      Clic derecho sobre lo marcado: Copiar, Resaltar la selección o Buscar ese texto.
+      Donde no hay texto (o en planos escaneados), arrastrar mueve la hoja.
+    · Mano: arrastrar mueve la hoja.
+    · Con el botón del medio del mouse siempre se mueve la hoja.
+- ZOOM: lupa − / +, la lista (50, 75, 100, 150, 200 %, Ajustar ancho, Página entera),
+  Ctrl + rueda (acerca donde está el mouse), Ctrl + / Ctrl − y Ctrl+0 (ajustar ancho).
+  Con zoom alto los planos se dibujan por partes: solo lo que se ve.
+- Si «Foliar» está activo, el folio se ve en vivo sobre cada página, tal como va a
+  quedar. La casilla «Ver como hoja impresa» también funciona en el visor.
+- Las páginas se dibujan en procesos aparte: los planos pesados no congelan la ventana.
+
+BUSCAR Y RESALTAR
+- Clic en la caja «Buscar» (arriba a la derecha), Ctrl+B o Ctrl+F, escribí y Enter. Muestra «3 de 12»;
+  ▲ ▼, Enter / Shift+Enter o F3 recorren los resultados. Resaltado amarillo y el
+  resultado actual en naranja. Las miniaturas con resultados llevan un punto amarillo.
+  No busca en planos escaneados sin texto (sin OCR).
+- «Resaltar resultados» convierte los resultados en resaltados.
+- RESALTADOR («🖍 Resaltar», o clic derecho): aparece una barrita flotante con
+    · Texto: arrastrá sobre las letras; marca solo el texto, letra por letra.
+    · Área: arrastrá para un rectángulo, o hacé clics para una POLILÍNEA (cada clic un
+      vértice; doble clic, Enter o clic en el primer punto la cierra; Esc la cancela).
+    · Libre: a mano alzada.
+  Paleta de 8 colores, «Otro…» y opacidad. Ctrl+Z deshace; clic derecho sobre un
+  resaltado lo quita. Esc termina.
+- «Guardar resaltados» (Ctrl+S): «En este PDF» los agrega al mismo archivo como
+  anotaciones normales de PDF (con su color, se ven en cualquier lector), o «Como copia…».
+
+GUARDAR AL CERRAR
+- Si cerrás una pestaña o el programa con cambios (resaltados u hojas organizadas),
+  PdFOL pregunta: Guardar · No guardar · Cancelar. Guardar agrega los resaltados al
+  mismo PDF y guarda las páginas organizadas como «nombre_PdFOL.pdf» (el original no
+  se toca). Cancelar no cierra nada.
+
+PROCESO (lo que era la barra de abajo)
+- Analizar, Procesar, Cancelar y Abrir carpeta, el estado y la barra de avance están en
+  la tarjeta «Proceso», abajo a la izquierda (debajo de las miniaturas). Así la hoja se ve
+  completa. En las otras pantallas, arriba de «Proceso» se ve el documento activo.
+
+HERRAMIENTAS EN EL PANEL DERECHO
+- Aplanar, Foliar y Comprimir se abren en un panel a la derecha del documento
+  (con ✕ para cerrarlo; tocar de nuevo el botón también lo cierra). Así se ve el
+  folio en vivo mientras lo configurás. La vista previa de Foliar está al final del panel.
+- Documento, Organizar, Perfiles y Apariencia siguen siendo pantallas completas;
+  tocar de nuevo el botón (o una pestaña) vuelve al documento.
+
+COPIAR PÁGINAS ENTRE PESTAÑAS
+- Clic derecho sobre las miniaturas: Ver, Copiar, Cortar, Pegar, «Copiar a otra
+  pestaña ▸», Girar y Eliminar. También Ctrl+C / Ctrl+X / Ctrl+V (se puede copiar en una
+  pestaña y pegar en otra), Supr y Ctrl+Z.
+- Arrastrar miniaturas: dentro del panel las mueve; soltadas sobre otra pestaña las
+  copian al final de ese documento.
+- La pestaña con páginas organizadas sin procesar lleva un «●». «Procesar» trabaja
+  sobre ese orden, como en Organizar.
+
+COMPARAR
+- Al comparar, la búsqueda trabaja en el lado activo; si hacés clic en el otro lado,
+  la misma búsqueda se repite sola en ese documento.
+- «Comparar» (o arrastrar una pestaña sobre otra): dos documentos lado a lado, cada
+  uno con su zoom y su número de página. «Desplazar juntas» los mueve a la par;
+  «Separar ✕» vuelve a uno. El lado enmarcado en azul es el activo: las miniaturas y
+  las herramientas trabajan sobre él (clic en el otro lado para cambiar).
+
+IMPRIMIR (Ctrl+P)
+- Ventana propia: impresora y «Propiedades» (la ventana de la impresora), páginas
+  (todas, la actual, las seleccionadas o un rango), copias e intercalar.
+- Papel Automático (carta, y A3 para los planos) o forzado a Carta, Oficio o A3.
+  «Ajustar a la hoja» o «Tamaño real».
+- Orientación automática: las horizontales se paran con el encabezado hacia la
+  perforación. Casilla «Con folio». Vista previa chica con el conteo de hojas carta y A3.
+- Imprime en un proceso aparte; el avance se ve abajo y «Cancelar» la corta.
+
+ACTUALIZACIONES
+- Al abrir, PdFOL revisa si hay una versión nueva (si no hay internet, no molesta).
+  Si la hay aparece una franja: «Ver cambios · Actualizar · Más tarde».
+- «Actualizar» la descarga (se ve abajo), comprueba su SHA256 y ofrece «Reiniciar
+  ahora»: un pequeño actualizador reemplaza los archivos del portable donde esté y
+  vuelve a abrir PdFOL. Tus perfiles se conservan y no hacen falta permisos de
+  administrador. Avisa antes si hay pestañas abiertas.
+- Nunca es obligatorio: si no actualizás, seguís usando tu versión completa.
+- Apariencia › «Buscar actualizaciones» revisa en cualquier momento.
+- Empieza a funcionar cuando la versión esté publicada en GitHub (ver carpeta «publicar»).
+
+FUENTES INCLUIDAS
+Special Elite (Apache 2.0) y Courier Prime, Cutive Mono, IBM Plex Mono,
+Share Tech Mono, Stardos Stencil, Allerta Stencil, Black Ops One
+(SIL Open Font License). Licencias en la carpeta "fuentes".
+
+ORGANIZAR Y UNIR
+- Barra con íconos: Abrir PDF · Unir PDF | Ver página · En el visor | Girar izq. ·
+  Girar der. | Atrás · Adelante · Mover a… | Deshacer · Rehacer · Restablecer |
+  Limpiar todo | Ayuda. Lo que no se puede usar en ese momento se ve apagado.
+- «Ayuda» muestra los atajos de teclado (se cierra con un clic o Esc).
+- A la izquierda: el documento activo y la lista de archivos unidos (cada uno con su
+  color y letra).
+- Copiar, Cortar, Pegar y Eliminar no tienen botón: Ctrl+C, Ctrl+X, Ctrl+V y Supr,
+  o el clic derecho sobre las miniaturas (ahí están todas las opciones).
+- Rehacer: Ctrl+Y.
+- Muestra las páginas en miniatura (chicas, medianas o grandes). Solo se dibujan
+  las que estás viendo, así el programa no se pone pesado con PDF grandes.
+- Clic elige. Varias: Ctrl+clic, o sombreá arrastrando desde un espacio vacío entre
+  páginas (con Ctrl suma al sombreado). Shift elige un rango, Ctrl+A todas.
+- Mover: arrastrá las páginas, o usá «◀ Mover», «Mover ▶» y «Mover a…».
+- Copiar / Cortar / Pegar (Ctrl+C, Ctrl+X, Ctrl+V): pega después de la página elegida.
+- ↺ ↻ giran, «Eliminar» (Supr) quita, «Deshacer» (Ctrl+Z), «Restablecer» vuelve al original.
+- «Limpiar todo» quita todas las páginas y cierra la pestaña de ese documento para empezar otro trabajo sin cerrar el programa (los originales y lo guardado no se tocan).
+- «Unir PDF…»: elegís uno o varios PDF y dónde van: al inicio, después de tal
+  página o al final del documento.
+- Al unir varios PDF, las páginas de cada documento tienen un fondo suave y una
+  barra de color propio (A, B, C…), con la leyenda arriba. Lo seleccionado se
+  sigue viendo con borde azul, así no se confunde.
+- «Ver página» o doble clic: la página en grande (ventana centrada, la página entra
+  completa), con zoom y anterior/siguiente.
+- «Ver en el visor»: el mismo documento en el visor, en la página elegida.
+- Flechas (← → ↑ ↓) recorren las páginas; con Ctrl mueven las páginas elegidas.
+- Al abrir o unir un PDF podés activar «Aplanar y comprimir antes de organizar»:
+  se prepara una copia temporal (el original no se toca) y las miniaturas y la
+  vista cargan mucho más rápido. Usa la configuración de Aplanar y Comprimir.
+- Las páginas que ya entraron aplanadas y comprimidas quedan marcadas en el PDF:
+  al procesar después (por ejemplo para foliar) no se vuelven a aplanar ni a
+  comprimir; solo se procesan las que entraron sin preparar.
+- «Abrir PDF…» solo sirve para el primer documento; después se agrega con «Unir PDF…».
+  Para empezar con otro documento, abrilo con «Abrir» (va en otra pestaña).
+- Cuando organizaste o uniste páginas, el botón «Procesar» de abajo trabaja sobre
+  ese resultado: arma el PDF en el orden que dejaste, aplana los planos pesados
+  que falten, comprime y folia, todo en una sola pasada (barra de 3 pasos). Lo que
+  entró ya preparado no se repite. Se guarda junto al primer documento con «_PdFOL».
+
+FOLIO FÍSICO (igual en todas las hojas impresas)
+- El tamaño y los márgenes del folio son los del papel: cada página se toma como
+  impresa en carta (carta, oficio, A4 o parecido) o en A3 (planos más grandes),
+  así el número mide lo mismo en todas las hojas aunque el PDF traiga A0, A1, etc.
+- Las páginas horizontales se archivan paradas con el encabezado hacia la
+  perforación (izquierda): el folio cae en la misma esquina que en las verticales
+  y se lee derecho con la hoja parada.
+- En la vista previa de Foliar, la casilla «Ver como hoja impresa» muestra las
+  horizontales paradas; sin palomear se ven como en el documento. El folio es el mismo.
+- La misma casilla está en Organizar y unir (miniaturas) y en «Ver página», que
+  además muestra el folio que le tocará a cada página si «Foliar» está activo.

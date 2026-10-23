@@ -1,0 +1,60 @@
+# GitHub Actions: arma PdFOL.exe en Windows y publica el release que detecta el actualizador.
+# Va en el repositorio como .github/workflows/publicar_release.yml (lo sube Claude al publicar).
+# Se dispara al crear una etiqueta de version, por ejemplo: v2.0, v2.1
+name: Publicar PdFOL
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  armar:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar librerias (mismas versiones que crear_portable.bat)
+        run: python -m pip install "pymupdf>=1.24,<2" pikepdf pillow "customtkinter>=5.2,<6" pyinstaller
+
+      - name: Armar PdFOL.exe
+        shell: pwsh
+        run: |
+          $py = (Get-ChildItem PdFOL_v*.py | Select-Object -First 1).Name
+          python -m PyInstaller --noconfirm --clean --windowed --onedir --name PdFOL --icon PdFOL.ico `
+            --collect-all pymupdf --collect-all pikepdf --collect-all customtkinter `
+            --hidden-import PIL._tkinter_finder --hidden-import PIL.ImageTk --hidden-import PIL.JpegImagePlugin `
+            --hidden-import PIL.PngImagePlugin --hidden-import PIL.IcoImagePlugin --hidden-import PIL.BmpImagePlugin `
+            --add-data "fuentes;fuentes" $py
+
+      - name: Comprimir y calcular SHA256
+        shell: pwsh
+        run: |
+          Move-Item dist/PdFOL PdFOL_portable
+          Compress-Archive -Path PdFOL_portable -DestinationPath PdFOL_portable.zip
+          $h = (Get-FileHash PdFOL_portable.zip -Algorithm SHA256).Hash.ToLower()
+          "$h  PdFOL_portable.zip" | Out-File -Encoding ascii PdFOL_portable.zip.sha256
+
+      - name: Armar el instalador (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
+          $ver = "${{ github.ref_name }}".TrimStart("v")
+          & $iscc /Q "/DMiVersion=$ver" "/FPdFOL_instalador" PdFOL.iss
+
+      - name: Crear el release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: PdFOL ${{ github.ref_name }}
+          body_path: NOVEDADES.md
+          files: |
+            PdFOL_portable.zip
+            PdFOL_portable.zip.sha256
+            PdFOL_instalador.exe
