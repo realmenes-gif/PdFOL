@@ -1,5 +1,5 @@
 """
-PdFOL v2.1  (visor de PDF con pestanas + organizar, aplanar, foliar y comprimir) · by Meneses999
+PdFOL v2.2  (visor de PDF con pestanas + organizar, aplanar, foliar y comprimir) · by Meneses999
 ========
 VISOR    : cada PDF se abre en su pestana, con miniaturas a la izquierda y
            desplazamiento continuo. Las paginas se dibujan en un proceso aparte
@@ -352,9 +352,34 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v2.1"
-VERSION_INTERNA = "2.1"
+VERSION = "v2.2"
+VERSION_INTERNA = "2.2"
 AUTOR = "Meneses999"
+
+# Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
+CAMBIOS = [
+    ("v2.2", [
+        "Cierre limpio: al cerrar, PdFOL termina por completo (en Windows podía quedar corriendo escondido).",
+        "Actualizador mejorado: no muestra ventana negra y, si PdFOL tarda en cerrarse, lo cierra él.",
+        "Las novedades se ven dentro de PdFOL: en «Acerca de», en «Novedades» y al actualizar.",
+        "Versión instalada: «Agregar o quitar programas» muestra la versión actual.",
+    ]),
+    ("v2.1", [
+        "Menú del husky: Buscar actualizaciones, Novedades, Ayuda y atajos (F1) y Acerca de.",
+        "Puntito naranja sobre el husky cuando hay una versión nueva.",
+        "Créditos by Meneses999 en el inicio, el título y «Acerca de».",
+    ]),
+    ("v2.0", [
+        "PdFOL pasa a ser un visor de PDF: pestañas, miniaturas, desplazamiento continuo y zoom.",
+        "Buscar (Ctrl+B / Ctrl+F), seleccionar y copiar texto, herramienta Mano.",
+        "Resaltador: texto, área o polilínea y libre, con colores; se guarda en el PDF.",
+        "Aplanar, Foliar y Comprimir en un panel junto al documento, con el folio en vivo.",
+        "Copiar páginas entre pestañas y comparar dos documentos lado a lado.",
+        "Imprimir con papel automático (carta, y A3 para los planos) y horizontales paradas.",
+        "Organizar con íconos, Rehacer y Ayuda; pregunta si guardar al cerrar.",
+        "Animación de inicio, abre maximizado, instalador y actualizaciones desde la app.",
+    ]),
+]
 
 
 # =========================================================================
@@ -2075,12 +2100,20 @@ def lanzar_actualizador(nuevo, carpeta_tmp):
         "@echo off",
         "chcp 65001 >nul",
         "title Actualizando PdFOL",
+        "set /a VUELTAS=0",
         ":esperar",
         f'tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul',
-        "if not errorlevel 1 (",
-        "    timeout /t 1 /nobreak >nul",
-        "    goto esperar",
-        ")",
+        "if errorlevel 1 goto listo_para_copiar",
+        "set /a VUELTAS+=1",
+        "if %VUELTAS% GEQ 20 goto forzar",
+        "ping -n 2 127.0.0.1 >nul",
+        "goto esperar",
+        ":forzar",
+        f"taskkill /F /T /PID {pid} >nul 2>nul",
+        "ping -n 2 127.0.0.1 >nul",
+        ":listo_para_copiar",
+        'taskkill /F /IM PdFOL.exe >nul 2>nul',
+        "ping -n 2 127.0.0.1 >nul",
         f'if exist "{app_dir}\\_internal" rmdir /s /q "{app_dir}\\_internal"',
         f'robocopy "{nuevo}" "{app_dir}" /E /XF PdFOL_perfiles.json /R:3 /W:1 /NFL /NDL /NJH /NJS /NP >nul',
         f'start "" "{os.path.join(app_dir, EXE_PORTABLE)}"',
@@ -2090,7 +2123,11 @@ def lanzar_actualizador(nuevo, carpeta_tmp):
     ]
     with open(bat, "w", encoding="utf-8", newline="\r\n") as f:
         f.write("\n".join(lineas) + "\n")
-    subprocess.Popen(["cmd", "/c", bat], creationflags=0x08000000 | 0x00000008, close_fds=True)  # sin ventana
+    si = subprocess.STARTUPINFO()
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0  # SW_HIDE
+    subprocess.Popen(["cmd", "/c", bat], creationflags=0x08000000 | 0x00000200, startupinfo=si,
+                     close_fds=True)  # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP: no se ve ninguna ventana
 
 
 def carpeta_escribible(carpeta):
@@ -7260,10 +7297,18 @@ def iniciar_interfaz():
         threading.Thread(target=hilo, daemon=True).start()
 
     def ver_cambios():
-        import webbrowser
+        """Lo que trae la version nueva, dentro de PdFOL (se lee de las notas del release)."""
         info = act["info"] or {}
-        if info.get("web"):
-            webbrowser.open(info["web"])
+        puntos = []
+        for ln in (info.get("notas") or "").splitlines():
+            ln = ln.strip().replace("**", "").replace("`", "")
+            if ln.startswith(("- ", "* ")):
+                puntos.append(ln[2:].strip())
+            elif puntos and ln and not ln.startswith("#") and not ln.lower().startswith("descargas"):
+                puntos[-1] += " " + ln
+        ventana_novedades(f"Novedades de {info.get('tag', 'la versión nueva')}",
+                          [(info.get("tag", ""), puntos or ["(Esta versión no trae notas.)"])],
+                          botones=[("Actualizar ahora", lambda: (empezar_actualizacion()), True)])
 
     def ofrecer_version(info):
         act["info"] = info
@@ -7319,8 +7364,7 @@ def iniciar_interfaz():
         except Exception as e:
             messagebox.showerror(NOMBRE, f"No se pudo iniciar el actualizador:\n{e}")
             return
-        detener_dibujantes()
-        raiz.destroy()
+        salir_del_todo()
 
     b_buscar_act.configure(command=lambda: buscar_actualizacion(manual=True))
 
@@ -7349,8 +7393,51 @@ def iniciar_interfaz():
         raiz.after(150, vigilar)
 
     def novedades():
-        import webbrowser
-        webbrowser.open(f"https://github.com/{REPO_GITHUB}/releases/tag/{VERSION}")
+        ventana_novedades(f"Novedades de {NOMBRE}", CAMBIOS)
+
+    def ventana_novedades(titulo, secciones, botones=()):
+        """Ventanita con el historial de cambios, con el estilo de PdFOL."""
+        w = ctk.CTkToplevel(raiz)
+        w.title(titulo)
+        w.configure(fg_color=C["fondo"])
+        w.resizable(False, False)
+        w.transient(raiz)
+        cab = ctk.CTkFrame(w, fg_color="transparent")
+        cab.pack(fill="x", padx=22, pady=(18, 8))
+        ctk.CTkLabel(cab, text="", image=ctk.CTkImage(icono_husky(40), size=(40, 40))).pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(cab, text=titulo, font=F(17, "bold"), text_color=C["texto"]).pack(side="left")
+        lista_cambios(w, secciones, alto=340).pack(fill="both", padx=22)
+        pie = ctk.CTkFrame(w, fg_color="transparent")
+        pie.pack(fill="x", padx=22, pady=16)
+        boton(pie, "Cerrar", primario=not botones, ancho=100, command=w.destroy).pack(side="right", padx=(8, 0))
+        for txt, cmd, prim in botones:
+            boton(pie, txt, primario=prim, ancho=150, command=lambda c_=cmd: (w.destroy(), c_())).pack(
+                side="right", padx=(8, 0))
+        w.bind("<Escape>", lambda _e: w.destroy())
+        w.update_idletasks()
+        w.geometry(f"+{raiz.winfo_rootx() + (raiz.winfo_width() - w.winfo_reqwidth()) // 2}"
+                   f"+{raiz.winfo_rooty() + (raiz.winfo_height() - w.winfo_reqheight()) // 3}")
+        w.after(80, lambda: (_tenir_barra_titulo(w, modo_oscuro()), w.focus_force()))
+
+    def lista_cambios(master, secciones, alto=220, ancho=460):
+        caja = ctk.CTkScrollableFrame(master, fg_color=C["tarjeta"], corner_radius=12, border_width=1,
+                                      border_color=C["borde"], width=ancho, height=alto,
+                                      scrollbar_button_color=C["suave_h"], scrollbar_button_hover_color=C["borde"])
+        for k_, (ver_, puntos) in enumerate(secciones):
+            fila_ = ctk.CTkFrame(caja, fg_color="transparent")
+            fila_.pack(fill="x", padx=10, pady=(12 if k_ == 0 else 16, 4))
+            ctk.CTkLabel(fila_, text=f"{NOMBRE} {ver_}" if ver_ else "", font=F(14, "bold"),
+                         text_color=C["texto"]).pack(side="left")
+            if ver_ == VERSION:
+                ctk.CTkLabel(fila_, text="  esta versión", font=F(11, "bold"), text_color=C["acento"]).pack(side="left")
+            for p_ in puntos:
+                f_ = ctk.CTkFrame(caja, fg_color="transparent")
+                f_.pack(fill="x", padx=12, pady=1)
+                ctk.CTkLabel(f_, text="•", font=F(12, "bold"), text_color=C["acento"], width=14).pack(side="left",
+                                                                                                      anchor="n")
+                ctk.CTkLabel(f_, text=p_, font=F(12), text_color=C["texto"], anchor="w", justify="left",
+                             wraplength=ancho - 60).pack(side="left", fill="x")
+        return caja
 
     def ayuda_general(*_):
         m_ = menu_contextual()
@@ -7391,6 +7478,9 @@ def iniciar_interfaz():
             if t_:
                 ctk.CTkLabel(caja, text=t_, font=F(10), text_color=C["texto2"], wraplength=380,
                              justify="center").pack(padx=24)
+        ctk.CTkLabel(caja, text="Novedades", font=F(13, "bold"), text_color=C["texto"], anchor="w").pack(
+            fill="x", padx=24, pady=(14, 4))
+        lista_cambios(caja, CAMBIOS, alto=190, ancho=400).pack(padx=20)
         pie = ctk.CTkFrame(caja, fg_color="transparent")
         pie.pack(pady=(14, 18))
         boton(pie, "Página de PdFOL", ancho=150,
@@ -8108,12 +8198,39 @@ def iniciar_interfaz():
             pass
         raiz.after(120, procesar_eventos)
 
+    def salir_del_todo():
+        """Cierra PdFOL por completo: corta las colas con los procesos de dibujo (en Windows, esperar a que
+        se vacien podia dejar el programa vivo y escondido) y termina sin esperas."""
+        app["cerrando"] = True
+        raiz.report_callback_exception = lambda *a: None
+        try:
+            if instancia not in (None, False):
+                instancia.close()
+        except Exception:
+            pass
+        detener_dibujantes()
+        for q_ in (q_pag, q_min, q_bus, q_sal):
+            try:
+                q_.cancel_join_thread()
+                q_.close()
+            except Exception:
+                pass
+        try:
+            raiz.destroy()
+        except Exception:
+            pass
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        os._exit(0)
+
     def al_cerrar():
         if app["ocupado"]:
             if not messagebox.askyesno(NOMBRE, "Hay un proceso en curso. ¿Cancelarlo y salir?"):
                 return
             cancelar.set()
-            raiz.after(1000, lambda: (detener_dibujantes(), raiz.destroy()))
+            raiz.after(1000, salir_del_todo)
             return
         for t_ in list(pest):  # cada documento con cambios pregunta si se guarda
             if not confirmar_cierre(t_):
@@ -8127,9 +8244,7 @@ def iniciar_interfaz():
             almacen.guardar()
         except Exception:
             pass
-        raiz.report_callback_exception = lambda *a: None  # tareas pendientes al cerrar: sin avisos
-        detener_dibujantes()
-        raiz.destroy()
+        salir_del_todo()
 
     # ---------------- conexiones
     prev = Previsualizador(eventos.put)

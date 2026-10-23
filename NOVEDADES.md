@@ -1,9 +1,9 @@
-## PdFOL v2.1 · by Meneses999
+## PdFOL v2.2 · by Meneses999
 
-- **Menú del husky** (arriba a la izquierda): Buscar actualizaciones, Novedades de esta versión,
-  Ayuda y atajos (F1) y Acerca de PdFOL.
-- **Puntito naranja** sobre el husky cuando hay una versión nueva, aunque cierres el aviso.
-- Créditos **by Meneses999** en la animación de inicio, el título de la ventana y «Acerca de».
+- **Cierre limpio:** al cerrar, PdFOL termina por completo (antes en Windows podía quedar corriendo escondido).
+- **Actualizador mejorado:** ya no muestra una ventana negra y, si PdFOL tarda en cerrarse, lo cierra él
+  (espera como mucho 20 segundos).
+- En la versión instalada, «Agregar o quitar programas» muestra la versión actual después de actualizar.
+- Incluye todo lo de la v2.1: menú del husky, puntito de versión nueva y créditos by Meneses999.
 
-**Descargas:** `PdFOL_instalador.exe` (se instala para tu usuario) o `PdFOL_portable.zip` (carpeta portable).
-Si ya tenés PdFOL v2.0, abrilo: te ofrece actualizar solo.
+**Descargas:** `PdFOL_instalador.exe` o `PdFOL_portable.zip`. Si ya tenés PdFOL, abrilo: te ofrece actualizar.
