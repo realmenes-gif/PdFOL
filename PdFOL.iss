@@ -2,7 +2,7 @@
 ; Se instala SOLO para el usuario (no pide administrador), en %LOCALAPPDATA%\Programs\PdFOL,
 ; con acceso en el menu Inicio, desinstalador y PdFOL en «Abrir con» para los PDF.
 #ifndef MiVersion
-  #define MiVersion "2.3"
+  #define MiVersion "2.4"
 #endif
 
 [Setup]
@@ -46,7 +46,7 @@ Name: "{autodesktop}\PdFOL"; Filename: "{app}\PdFOL.exe"; Tasks: escritorio
 [Registry]
 ; tipo de archivo de PdFOL para los PDF
 Root: HKCU; Subkey: "Software\Classes\PdFOL.PDF"; ValueType: string; ValueData: "Documento PDF"; Flags: uninsdeletekey; Tasks: pdf
-Root: HKCU; Subkey: "Software\Classes\PdFOL.PDF\DefaultIcon"; ValueType: string; ValueData: "{app}\PdFOL.exe,0"; Tasks: pdf
+Root: HKCU; Subkey: "Software\Classes\PdFOL.PDF\DefaultIcon"; ValueType: string; ValueData: "{app}\PdFOL_documento.ico"; Tasks: pdf
 Root: HKCU; Subkey: "Software\Classes\PdFOL.PDF\shell\open\command"; ValueType: string; ValueData: """{app}\PdFOL.exe"" ""%1"""; Tasks: pdf
 Root: HKCU; Subkey: "Software\Classes\.pdf\OpenWithProgids"; ValueType: string; ValueName: "PdFOL.PDF"; ValueData: ""; Flags: uninsdeletevalue; Tasks: pdf
 Root: HKCU; Subkey: "Software\Classes\Applications\PdFOL.exe"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "PdFOL"; Flags: uninsdeletekey; Tasks: pdf

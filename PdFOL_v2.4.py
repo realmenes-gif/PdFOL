@@ -1,5 +1,5 @@
 """
-PdFOL v2.3  (visor de PDF con pestanas + organizar, aplanar, foliar y comprimir) · by Meneses999
+PdFOL v2.4  (visor de PDF con pestanas + organizar, aplanar, foliar y comprimir) · by Meneses999
 ========
 VISOR    : cada PDF se abre en su pestana, con miniaturas a la izquierda y
            desplazamiento continuo. Las paginas se dibujan en un proceso aparte
@@ -352,12 +352,20 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v2.3"
-VERSION_INTERNA = "2.3"
+VERSION = "v2.4"
+VERSION_INTERNA = "2.4"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v2.4", [
+        "Arreglado el aviso de error (tema_guardado) que salía al abrir PdFOL.",
+        "Arrastrá PDF a la ventana: se abren en el visor; en Organizar salen las opciones de «Unir».",
+        "Todo archivo que abrís (Abrir, Documento, Organizar, doble clic en el Explorador) cae primero en el visor.",
+        "Foliar ya no viene prendido: se prende solo al unir PDF o si lo prendés vos.",
+        "Barra de arriba más baja y la barra del visor en la fila de las pestañas: la hoja se ve más grande.",
+        "Ícono nítido en la barra de tareas y nuevo ícono para los PDF que abre PdFOL.",
+    ]),
     ("v2.3", [
         "Color del tema en Apariencia: Azul gris (el de siempre) o Verde gris, en claro y en oscuro.",
         "Primera versión que se actualiza con el actualizador nuevo (sin ventana negra).",
@@ -390,6 +398,19 @@ CAMBIOS = [
 #  PANTALLA DE INICIO: el husky animado mientras se cargan las librerias
 #  (es un programa aparte y liviano: aparece enseguida, antes de PyMuPDF)
 # =========================================================================
+def _pref_guardada(clave, defecto):
+    """Lee una preferencia de PdFOL_perfiles.json (lo usa la animacion de inicio, antes de cargar todo)."""
+    import json as _json
+    base = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+    for carpeta in (base, os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "PdFOL")):
+        try:
+            with open(os.path.join(carpeta, "PdFOL_perfiles.json"), encoding="utf-8") as f:
+                return _json.load(f).get(clave, defecto)
+        except Exception:
+            pass
+    return defecto
+
+
 def _apariencia_guardada():
     """'Claro' u 'Oscuro' segun la preferencia guardada (o Windows, si es Automatico)."""
     import json as _json
@@ -433,7 +454,7 @@ def pantalla_de_inicio():
     tarjeta, borde, texto, texto2, acento, suave = (
         ("#232931", "#3A4350", "#E7EBF0", "#9AA6B4", "#7096C8", "#2C333D") if oscuro else
         ("#FFFFFF", "#D9E0E9", "#1E2730", "#6A7685", "#4C6F9F", "#E7ECF3"))
-    if tema_guardado() == "Verde gris":
+    if _pref_guardada("tema", "Azul gris") == "Verde gris":
         tarjeta, borde, texto, texto2, acento, suave = (
             ("#232A27", "#3A4640", "#E6ECE8", "#9FB0A6", "#9FB0A6", "#2C3531") if oscuro else
             ("#FFFFFF", "#D5DFD9", "#1F2A25", "#66766D", "#5F7D6C", "#E5EDE8"))
@@ -578,8 +599,15 @@ def cerrar_pantalla_de_inicio():
 _INICIO = None
 if __name__ == "__main__":
     if "--pdfol-inicio" in sys.argv:
-        pantalla_de_inicio()
-        sys.exit(0)
+        try:
+            pantalla_de_inicio()
+        except BaseException:  # la animacion es un adorno: si falla, no se muestra nada
+            if os.environ.get("PDFOL_AUTOPRUEBA"):  # pero en la prueba automatica se anota el error
+                import traceback
+                with open(os.environ.get("PDFOL_AUTOPRUEBA_LOG", "pdfol_autoprueba.log"), "a", encoding="utf-8") as f_:
+                    f_.write("PANTALLA DE INICIO\n" + traceback.format_exc())
+                os._exit(3)
+        os._exit(0)
     if (not any(a.startswith("--") for a in sys.argv[1:]) and not os.environ.get("PDFOL_PRUEBA")
             and not os.environ.get("PDFOL_SIN_INICIO")):
         _INICIO = lanzar_pantalla_de_inicio()  # la ventana de PdFOL todavia tarda: el husky aparece ya
@@ -2598,8 +2626,9 @@ def ruta_icono_ico():
     p = os.path.join(tempfile.gettempdir(), f"PdFOL_{VERSION_INTERNA}_icono.ico")
     try:
         if not os.path.isfile(p):
-            icono_husky(256).save(p, format="ICO", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64),
-                                                          (128, 128), (256, 256)])
+            # v2.4: todos los tamanos que pide Windows con la pantalla escalada (125 %, 150 %, 200 %...)
+            icono_husky(256).save(p, format="ICO", sizes=[(n_, n_) for n_ in (16, 20, 24, 30, 32, 36, 40, 48, 60,
+                                                                               64, 72, 80, 96, 128, 256)])
         return p
     except Exception:
         return None
@@ -2712,6 +2741,21 @@ def anotar_version_instalada():
             winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ, f"PdFOL v{VERSION_INTERNA}")
     except Exception:
         pass
+    try:  # v2.4: los PDF que abre PdFOL llevan su icono de documento (llega con la actualizacion)
+        import winreg
+        ico_doc = os.path.join(os.path.dirname(sys.executable), "PdFOL_documento.ico")
+        if os.path.isfile(ico_doc):
+            k = winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\PdFOL.PDF\DefaultIcon")
+            try:
+                actual_ = winreg.QueryValueEx(k, "")[0]
+            except OSError:
+                actual_ = ""
+            if actual_ != ico_doc:
+                winreg.SetValueEx(k, "", 0, winreg.REG_SZ, ico_doc)
+                import ctypes
+                ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)  # SHCNE_ASSOCCHANGED
+    except Exception:
+        pass
 
 
 def pdfol_abre_los_pdf():
@@ -2801,12 +2845,41 @@ def iniciar_interfaz():
     ico_ruta = ruta_icono_ico()
     ico_fotos = []
 
+    def icono_nitido(w):
+        """v2.4: Tk carga el icono chico (32 px) y Windows lo estira en la barra de tareas: se ve borroso.
+        Aca se le da a la ventana el tamano exacto que usa Windows para esta pantalla."""
+        try:
+            import ctypes
+            u32 = ctypes.windll.user32
+            u32.LoadImageW.restype = ctypes.c_void_p
+            u32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p]
+            u32.GetParent.restype = ctypes.c_void_p
+            hwnd = u32.GetParent(w.winfo_id()) or w.winfo_id()
+            try:
+                dpi = u32.GetDpiForWindow(ctypes.c_void_p(hwnd)) or 96
+            except Exception:
+                dpi = 96
+            for tipo_, metrica_, base_ in ((1, 11, 32), (0, 49, 16)):  # ICON_BIG/SM_CXICON, ICON_SMALL/SM_CXSMICON
+                try:
+                    n_ = u32.GetSystemMetricsForDpi(metrica_, dpi)
+                except Exception:
+                    n_ = 0
+                n_ = n_ or round(base_ * dpi / 96)
+                if tipo_ == 1:
+                    n_ = max(n_, 48)  # la barra de tareas usa el grande: mejor que sobre a que falte
+                h_ = u32.LoadImageW(None, ico_ruta, 1, n_, n_, 0x10)  # IMAGE_ICON, LR_LOADFROMFILE
+                if h_:
+                    u32.SendMessageW(hwnd, 0x80, ctypes.c_void_p(tipo_), ctypes.c_void_p(h_))  # WM_SETICON
+        except Exception:
+            pass
+
     def poner_icono(w):
         try:
             if not w.winfo_exists():
                 return
             if os.name == "nt" and ico_ruta:
                 w.iconbitmap(ico_ruta)
+                icono_nitido(w)
             else:
                 if not ico_fotos:
                     from PIL import ImageTk
@@ -2842,7 +2915,7 @@ def iniciar_interfaz():
     # ---------------- variables
     V = {
         "ruta": tk.StringVar(),
-        "apl": tk.BooleanVar(value=True), "fol": tk.BooleanVar(value=True), "comp": tk.BooleanVar(value=True),
+        "apl": tk.BooleanVar(value=True), "fol": tk.BooleanVar(value=False), "comp": tk.BooleanVar(value=True),
         "dpi": tk.StringVar(value=str(DPI_DEFECTO)), "texto": tk.BooleanVar(value=True),
         "nucleos": tk.StringVar(value="Automático"), "extra": tk.StringVar(), "excluir": tk.StringVar(),
         "nivel": tk.StringVar(value="Equilibrada"),
@@ -2882,7 +2955,7 @@ def iniciar_interfaz():
         return C[clave][1 if modo_oscuro() else 0]
 
     # ---- barra de arriba (canvas con degradado): husky + PdFOL, herramientas con icono y busqueda
-    ALTO_SUP = 76
+    ALTO_SUP = 54  # v2.4: barra mas baja, mas espacio para las paginas
     superior = tk.Canvas(raiz, height=ALTO_SUP, highlightthickness=0, bd=0)
     superior.grid(row=0, column=0, sticky="ew")
     sup_cache = {"fondo": None, "ancho": 0}
@@ -2895,16 +2968,16 @@ def iniciar_interfaz():
 
     iconos_tk = {}
     for clave, _, color_, _, _ in ICONOS:
-        im_ = _icono(clave, color_, 28)
+        im_ = _icono(clave, color_, 22)
         iconos_tk[clave] = foto_tk(_icono_apagado(im_) if clave in PROXIMAMENTE else im_)
-    logo_tk = foto_tk(icono_husky(46))
+    logo_tk = foto_tk(icono_husky(38))
     import tkinter.font as tkfont
-    f_item = tkfont.Font(family=FAM, size=10)
+    f_item = tkfont.Font(family=FAM, size=9)
     def _mezcla(a_, b_):
         return "#%02x%02x%02x" % tuple((x + y) // 2 for x, y in zip(_hex(a_), _hex(b_)))
 
     fondo_medio = (_mezcla(C["lat_ini"][0], C["lat_fin"][0]), _mezcla(C["lat_ini"][1], C["lat_fin"][1]))
-    e_buscar = ctk.CTkEntry(superior, width=220, height=32, corner_radius=16, font=F(12), bg_color=fondo_medio,
+    e_buscar = ctk.CTkEntry(superior, width=220, height=28, corner_radius=14, font=F(12), bg_color=fondo_medio,
                             fg_color=C["campo"], border_color=C["borde"], text_color=C["texto"],
                             placeholder_text="Buscar  (Ctrl+F)", placeholder_text_color=C["texto2"])
     id_buscar = None
@@ -2926,40 +2999,40 @@ def iniciar_interfaz():
         superior.create_line(0, h - 1, w, h - 1, fill=col("borde"))
         # logotipo: husky + PdFOL v2.0 · Aplanar · Foliar · Comprimir
         if app.get("menu_logo"):  # resaltado mientras el menu del husky esta abierto
-            superior.create_rectangle(8, 8, 252, h - 8, fill=col("lat_sel"), outline="")
-        superior.create_image(16, h // 2, image=logo_tk, anchor="w", tags=("item", "logo"))
-        id_nom = superior.create_text(70, 30, text=NOMBRE, anchor="w", fill=col("texto"), font=(FAM, 19, "bold"),
+            superior.create_rectangle(6, 5, 214, h - 5, fill=col("lat_sel"), outline="")
+        superior.create_image(12, h // 2, image=logo_tk, anchor="w", tags=("item", "logo"))
+        id_nom = superior.create_text(56, 20, text=NOMBRE, anchor="w", fill=col("texto"), font=(FAM, 16, "bold"),
                                       tags=("item", "logo"))
         x_fin = superior.bbox(id_nom)[2]
-        superior.create_text(x_fin + 6, 33, text=VERSION, anchor="w", fill=col("acento"), font=(FAM, 12, "bold"),
+        superior.create_text(x_fin + 5, 22, text=VERSION, anchor="w", fill=col("acento"), font=(FAM, 10, "bold"),
                              tags=("item", "logo"))
-        superior.create_text(71, 54, text="Aplanar · Foliar · Comprimir", anchor="w", fill=col("texto2"),
-                             font=(FAM, 9), tags=("item", "logo"))
-        superior.create_rectangle(8, 8, 252, h - 8, outline="", fill="", tags=("item", "logo"))
+        superior.create_text(57, 40, text="Aplanar · Foliar · Comprimir", anchor="w", fill=col("texto2"),
+                             font=(FAM, 8), tags=("item", "logo"))
+        superior.create_rectangle(6, 5, 214, h - 5, outline="", fill="", tags=("item", "logo"))
         if app.get("hay_nueva"):  # puntito: hay una version nueva
-            superior.create_oval(50, 13, 64, 27, fill="#F97316", outline=col("lat_ini"), width=2, tags=("item", "logo"))
-        x = 262
+            superior.create_oval(38, 6, 50, 18, fill="#F97316", outline=col("lat_ini"), width=2, tags=("item", "logo"))
+        x = 222
         grupo_ant = 0
         for clave, _tt, _c, grupo, corto in ICONOS:
             if grupo != grupo_ant:
-                superior.create_line(x + 4, 16, x + 4, h - 16, fill=col("borde"))
+                superior.create_line(x + 4, 12, x + 4, h - 12, fill=col("borde"))
                 x += 10
                 grupo_ant = grupo
-            ancho_i = max(f_item.measure(corto) + 18, 66)
+            ancho_i = max(f_item.measure(corto) + 14, 54)
             elegido = (clave == app["pagina"] or (app["pagina"] == "visor" and clave == app.get("panel"))
                        or (clave == "comparar" and app.get("comparando")))
             if elegido:
-                x0, y0, x1, y1, r = x + 2, 7, x + ancho_i - 2, h - 8, 9
+                x0, y0, x1, y1, r = x + 2, 4, x + ancho_i - 2, h - 5, 8
                 superior.create_polygon(
                     x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1, x1 - r, y1,
                     x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0,
                     smooth=True, fill=col("lat_sel"), outline="")
             cx = x + ancho_i // 2
             apagado = clave in PROXIMAMENTE
-            superior.create_image(cx, 30, image=iconos_tk[clave], tags=("item", clave))
-            superior.create_text(cx, 57, text=corto, fill=col("texto2") if apagado else col("texto"),
-                                 font=(FAM, 10, "bold" if elegido else "normal"), tags=("item", clave))
-            superior.create_rectangle(x + 2, 7, x + ancho_i - 2, h - 8, outline="", fill="", tags=("item", clave))
+            superior.create_image(cx, 20, image=iconos_tk[clave], tags=("item", clave))
+            superior.create_text(cx, 42, text=corto, fill=col("texto2") if apagado else col("texto"),
+                                 font=(FAM, 9, "bold" if elegido else "normal"), tags=("item", clave))
+            superior.create_rectangle(x + 2, 4, x + ancho_i - 2, h - 5, outline="", fill="", tags=("item", clave))
             x += ancho_i
         # busqueda al final
         ancho_b = max(150, min(240, w - x - 40))
@@ -3008,7 +3081,7 @@ def iniciar_interfaz():
     caja_pest = ctk.CTkFrame(barra_pest, fg_color="transparent", height=34)
     caja_pest.grid(row=0, column=0, sticky="w", padx=(12, 6), pady=(6, 0))
     ctk.CTkLabel(barra_pest, textvariable=v_perfil_lbl, font=F(11), text_color=C["texto2"]).grid(
-        row=0, column=1, sticky="e", padx=(6, 22), pady=(6, 0))
+        row=0, column=2, sticky="e", padx=(6, 16), pady=(6, 0))
     ctk.CTkFrame(raiz, height=1, fg_color=C["borde"], corner_radius=0).grid(row=2, column=0, sticky="sew")
 
     # ---- franja de actualizacion (fila 1, solo cuando hay una version nueva)
@@ -3028,7 +3101,7 @@ def iniciar_interfaz():
     cuerpo.grid_columnconfigure(1, weight=1)
     cuerpo.grid_rowconfigure(0, weight=1)
     col_izq = ctk.CTkFrame(cuerpo, fg_color="transparent", width=ANCHO_IZQ)
-    col_izq.grid(row=0, column=0, sticky="nsw", padx=(14, 0), pady=(46, 12))
+    col_izq.grid(row=0, column=0, sticky="nsw", padx=(14, 0), pady=(10, 12))
     col_izq.grid_propagate(False)
     col_izq.grid_columnconfigure(0, weight=1)
     col_izq.grid_rowconfigure(1, weight=1)
@@ -4645,6 +4718,13 @@ def iniciar_interfaz():
         org_lanzar("preparar", {"rutas": list(rutas), "tmp": org_tmp(), "dpi": dpi, "texto": texto_,
                                 "nivel": nivel})
 
+    def foliar_al_unir():
+        """v2.4: el folio no viene prendido; se prende solo al unir PDF (o si lo prende el usuario)."""
+        if not V["fol"].get():
+            V["fol"].set(True)
+            refrescar()
+            actualizar_ejemplo()
+
     def org_traer(rutas, pos, preparar, nuevo):
         def cargar(pares):
             for orig, prep in pares:
@@ -4660,7 +4740,8 @@ def iniciar_interfaz():
                 org_cargar([pares[0][1]])
             else:
                 org_cargar([b_ for _, b_ in pares], agregar=True, pos=pos)
-                v_estado.set(f"PDF agregados: {len(pares)}. Ordená y presioná «Procesar».")
+                foliar_al_unir()
+                v_estado.set(f"PDF agregados: {len(pares)}. Foliar quedó activado. Ordená y presioná «Procesar».")
 
         if nuevo:
             org["ruta"] = rutas[0]
@@ -4800,23 +4881,23 @@ def iniciar_interfaz():
     visor.grid_columnconfigure(0, weight=1)
     visor.grid_rowconfigure(1, weight=1)
 
-    # ---------- barra general del visor
-    barra_vis = ctk.CTkFrame(visor, fg_color="transparent")
-    barra_vis.grid(row=0, column=0, columnspan=2, sticky="ew", padx=(8, 14), pady=(8, 6))
+    # ---------- barra general del visor (v2.4: va en la fila de las pestanas, a la derecha,
+    # asi la hoja gana alto)
+    barra_vis = ctk.CTkFrame(barra_pest, fg_color="transparent")
 
     def bv(master, texto, cmd, ancho, **kw):
         b_ = boton(master, texto, ancho=ancho, command=cmd, **kw)
-        b_.configure(height=30, font=F(12))
+        b_.configure(height=28, font=F(12))
         return b_
 
-    b_minis = bv(barra_vis, "☰  Miniaturas", lambda: alternar_miniaturas(), 120)
-    b_minis.pack(side="left", padx=(0, 10))
+    b_minis = bv(barra_vis, "☰  Miniaturas", lambda: alternar_miniaturas(), 112)
+    b_minis.pack(side="left", padx=(0, 8))
     v_herr = tk.StringVar(value="Seleccionar")  # siempre arranca en Seleccionar
-    seg_herr = segmentado(barra_vis, ["Seleccionar", "Mano"], v_herr, ancho=190, cmd=lambda _v: cambiar_herramienta())
+    seg_herr = segmentado(barra_vis, ["Seleccionar", "Mano"], v_herr, ancho=170, cmd=lambda _v: cambiar_herramienta())
     seg_herr.pack(side="left", padx=(0, 6))
-    b_resaltar = bv(barra_vis, "🖍  Resaltar", lambda: alternar_resaltar(), 104)
+    b_resaltar = bv(barra_vis, "🖍  Resaltar", lambda: alternar_resaltar(), 98)
     b_resaltar.pack(side="left", padx=(0, 6))
-    b_guardar_res = bv(barra_vis, "Guardar resaltados", lambda: guardar_resaltados_dialogo(), 170, primario=True)
+    b_guardar_res = bv(barra_vis, "Guardar resaltados", lambda: guardar_resaltados_dialogo(), 150, primario=True)
     # busqueda: «texto»: 3 de 12  ▲ ▼  Resaltar resultados  ✕
     caja_busq = ctk.CTkFrame(barra_vis, fg_color=C["tarjeta"], corner_radius=8, border_width=1,
                              border_color=C["borde"])
@@ -4832,7 +4913,7 @@ def iniciar_interfaz():
     ctk.CTkButton(caja_busq, text="✕", width=26, height=26, corner_radius=13, font=F(11), fg_color="transparent",
                   hover_color=C["suave_h"], text_color=C["texto2"],
                   command=lambda: busq_cerrar()).pack(side="left", padx=(2, 4))
-    casilla_impresa(barra_vis, None, "Ver como hoja impresa").pack(side="right", padx=(10, 2))
+    casilla_impresa(barra_vis, None, "Hoja impresa").pack(side="right", padx=(10, 2))
     b_separar = bv(barra_vis, "Separar  ✕", lambda: separar(), 100)
     v_juntas = tk.BooleanVar(value=True)
     chk_juntas = ctk.CTkCheckBox(barra_vis, text="Desplazar juntas", variable=v_juntas, font=F(12),
@@ -4853,7 +4934,7 @@ def iniciar_interfaz():
 
     # ---------- area de documentos (una vista, o dos para comparar) y panel de herramienta
     area_doc = ctk.CTkFrame(visor, fg_color="transparent")
-    area_doc.grid(row=1, column=0, sticky="nsew", padx=(8, 14), pady=(0, 12))
+    area_doc.grid(row=1, column=0, sticky="nsew", padx=(8, 14), pady=(10, 12))
     area_doc.grid_rowconfigure(0, weight=1)
     area_doc.grid_columnconfigure(0, weight=1, uniform="vistas")
     area_doc.grid_columnconfigure(1, weight=0, uniform="")
@@ -6983,8 +7064,9 @@ def iniciar_interfaz():
             ctk.CTkLabel(caja_pest, text="Sin documentos abiertos", font=F(12), text_color=C["texto2"]).pack(
                 side="left", padx=8, pady=4)
             return
-        ancho_disp = max(400, barra_pest.winfo_width() - 260)
-        max_txt = max(10, min(34, int(ancho_disp / max(1, len(pest)) / 8) - 6))
+        ancho_bv = barra_vis.winfo_reqwidth() + 20 if barra_vis.winfo_manager() else 0
+        ancho_disp = max(150, barra_pest.winfo_width() - 40 - ancho_bv)
+        max_txt = max(3, min(34, int((ancho_disp / max(1, len(pest)) - 56) / 7.5)))
         en_comp = {id(v_.t) for v_ in vistas[:2]} if vis["comp"] else set()
         for i, t_ in enumerate(pest):
             activa = i == vis["act"]
@@ -7011,6 +7093,19 @@ def iniciar_interfaz():
                 if w_ is not None:
                     vis["pest_w"][str(w_)] = i
             l_.bind("<Enter>", lambda e, tip_=t_["ruta"]: v_detalle.set(tip_) if not app["ocupado"] else None)
+
+    pest_tarea = {"id": None, "ancho": 0}
+
+    def _barra_vis_cambio(ev):
+        # la barra del visor crece (busqueda, comparar): las pestanas se achican para que entren
+        if abs(ev.width - pest_tarea["ancho"]) < 4:
+            return
+        pest_tarea["ancho"] = ev.width
+        if pest_tarea["id"]:
+            raiz.after_cancel(pest_tarea["id"])
+        pest_tarea["id"] = raiz.after(60, dibujar_pestanas)
+
+    barra_vis.bind("<Configure>", _barra_vis_cambio, add="+")
 
     def soltar_pestana(ev):
         a_ = vis.get("arr_pest")
@@ -7103,7 +7198,7 @@ def iniciar_interfaz():
         if paneles[clave]._parent_frame.winfo_manager() != "pack":
             paneles[clave].pack(fill="both", expand=True, padx=2, pady=(4, 6))
         if not panel_der.winfo_ismapped():
-            panel_der.grid(row=1, column=1, sticky="ns", padx=(0, 14), pady=(0, 12))
+            panel_der.grid(row=1, column=1, sticky="ns", padx=(0, 14), pady=(10, 12))
         app["panel"] = clave
         dibujar_lateral()
         if clave == "foliar":
@@ -7742,6 +7837,10 @@ def iniciar_interfaz():
             paginas[clave].grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 0))
             titulo.configure(text=TITULOS[clave])
         app["pagina"] = clave
+        if clave == "visor":  # la barra del visor vive en la fila de las pestanas
+            barra_vis.grid(row=0, column=1, sticky="e", padx=(6, 4), pady=(6, 0))
+        else:
+            barra_vis.grid_remove()
         dibujar_lateral()
         columna_izquierda()
         if clave == "organizar":
@@ -8018,8 +8117,8 @@ def iniciar_interfaz():
         refrescar()
 
     def nuevo_archivo(r_):
-        """En la v2.0 cada PDF va en su pestana."""
-        return abrir_pestana(r_, mostrar_visor=False)
+        """En la v2.0 cada PDF va en su pestana (v2.4: siempre se ve primero en el visor)."""
+        return abrir_pestana(r_)
 
     def _abrir_documento(r_):
         V["ruta"].set(os.path.normpath(r_))
@@ -8044,7 +8143,7 @@ def iniciar_interfaz():
     def buscar():
         r_ = filedialog.askopenfilename(title="Elegí el PDF", filetypes=[("PDF", "*.pdf")])
         if r_:
-            abrir_pestana(r_, mostrar_visor=False)
+            abrir_pestana(r_)
 
     def ruta_valida():
         ruta = V["ruta"].get().strip().strip('"')
@@ -8382,6 +8481,7 @@ def iniciar_interfaz():
     if isinstance(ult, int) and 0 <= ult < MAX_PERFILES and almacen.perfiles[ult]:
         aplicar(almacen.perfiles[ult].get("config", {}))
         app["perfil"] = ult
+        V["fol"].set(False)  # v2.4: al abrir para ver, sin folio (se prende al unir o a mano)
     else:
         app["perfil"] = None
         poner_color((0, 0, 0), refrescar_prev=False)
@@ -8401,10 +8501,63 @@ def iniciar_interfaz():
             raiz.focus_force()
         raiz.after(350, cerrar_pantalla_de_inicio)
     raiz.after(150, iniciar_dibujantes)  # primero se muestra la ventana
+    # ---- v2.4: arrastrar PDF a la ventana (visor: se abren; Organizar: las opciones de «Unir»)
+    def soltar_pdf(datos):
+        try:
+            items_ = raiz.tk.splitlist(datos)
+        except Exception:
+            items_ = [datos]
+        rutas_ = [os.path.normpath(x) for x in items_ if os.path.isfile(x) and x.lower().endswith(".pdf")]
+        if not rutas_:
+            v_estado.set("Solo se pueden soltar archivos PDF.")
+        else:
+            raiz.after(30, lambda: abrir_soltados(rutas_))
+        return "copy"
+
+    def abrir_soltados(rutas_):
+        try:
+            raiz.lift()
+            raiz.focus_force()
+        except Exception:
+            pass
+        if app["pagina"] == "organizar":
+            if org["preparando"]:
+                v_estado.set("Esperá a que termine de preparar las páginas.")
+                return
+            if not org["orden"]:  # Organizar vacio: el primero se abre aca mismo y el resto se une
+                if not abrir_pestana(rutas_[0], mostrar_visor=False):
+                    return
+                rutas_ = rutas_[1:]
+                if not rutas_:
+                    return
+            org_dialogo(rutas_, True, lambda pos, prep: org_traer(rutas_, pos, prep, nuevo=False))
+            return
+        for r_ in rutas_:
+            abrir_pestana(r_)
+
+    def activar_soltar():
+        try:
+            from tkinterdnd2 import TkinterDnD, DND_FILES
+            TkinterDnD._require(raiz)
+        except Exception:
+            return False  # sin tkdnd: todo lo demas funciona igual
+        cmd_ = raiz.register(soltar_pdf)
+        cmd_ok = raiz.register(lambda *_a: "copy")
+        for w_ in (raiz, cuerpo, contenido, cv, cvm):
+            try:
+                raiz.tk.call("tkdnd::drop_target", "register", w_._w, DND_FILES)
+                raiz.tk.call("bind", w_._w, "<<DropEnter>>", cmd_ok)
+                raiz.tk.call("bind", w_._w, "<<DropPosition>>", cmd_ok)
+                raiz.tk.call("bind", w_._w, "<<Drop>>", cmd_ + " %D")
+            except Exception:
+                pass
+        return True
+
+    app["soltar"] = activar_soltar()
     dibujar_pestanas()
     for a_ in sys.argv[1:]:  # PDF arrastrados sobre el .exe o «Abrir con»: una pestana cada uno
         if os.path.isfile(a_) and a_.lower().endswith(".pdf"):
-            abrir_pestana(os.path.abspath(a_), mostrar_visor=False)
+            abrir_pestana(os.path.abspath(a_))
     mostrar_pagina("visor")
     for n_, b in botones_tema.items():
         b.configure(border_color=C["acento"] if n_ == V["apariencia"].get() else C["tarjeta"])
@@ -8416,7 +8569,29 @@ def iniciar_interfaz():
     raiz.after(120, procesar_eventos)
     raiz.after(60, recibir_dibujos)
     raiz.after(10, mostrar_ventana)
-    if not os.environ.get("PDFOL_PRUEBA"):
+    auto_ = os.environ.get("PDFOL_AUTOPRUEBA")
+    if auto_:  # prueba automatica (la usa GitHub antes de publicar): abre, recorre todo y cierra
+        def _fallo(*a_):
+            import traceback
+            with open(os.environ.get("PDFOL_AUTOPRUEBA_LOG", "pdfol_autoprueba.log"), "a", encoding="utf-8") as f_:
+                f_.write("".join(traceback.format_exception(*a_)))
+            for p_ in mp.active_children():  # que no queden procesos de dibujo vivos
+                try:
+                    p_.terminate()
+                except Exception:
+                    pass
+            os._exit(3)
+
+        raiz.report_callback_exception = _fallo
+        claves_ = ["organizar", "visor"] + [c_ for c_, *_ in ICONOS if c_ in EN_PANEL and c_ not in PROXIMAMENTE]
+        pasos_ = [lambda: abrir_pestana(auto_) if os.path.isfile(auto_) else None]
+        pasos_ += [lambda c_=c_: mostrar_pagina(c_) for c_ in claves_]
+        pasos_ += [lambda: mostrar_pagina("visor"), lambda: alternar_resaltar(), lambda: alternar_resaltar(),
+                   lambda: abrir_soltados([auto_]) if os.path.isfile(auto_) else None]
+        for n_, f_ in enumerate(pasos_):
+            raiz.after(3000 + 700 * n_, f_)
+        raiz.after(3000 + 700 * len(pasos_) + 2500, salir_del_todo)
+    if not (os.environ.get("PDFOL_PRUEBA") or auto_):
         raiz.after(2500, buscar_actualizacion)  # al abrir: si no hay internet, no molesta
         raiz.after(1800, preguntar_abrir_siempre)
         raiz.after(3000, anotar_version_instalada)  # version instalada: ¿abrir siempre los PDF con PdFOL?

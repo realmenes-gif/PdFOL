@@ -1,4 +1,4 @@
-PdFOL v2.3  -  Visor de PDF · Organizar · Unir · Aplanar · Foliar · Comprimir
+PdFOL v2.4  -  Visor de PDF · Organizar · Unir · Aplanar · Foliar · Comprimir
 =============================================================================
 by Meneses999
 
@@ -7,7 +7,7 @@ CREAR EL PORTABLE Y EL INSTALADOR (una sola vez)
 2. Doble clic en "crear_portable.bat" y esperá a que diga LISTO (3 a 6 minutos).
 3. Se crean:
    - la carpeta "PdFOL_portable" con "PdFOL.exe" (portable: se copia y se usa, sin instalar);
-   - "PdFOL_v2.3_instalador.exe" (instalable).
+   - "PdFOL_v2.4_instalador.exe" (instalable).
    (Desde la v2.0 el programa se llama PdFOL.exe, sin número: así se puede actualizar solo.)
    Para el instalador el .bat usa Inno Setup (gratis): si no lo tenés, lo baja e instala
    solo para tu usuario la primera vez. Si no hay internet, el portable igual queda listo.
@@ -40,6 +40,12 @@ VISOR (nuevo en la v2.0)
   o arrastrando uno o varios PDF sobre PdFOL.exe). Si PdFOL ya está abierto, el PDF
   entra como pestaña nueva en la misma ventana. Ctrl+W cierra la pestaña, Ctrl+Tab
   pasa a la siguiente, clic con la rueda sobre la pestaña también la cierra.
+- v2.4: también podés ARRASTRAR PDF a la ventana de PdFOL: se abren en el visor.
+  En Organizar, al soltarlos salen las mismas opciones de «Unir» (dónde agregarlos).
+- v2.4: todo archivo que abrís (Abrir, Documento, Organizar o doble clic en el
+  Explorador) aparece primero en el visor.
+- v2.4: la barra del visor (Miniaturas, Seleccionar/Mano, Resaltar, Hoja impresa)
+  está en la fila de las pestañas, a la derecha: la hoja se ve más grande.
 - Miniaturas a la izquierda («☰ Miniaturas» las oculta o muestra); la página actual
   va marcada. Clic va a la página; Ctrl+clic y Shift eligen varias.
 - Al abrir aparece enseguida el husky animado («Abriendo…») mientras se cargan las
@@ -57,8 +63,10 @@ VISOR (nuevo en la v2.0)
 - ZOOM: lupa − / +, la lista (50, 75, 100, 150, 200 %, Ajustar ancho, Página entera),
   Ctrl + rueda (acerca donde está el mouse), Ctrl + / Ctrl − y Ctrl+0 (ajustar ancho).
   Con zoom alto los planos se dibujan por partes: solo lo que se ve.
+- Foliar NO viene prendido (v2.4): para solo mirar un PDF no aparece el folio. Se prende
+  solo al unir PDF en Organizar, o cuando lo prendés vos.
 - Si «Foliar» está activo, el folio se ve en vivo sobre cada página, tal como va a
-  quedar. La casilla «Ver como hoja impresa» también funciona en el visor.
+  quedar. La casilla «Hoja impresa» también funciona en el visor.
 - Las páginas se dibujan en procesos aparte: los planos pesados no congelan la ventana.
 
 BUSCAR Y RESALTAR

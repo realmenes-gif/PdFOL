@@ -40,14 +40,32 @@ jobs:
 
       - name: Instalar librerias (mismas versiones que crear_portable.bat)
         if: steps.ver.outputs.existe == '0'
-        run: python -m pip install --disable-pip-version-check "pymupdf>=1.24,<2" pikepdf pillow "customtkinter>=5.2,<6" pyinstaller
+        run: python -m pip install --disable-pip-version-check "pymupdf>=1.24,<2" pikepdf pillow "customtkinter>=5.2,<6" tkinterdnd2 pyinstaller
+
+      - name: Prueba antes de armar (inicio, ventana, paginas y salida)
+        if: steps.ver.outputs.existe == '0'
+        shell: pwsh
+        run: |
+          $py = "${{ steps.ver.outputs.archivo }}"
+          python -c "import pymupdf; d = pymupdf.open(); [d.new_page().insert_text((72, 72 + 20 * i), 'Prueba PdFOL') for i in range(3)]; d.save('prueba.pdf')"
+          $env:PDFOL_AUTOPRUEBA = (Resolve-Path prueba.pdf).Path
+          $env:PDFOL_AUTOPRUEBA_LOG = Join-Path $PWD "autoprueba.log"
+          $p = Start-Process python -ArgumentList "`"$py`" --pdfol-inicio" -PassThru -RedirectStandardInput prueba.pdf -NoNewWindow
+          $null = $p.Handle
+          if (-not $p.WaitForExit(30000)) { $p.Kill(); Write-Error "La pantalla de inicio no termina"; exit 1 }
+          $p = Start-Process python -ArgumentList "`"$py`"" -PassThru -NoNewWindow
+          $null = $p.Handle
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); Write-Error "PdFOL no termino la prueba"; exit 1 }
+          if (Test-Path autoprueba.log) { Get-Content autoprueba.log; exit 1 }
+          if ($p.ExitCode -ne 0) { Write-Error "PdFOL salio con codigo $($p.ExitCode)"; exit 1 }
+          Write-Host "Prueba OK"
 
       - name: Armar PdFOL.exe
         if: steps.ver.outputs.existe == '0'
         shell: pwsh
         run: |
           python -m PyInstaller --noconfirm --clean --windowed --onedir --name PdFOL --icon PdFOL.ico `
-            --collect-all pymupdf --collect-all pikepdf --collect-all customtkinter `
+            --collect-all pymupdf --collect-all pikepdf --collect-all customtkinter --collect-all tkinterdnd2 `
             --hidden-import PIL._tkinter_finder --hidden-import PIL.ImageTk --hidden-import PIL.JpegImagePlugin `
             --hidden-import PIL.PngImagePlugin --hidden-import PIL.IcoImagePlugin --hidden-import PIL.BmpImagePlugin `
             --add-data "fuentes;fuentes" "${{ steps.ver.outputs.archivo }}"
@@ -57,6 +75,17 @@ jobs:
         shell: pwsh
         run: |
           Move-Item dist/PdFOL PdFOL_portable
+          Copy-Item PdFOL_documento.ico PdFOL_portable\
+          # prueba del .exe ya armado (si le falta una libreria, aca se nota)
+          $env:PDFOL_AUTOPRUEBA = (Resolve-Path prueba.pdf).Path
+          $env:PDFOL_AUTOPRUEBA_LOG = Join-Path $PWD "autoprueba_exe.log"
+          $p = Start-Process PdFOL_portable\PdFOL.exe -PassThru
+          $null = $p.Handle
+          if (-not $p.WaitForExit(120000)) { $p.Kill(); Write-Error "PdFOL.exe no termino la prueba"; exit 1 }
+          if (Test-Path autoprueba_exe.log) { Get-Content autoprueba_exe.log; exit 1 }
+          if ($p.ExitCode -ne 0) { Write-Error "PdFOL.exe salio con codigo $($p.ExitCode)"; exit 1 }
+          Remove-Item Env:PDFOL_AUTOPRUEBA
+          Get-ChildItem PdFOL_portable -Filter "PdFOL_perfiles.json*" | Remove-Item
           Compress-Archive -Path PdFOL_portable -DestinationPath PdFOL_portable.zip
           $h = (Get-FileHash PdFOL_portable.zip -Algorithm SHA256).Hash.ToLower()
           "$h  PdFOL_portable.zip" | Out-File -Encoding ascii PdFOL_portable.zip.sha256

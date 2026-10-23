@@ -6,11 +6,11 @@ if not "%~1"=="_abierto" (
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
-title Creando PdFOL v2.3 portable
+title Creando PdFOL v2.4 portable
 
 echo.
 echo  ==========================================================
-echo    Creando la version PORTABLE de PdFOL v2.3
+echo    Creando la version PORTABLE de PdFOL v2.4
 echo    (solo se hace una vez; tarda unos minutos)
 echo  ==========================================================
 echo.
@@ -36,8 +36,8 @@ if errorlevel 1 (
     goto :fin
 )
 
-if not exist "PdFOL_v2.3.py" (
-    echo  No encuentro PdFOL_v2.3.py en esta carpeta.
+if not exist "PdFOL_v2.4.py" (
+    echo  No encuentro PdFOL_v2.4.py en esta carpeta.
     echo  Descomprimi el .zip completo y ejecuta este .bat desde esa carpeta.
     goto :fin
 )
@@ -59,7 +59,7 @@ if not exist "fuentes\SpecialElite-Regular.ttf" (
 
 echo [1/4] Instalando herramientas (PyMuPDF, pikepdf, Pillow, CustomTkinter, PyInstaller)...
 rem Versiones fijas: las probadas con PdFOL (PyMuPDF 2 y CustomTkinter 6 cambian demasiado)
-python -m pip install --upgrade --quiet --disable-pip-version-check "pymupdf>=1.24,<2" pikepdf pillow "customtkinter>=5.2,<6" pyinstaller
+python -m pip install --upgrade --quiet --disable-pip-version-check "pymupdf>=1.24,<2" pikepdf pillow "customtkinter>=5.2,<6" tkinterdnd2 pyinstaller
 if errorlevel 1 (
     echo  Error instalando las librerias. Revisa tu conexion a internet.
     goto :fin
@@ -72,6 +72,7 @@ python -m PyInstaller --noconfirm --clean --windowed --onedir ^
     --collect-all pymupdf ^
     --collect-all pikepdf ^
     --collect-all customtkinter ^
+    --collect-all tkinterdnd2 ^
     --hidden-import PIL._tkinter_finder ^
     --hidden-import PIL.ImageTk ^
     --hidden-import PIL.JpegImagePlugin ^
@@ -80,7 +81,7 @@ python -m PyInstaller --noconfirm --clean --windowed --onedir ^
     --hidden-import PIL.BmpImagePlugin ^
     --add-data "%~dp0fuentes;fuentes" ^
     --distpath "%~dp0_dist" --workpath "%~dp0_build" --specpath "%~dp0_build" ^
-    PdFOL_v2.3.py
+    PdFOL_v2.4.py
 if errorlevel 1 (
     echo.
     echo  Hubo un error armando el programa. Copia el texto de arriba y envialo.
@@ -106,6 +107,7 @@ if not defined PERFILES if exist "%~dp0..\PdFOL_v1.1\PdFOL_v1.1_portable\PdFOL_p
 )
 if exist "%DESTINO%" rmdir /s /q "%DESTINO%"
 move "%~dp0_dist\PdFOL" "%DESTINO%" >nul
+copy /y "%~dp0PdFOL_documento.ico" "%DESTINO%\PdFOL_documento.ico" >nul
 if defined PERFILES copy /y "%TEMP%\PdFOL_perfiles_respaldo.json" "%DESTINO%\PdFOL_perfiles.json" >nul
 rmdir /s /q "%~dp0_dist" 2>nul
 rmdir /s /q "%~dp0_build" 2>nul
@@ -128,7 +130,7 @@ goto :sin_inno
 :armar_instalador
 "%ISCC%" /Q "%~dp0PdFOL.iss"
 if errorlevel 1 goto :sin_instalador
-set "INSTALADOR=PdFOL_v2.3_instalador.exe"
+set "INSTALADOR=PdFOL_v2.4_instalador.exe"
 goto :listo
 
 :sin_inno_descarga
