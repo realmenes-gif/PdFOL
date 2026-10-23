@@ -1,14 +1,9 @@
-## PdFOL v2.0
+## PdFOL v2.1 · by Meneses999
 
-PdFOL ahora es un **visor de PDF** con las herramientas de siempre (aplanar, foliar, comprimir, organizar y unir).
-
-- Pestañas por archivo, miniaturas y desplazamiento continuo; zoom con lupa, porcentajes y Ctrl+rueda.
-- Buscar (Ctrl+B / Ctrl+F) y resaltador (texto, área o polilínea y libre) con colores, que se guarda en el PDF.
-- Seleccionar y copiar texto; herramienta Mano.
-- Aplanar, Foliar y Comprimir en un panel junto al documento, con el folio en vivo.
-- Copiar páginas entre pestañas, comparar dos documentos lado a lado.
-- Imprimir con papel automático (carta, y A3 para los planos) y hojas horizontales paradas.
-- Organizar con íconos, Rehacer y Ayuda; pregunta si guardar al cerrar.
-- Animación de inicio, abre maximizado, instalador y actualizaciones desde la app.
+- **Menú del husky** (arriba a la izquierda): Buscar actualizaciones, Novedades de esta versión,
+  Ayuda y atajos (F1) y Acerca de PdFOL.
+- **Puntito naranja** sobre el husky cuando hay una versión nueva, aunque cierres el aviso.
+- Créditos **by Meneses999** en la animación de inicio, el título de la ventana y «Acerca de».
 
 **Descargas:** `PdFOL_instalador.exe` (se instala para tu usuario) o `PdFOL_portable.zip` (carpeta portable).
+Si ya tenés PdFOL v2.0, abrilo: te ofrece actualizar solo.

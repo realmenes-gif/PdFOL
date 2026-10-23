@@ -1,5 +1,5 @@
 """
-PdFOL v2.0  (visor de PDF con pestanas + organizar, aplanar, foliar y comprimir)
+PdFOL v2.1  (visor de PDF con pestanas + organizar, aplanar, foliar y comprimir) · by Meneses999
 ========
 VISOR    : cada PDF se abre en su pestana, con miniaturas a la izquierda y
            desplazamiento continuo. Las paginas se dibujan en un proceso aparte
@@ -24,7 +24,7 @@ Herramienta para PDFs grandes de planos:
 Orden de proceso: aplanar -> foliar -> comprimir. El original nunca se modifica.
 
 - Interfaz grafica: doble clic (o ejecutar sin argumentos).
-- Consola: PdFOL_v2.0.exe doc.pdf --aplanar --foliar --comprimir equilibrada ...
+- Consola: PdFOL.exe doc.pdf --aplanar --foliar --comprimir equilibrada ...
 """
 
 import csv
@@ -352,8 +352,9 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v2.0"
-VERSION_INTERNA = "2.0"
+VERSION = "v2.1"
+VERSION_INTERNA = "2.1"
+AUTOR = "Meneses999"
 
 
 # =========================================================================
@@ -423,7 +424,7 @@ def pantalla_de_inicio():
         except Exception:
             return ImageFont.load_default()
 
-    W, H, K = 340, 320, 3  # K: dibujo a 3x y reduzco (suavizado)
+    W, H, K = 340, 336, 3  # K: dibujo a 3x y reduzco (suavizado)
     r = tk.Tk()
     r.overrideredirect(True)
     r.attributes("-topmost", True)
@@ -443,12 +444,15 @@ def pantalla_de_inicio():
     d.text((x0, 182 * K), NOMBRE, font=f1, fill=hx(texto))
     d.text((x0 + w1 + 7 * K, 193 * K), VERSION, font=f2, fill=hx(acento))
     sub = "Aplanar · Foliar · Comprimir"
-    d.text(((W * K - d.textlength(sub, font=f3)) / 2, 220 * K), sub, font=f3, fill=hx(texto2))
+    d.text(((W * K - d.textlength(sub, font=f3)) / 2, 216 * K), sub, font=f3, fill=hx(texto2))
+    f4 = fuente(10 * K, True)
+    autor = f"by {AUTOR}"
+    d.text(((W * K - d.textlength(autor, font=f4)) / 2, 234 * K), autor, font=f4, fill=hx(acento))
     fondo = fondo.resize((W, H), Image.LANCZOS)
     husky = Image.open(io.BytesIO(base64.b64decode("".join(ICONO_PNG_B64)))).convert("RGBA").resize((128, 128),
                                                                                                        Image.LANCZOS)
     # barra (pastilla) y textos animados, a 3x
-    BX, BY, BW, BH = 80, 290, W - 160, 6
+    BX, BY, BW, BH = 80, 306, W - 160, 6
     fA = fuente(11 * K)
 
     def cuadro(t):
@@ -478,15 +482,15 @@ def pantalla_de_inicio():
     fam = "Segoe UI" if os.name == "nt" else "DejaVu Sans"
     foto = {"img": None}
     item = cv.create_image(0, 0, anchor="nw")
-    lbl = cv.create_text(W / 2 - 6, 266, text="", font=(fam, 10), fill=texto2)
-    puntos = [cv.create_text(0, 266, text="•", font=(fam, 9), fill=texto2) for _ in range(3)]
+    lbl = cv.create_text(W / 2 - 6, 282, text="", font=(fam, 10), fill=texto2)
+    puntos = [cv.create_text(0, 282, text="•", font=(fam, 9), fill=texto2) for _ in range(3)]
     import tkinter.font as tkf
     fl = tkf.Font(family=fam, size=10)
     base_txt = "Abriendo"
     wl = fl.measure(base_txt)
     cv.itemconfigure(lbl, text=base_txt)
     for k_, p_ in enumerate(puntos):
-        cv.coords(p_, W / 2 - 6 + wl / 2 + 7 + k_ * 7, 267)
+        cv.coords(p_, W / 2 - 6 + wl / 2 + 7 + k_ * 7, 283)
     c2, c1 = hx(texto2), hx(tarjeta)
     t0 = time.time()
 
@@ -2614,6 +2618,25 @@ def es_instalado():
             and os.path.isfile(os.path.join(os.path.dirname(sys.executable), "unins000.exe")))
 
 
+ID_INSTALADOR = "{6C2E8B3A-41D7-4F5C-9A6E-3D0F5C1B2A20}_is1"
+
+
+def anotar_version_instalada():
+    """Version instalada: despues de actualizar, «Agregar o quitar programas» muestra la version nueva."""
+    if not es_instalado():
+        return
+    try:
+        import winreg
+        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                           "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + ID_INSTALADOR, 0,
+                           winreg.KEY_READ | winreg.KEY_SET_VALUE)
+        if winreg.QueryValueEx(k, "DisplayVersion")[0] != VERSION_INTERNA:
+            winreg.SetValueEx(k, "DisplayVersion", 0, winreg.REG_SZ, VERSION_INTERNA)
+            winreg.SetValueEx(k, "DisplayName", 0, winreg.REG_SZ, f"PdFOL v{VERSION_INTERNA}")
+    except Exception:
+        pass
+
+
 def pdfol_abre_los_pdf():
     """True si Windows abre los .pdf con PdFOL (eleccion del usuario)."""
     if os.name != "nt":
@@ -2683,7 +2706,7 @@ def iniciar_interfaz():
     raiz = ctk.CTk(fg_color=C["fondo"])
     if _INICIO is not None:
         raiz.withdraw()  # la ventana aparece recien cuando esta completa (mientras, el husky)
-    raiz.title(f"{NOMBRE} {VERSION}")
+    raiz.title(f"{NOMBRE} {VERSION} · by {AUTOR}")
     raiz.geometry("1320x860")
     raiz.minsize(1080, 720)
 
@@ -2824,12 +2847,19 @@ def iniciar_interfaz():
         superior.create_image(0, 0, image=sup_cache["fondo"], anchor="nw")
         superior.create_line(0, h - 1, w, h - 1, fill=col("borde"))
         # logotipo: husky + PdFOL v2.0 · Aplanar · Foliar · Comprimir
-        superior.create_image(16, h // 2, image=logo_tk, anchor="w")
-        id_nom = superior.create_text(70, 30, text=NOMBRE, anchor="w", fill=col("texto"), font=(FAM, 19, "bold"))
+        if app.get("menu_logo"):  # resaltado mientras el menu del husky esta abierto
+            superior.create_rectangle(8, 8, 252, h - 8, fill=col("lat_sel"), outline="")
+        superior.create_image(16, h // 2, image=logo_tk, anchor="w", tags=("item", "logo"))
+        id_nom = superior.create_text(70, 30, text=NOMBRE, anchor="w", fill=col("texto"), font=(FAM, 19, "bold"),
+                                      tags=("item", "logo"))
         x_fin = superior.bbox(id_nom)[2]
-        superior.create_text(x_fin + 6, 33, text=VERSION, anchor="w", fill=col("acento"), font=(FAM, 12, "bold"))
+        superior.create_text(x_fin + 6, 33, text=VERSION, anchor="w", fill=col("acento"), font=(FAM, 12, "bold"),
+                             tags=("item", "logo"))
         superior.create_text(71, 54, text="Aplanar · Foliar · Comprimir", anchor="w", fill=col("texto2"),
-                             font=(FAM, 9))
+                             font=(FAM, 9), tags=("item", "logo"))
+        superior.create_rectangle(8, 8, 252, h - 8, outline="", fill="", tags=("item", "logo"))
+        if app.get("hay_nueva"):  # puntito: hay una version nueva
+            superior.create_oval(50, 13, 64, 27, fill="#F97316", outline=col("lat_ini"), width=2, tags=("item", "logo"))
         x = 262
         grupo_ant = 0
         for clave, _tt, _c, grupo, corto in ICONOS:
@@ -2864,6 +2894,9 @@ def iniciar_interfaz():
         items = superior.find_overlapping(ev.x, ev.y, ev.x, ev.y)
         claves = {c for c, *_ in ICONOS}
         for it in reversed(items):
+            if "logo" in superior.gettags(it):
+                menu_husky()
+                return
             for t in superior.gettags(it):
                 if t in claves:
                     if t in PROXIMAMENTE:
@@ -3367,7 +3400,7 @@ def iniciar_interfaz():
     t = Tarjeta(p, 3)
     b_buscar_act = boton(t, "Buscar actualizaciones", ancho=190)
     b_pdf_def = boton(t, "Abrir los PDF con PdFOL", ancho=190)
-    t.fila(f"Versión instalada: {VERSION}", b_buscar_act,
+    t.fila(f"Versión: {VERSION}  ·  by {AUTOR}", b_buscar_act,
            "Al abrir, PdFOL revisa si hay una versión nueva (si no hay internet, no molesta). "
            "Actualizar nunca es obligatorio y conserva tus perfiles.")
     t.fila("Programa para los PDF", b_pdf_def,
@@ -7234,6 +7267,8 @@ def iniciar_interfaz():
 
     def ofrecer_version(info):
         act["info"] = info
+        app["hay_nueva"] = True
+        dibujar_lateral()
         franja_mostrar(f"Hay una versión nueva de PdFOL ({info['tag']}).",
                        [("Ver cambios", ver_cambios, False), ("Actualizar", empezar_actualizacion, True),
                         ("Más tarde", franja_ocultar, False)])
@@ -7288,6 +7323,87 @@ def iniciar_interfaz():
         raiz.destroy()
 
     b_buscar_act.configure(command=lambda: buscar_actualizacion(manual=True))
+
+    # ================= menu del husky (arriba a la izquierda)
+    def menu_husky():
+        m_ = menu_contextual()
+        m_.add_titulo(f"{NOMBRE} {VERSION}  ·  by {AUTOR}")
+        if app.get("hay_nueva") and act.get("info"):
+            m_.add_command(label=f"Actualizar a {act['info']['tag']}", command=lambda: ofrecer_version(act["info"]),
+                           punto="#F97316")
+        m_.add_command(label="Buscar actualizaciones", command=lambda: buscar_actualizacion(manual=True))
+        m_.add_command(label="Novedades de esta versión", command=novedades)
+        m_.add_separator()
+        m_.add_command(label="Ayuda y atajos", command=ayuda_general, acelerador="F1")
+        m_.add_command(label="Acerca de PdFOL", command=acerca_de)
+        app["menu_logo"] = True
+        dibujar_lateral()
+        m_.tk_popup(superior.winfo_rootx() + 12, superior.winfo_rooty() + ALTO_SUP - 4)
+
+        def vigilar():  # se quita el resaltado del logo cuando se cierra el menu
+            if MenuPdfol.abierto is m_:
+                raiz.after(150, vigilar)
+            else:
+                app["menu_logo"] = False
+                dibujar_lateral()
+        raiz.after(150, vigilar)
+
+    def novedades():
+        import webbrowser
+        webbrowser.open(f"https://github.com/{REPO_GITHUB}/releases/tag/{VERSION}")
+
+    def ayuda_general(*_):
+        m_ = menu_contextual()
+        m_.add_titulo("Atajos de PdFOL")
+        for t_, a_ in (("Abrir PDF", "Ctrl+O"), ("Cerrar pestaña · Siguiente", "Ctrl+W · Ctrl+Tab"),
+                       ("Buscar", "Ctrl+B · Ctrl+F"), ("Siguiente resultado", "Enter · F3"),
+                       ("Copiar texto seleccionado", "Ctrl+C"), ("Seleccionar la página", "Ctrl+A"),
+                       ("Acercar · Alejar", "Ctrl + rueda · Ctrl + / −"), ("Ajustar ancho", "Ctrl+0"),
+                       ("Mover la hoja", "botón del medio · Mano"), ("Guardar resaltados", "Ctrl+S"),
+                       ("Deshacer · Rehacer", "Ctrl+Z · Ctrl+Y"), ("Imprimir", "Ctrl+P"),
+                       ("Más opciones", "clic derecho")):
+            m_.add_command(label=t_, acelerador=a_)
+        m_.tk_popup(superior.winfo_rootx() + 12, superior.winfo_rooty() + ALTO_SUP - 4)
+        return "break"
+
+    def acerca_de():
+        w = ctk.CTkToplevel(raiz)
+        w.title(f"Acerca de {NOMBRE}")
+        w.configure(fg_color=C["fondo"])
+        w.resizable(False, False)
+        w.transient(raiz)
+        caja = ctk.CTkFrame(w, fg_color=C["tarjeta"], corner_radius=14, border_width=1, border_color=C["borde"])
+        caja.pack(padx=18, pady=18)
+        ctk.CTkLabel(caja, text="", image=ctk.CTkImage(icono_husky(96), size=(96, 96))).pack(pady=(20, 6))
+        fila_ = ctk.CTkFrame(caja, fg_color="transparent")
+        fila_.pack()
+        ctk.CTkLabel(fila_, text=NOMBRE, font=F(24, "bold"), text_color=C["texto"]).pack(side="left")
+        ctk.CTkLabel(fila_, text=" " + VERSION, font=F(14, "bold"), text_color=C["acento"]).pack(side="left", pady=(6, 0))
+        ctk.CTkLabel(caja, text=f"by {AUTOR}", font=F(13, "bold"), text_color=C["texto"]).pack(pady=(2, 0))
+        ctk.CTkLabel(caja, text="Visor de PDF · Aplanar · Foliar · Comprimir", font=F(12),
+                     text_color=C["texto2"]).pack(pady=(2, 12))
+        try:
+            libs = f"PyMuPDF {fitz.VersionBind} · pikepdf {pikepdf.__version__} · CustomTkinter {ctk.__version__}"
+        except Exception:
+            libs = ""
+        for t_ in (("Versión instalada" if es_instalado() else "Versión portable") + f": {VERSION}",
+                   f"Perfiles: {almacen.ruta}", libs):
+            if t_:
+                ctk.CTkLabel(caja, text=t_, font=F(10), text_color=C["texto2"], wraplength=380,
+                             justify="center").pack(padx=24)
+        pie = ctk.CTkFrame(caja, fg_color="transparent")
+        pie.pack(pady=(14, 18))
+        boton(pie, "Página de PdFOL", ancho=150,
+              command=lambda: __import__("webbrowser").open(f"https://github.com/{REPO_GITHUB}")).pack(
+            side="left", padx=4)
+        boton(pie, "Cerrar", primario=True, ancho=100, command=w.destroy).pack(side="left", padx=4)
+        w.bind("<Escape>", lambda _e: w.destroy())
+        w.update_idletasks()
+        w.geometry(f"+{raiz.winfo_rootx() + (raiz.winfo_width() - w.winfo_reqwidth()) // 2}"
+                   f"+{raiz.winfo_rooty() + (raiz.winfo_height() - w.winfo_reqheight()) // 3}")
+        w.after(80, lambda: (_tenir_barra_titulo(w, modo_oscuro()), w.focus_force()))
+
+    raiz.bind("<F1>", ayuda_general)
 
     # ================= «¿Abrir siempre con PdFOL?» (version instalada)
     def abrir_siempre_con_pdfol():
@@ -8076,7 +8192,8 @@ def iniciar_interfaz():
     raiz.after(10, mostrar_ventana)
     if not os.environ.get("PDFOL_PRUEBA"):
         raiz.after(2500, buscar_actualizacion)  # al abrir: si no hay internet, no molesta
-        raiz.after(1800, preguntar_abrir_siempre)  # version instalada: ¿abrir siempre los PDF con PdFOL?
+        raiz.after(1800, preguntar_abrir_siempre)
+        raiz.after(3000, anotar_version_instalada)  # version instalada: ¿abrir siempre los PDF con PdFOL?
     if os.environ.get("PDFOL_PRUEBA"):  # solo para las pruebas automaticas
         globals()["_PRUEBA"] = locals()
     raiz.mainloop()
