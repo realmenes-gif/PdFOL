@@ -1,11 +1,12 @@
-# GitHub Actions: arma PdFOL.exe en Windows y publica el release que detecta el actualizador.
-# Va en el repositorio como .github/workflows/publicar_release.yml (lo sube Claude al publicar).
-# Se dispara al crear una etiqueta de version, por ejemplo: v2.0, v2.1
+# GitHub Actions: arma PdFOL.exe en Windows y publica la version que detecta el actualizador.
+# Se dispara al subir cambios a main: lee VERSION_INTERNA de PdFOL_v*.py y, si esa version
+# todavia no esta publicada, arma el portable y el instalador y crea la version (etiqueta vX).
 name: Publicar PdFOL
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,24 +17,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Ver la version del programa
+        id: ver
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $py = (Get-ChildItem PdFOL_v*.py | Select-Object -First 1).Name
+          $m = Select-String -Path $py -Pattern '^VERSION_INTERNA = "([^"]+)"' | Select-Object -First 1
+          $v = $m.Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+          "archivo=$py" >> $env:GITHUB_OUTPUT
+          gh release view "v$v" --repo "${{ github.repository }}" *> $null
+          if ($LASTEXITCODE -eq 0) { "existe=1" >> $env:GITHUB_OUTPUT; Write-Host "v$v ya esta publicada: no se hace nada." }
+          else { "existe=0" >> $env:GITHUB_OUTPUT; Write-Host "Se publica v$v." }
+          exit 0
+
       - uses: actions/setup-python@v5
+        if: steps.ver.outputs.existe == '0'
         with:
           python-version: "3.12"
 
       - name: Instalar librerias (mismas versiones que crear_portable.bat)
-        run: python -m pip install "pymupdf>=1.24,<2" pikepdf pillow "customtkinter>=5.2,<6" pyinstaller
+        if: steps.ver.outputs.existe == '0'
+        run: python -m pip install --disable-pip-version-check "pymupdf>=1.24,<2" pikepdf pillow "customtkinter>=5.2,<6" pyinstaller
 
       - name: Armar PdFOL.exe
+        if: steps.ver.outputs.existe == '0'
         shell: pwsh
         run: |
-          $py = (Get-ChildItem PdFOL_v*.py | Select-Object -First 1).Name
           python -m PyInstaller --noconfirm --clean --windowed --onedir --name PdFOL --icon PdFOL.ico `
             --collect-all pymupdf --collect-all pikepdf --collect-all customtkinter `
             --hidden-import PIL._tkinter_finder --hidden-import PIL.ImageTk --hidden-import PIL.JpegImagePlugin `
             --hidden-import PIL.PngImagePlugin --hidden-import PIL.IcoImagePlugin --hidden-import PIL.BmpImagePlugin `
-            --add-data "fuentes;fuentes" $py
+            --add-data "fuentes;fuentes" "${{ steps.ver.outputs.archivo }}"
 
       - name: Comprimir y calcular SHA256
+        if: steps.ver.outputs.existe == '0'
         shell: pwsh
         run: |
           Move-Item dist/PdFOL PdFOL_portable
@@ -42,17 +62,21 @@ jobs:
           "$h  PdFOL_portable.zip" | Out-File -Encoding ascii PdFOL_portable.zip.sha256
 
       - name: Armar el instalador (Inno Setup)
+        if: steps.ver.outputs.existe == '0'
         shell: pwsh
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
-          $ver = "${{ github.ref_name }}".TrimStart("v")
-          & $iscc /Q "/DMiVersion=$ver" "/FPdFOL_instalador" PdFOL.iss
+          & $iscc /Q "/DMiVersion=${{ steps.ver.outputs.version }}" "/FPdFOL_instalador" PdFOL.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
 
-      - name: Crear el release
+      - name: Crear la version
+        if: steps.ver.outputs.existe == '0'
         uses: softprops/action-gh-release@v2
         with:
-          name: PdFOL ${{ github.ref_name }}
+          tag_name: v${{ steps.ver.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: PdFOL v${{ steps.ver.outputs.version }}
           body_path: NOVEDADES.md
           files: |
             PdFOL_portable.zip
