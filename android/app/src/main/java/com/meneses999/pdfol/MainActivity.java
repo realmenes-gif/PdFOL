@@ -23,6 +23,8 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.provider.OpenableColumns;
 import android.util.Base64;
+import android.util.Log;
+import android.webkit.ConsoleMessage;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -132,6 +134,12 @@ public class MainActivity extends Activity {
         web.setOverScrollMode(View.OVER_SCROLL_NEVER);
         web.addJavascriptInterface(new Puente(), "PdfolAndroid");
         web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onConsoleMessage(ConsoleMessage m) {
+                Log.i("PdFOL", m.messageLevel() + " " + m.message() + " (" + m.sourceId() + ":" + m.lineNumber() + ")");
+                return true;
+            }
+
             // firmas y sellos desde una imagen (galeria, fotos o archivos)
             @Override
             public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
@@ -543,10 +551,12 @@ public class MainActivity extends Activity {
                     if (reconocedor == null) reconocedor = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
                     reconocedor.process(InputImage.fromBitmap(img, 0))
                             .addOnSuccessListener(texto -> {
+                                Log.i("PdFOL", "OCR bloques=" + texto.getTextBlocks().size());
                                 ocrListo(token, jsonOcr(texto, img.getWidth(), img.getHeight()));
                                 img.recycle();
                             })
                             .addOnFailureListener(e -> {
+                                Log.w("PdFOL", "OCR fallo: " + e);
                                 String m = String.valueOf(e.getMessage()).toLowerCase();
                                 ocrListo(token, m.contains("download") ? "{\"error\":\"descargando\"}" : "{\"error\":\"ocr\"}");
                                 img.recycle();

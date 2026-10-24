@@ -25,8 +25,10 @@ adb shell content call --uri content://media --method scan_volume --arg external
 sleep 3
 ID2=$(adb shell content query --uri content://media/external/file --projection _id --where "_display_name=\'escaneado.pdf\'" | grep -oE "_id=[0-9]+" | head -1 | cut -d= -f2)
 adb shell am start -W -a android.intent.action.VIEW -d "content://media/external/file/$ID2" -t application/pdf --grant-read-uri-permission -n com.meneses999.pdfol/.MainActivity
-sleep 40
+sleep 30
 adb exec-out screencap -p > "$OUT/2b_escaneado.png"
+sleep 30
+adb exec-out screencap -p > "$OUT/2c_escaneado.png"
 adb logcat -d | grep -E "PdFOL OCR" | tail -5
 adb shell input keyevent KEYCODE_BACK
 sleep 2
@@ -42,5 +44,5 @@ adb exec-out screencap -p > "$OUT/4_oscuro.png"
 adb shell wm size 1600x2560; adb shell wm density 320
 sleep 6
 adb exec-out screencap -p > "$OUT/5_tablet.png"
-adb logcat -d | grep -iE "chromium|pdfol|AndroidRuntime|FATAL|WebView" | tail -300 > "$OUT/log.txt"
+adb logcat -d | grep -iE "pdfol|AndroidRuntime|FATAL|mlkit|vision|TextRecognizer|DynamiteModule|ModuleInstall" | tail -400 > "$OUT/log.txt"
 ls -la "$OUT"
