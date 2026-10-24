@@ -241,7 +241,7 @@ body.con-docs #inicio { display: none; }
 .firma-g .x svg { width: 12px; height: 12px; stroke-width: 2.5; }
 .tintas { display: flex; gap: 8px; align-items: center; }
 .firma-en-pag {
-  position: absolute; z-index: 30; touch-action: none; border: 1.5px dashed transparent; border-radius: 4px;
+  position: absolute; z-index: 2; touch-action: none; border: 1.5px dashed transparent; border-radius: 4px;
 }
 .firma-en-pag svg { width: 100%; height: 100%; display: block; overflow: visible; }
 .firma-en-pag.edit { border-color: var(--acento); background: rgba(76, 111, 159, .06); }
@@ -285,3 +285,47 @@ button:disabled { opacity: .4; pointer-events: none; }
   #busqueda { padding: 4px 8px; }
   .caja-busq { height: 34px; }
 }
+
+/* plumas, colores con transparencia, firmas y sellos */
+.plumas { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+.plumas button { flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 8px 5px; border-radius: 10px; background: var(--suave); border: 2px solid transparent; min-width: 64px; }
+.plumas button.sel { border-color: var(--acento); background: var(--tarjeta); }
+.plumas button span { font-size: 11px; color: var(--texto2); }
+.plumas button.sel span { color: var(--texto); font-weight: 700; }
+.plumas .muestra-pluma { width: 44px; height: 22px; fill: none; stroke-linecap: round; }
+.lapiz-opc { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.colores { overflow-x: auto; scrollbar-width: none; padding: 4px 2px; flex-wrap: nowrap; }
+.colores::-webkit-scrollbar, .plumas::-webkit-scrollbar { display: none; }
+.color { flex: none; }
+.color[aria-label="Blanco"] { border-color: #AAB4C0; }
+.deslizadores { gap: 14px; }
+.deslizadores .grosor { margin-left: 0; flex: 1; min-width: 140px; }
+.deslizadores .grosor input { flex: 1; width: auto; }
+.deslizadores b { font-size: 12px; color: var(--texto2); min-width: 38px; }
+.dialogo .lapiz-opc, .dialogo .plumas { margin-top: 8px; }
+.cuenta-g { font-size: 13px !important; margin: 0 0 6px !important; }
+.firmas-guardadas { flex-wrap: wrap; }
+.firma-g { width: 128px; height: 64px; padding: 4px; }
+.firma-g img { width: 100%; height: 100%; object-fit: contain; }
+.vista-img, .firma-g {
+  background-color: #fff;
+  background-image: linear-gradient(45deg, #E8ECF1 25%, transparent 25%), linear-gradient(-45deg, #E8ECF1 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #E8ECF1 75%), linear-gradient(-45deg, transparent 75%, #E8ECF1 75%);
+  background-size: 14px 14px; background-position: 0 0, 0 7px, 7px -7px, -7px 0;
+}
+.vista-img { min-height: 120px; border-radius: 12px; border: 1px solid var(--borde); display: grid; place-items: center; padding: 10px; margin-bottom: 10px; color: #6A7685; font-size: 13px; }
+.fila-chk { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 8px 0; color: var(--texto); }
+.fila-chk input { accent-color: var(--acento); width: 18px; height: 18px; }
+.dialogo .grosor { margin-left: 0; }
+.dialogo .grosor input { width: 160px; }
+.firma-en-pag img { width: 100%; height: 100%; display: block; pointer-events: none; }
+@media (min-width: 760px) {
+  #herr-marcar .lapiz-opc { flex: 1; }
+}
+.deslizadores { flex-wrap: wrap; }
+.dialogo .deslizadores { flex-direction: column; align-items: stretch; gap: 6px; }
+.dialogo .deslizadores .grosor { width: 100%; }
+.dialogo .deslizadores .grosor span { min-width: 64px; }
+.dialogo .deslizadores .grosor input { width: auto; flex: 1; min-width: 0; }
+.dialogo .colores, .dialogo .plumas { max-width: 100%; }
+.dialogo { overflow-x: hidden; }

@@ -65,10 +65,11 @@
     <button data-m="libre">Marcador</button>
     <button data-m="lapiz">Lápiz</button>
   </div>
-  <div class="fila-herr">
+  <div class="fila-herr" id="fila-res">
     <div id="colores" class="colores"></div>
     <label class="grosor"><span>Grosor</span><input id="grosor" type="range" min="4" max="24" value="12"></label>
   </div>
+  <div id="lapiz-opc" class="lapiz-opc" hidden></div>
   <div class="fila-herr">
     <button class="suave" id="m-deshacer"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>Deshacer</button>
     <button class="suave" id="m-rehacer"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg>Rehacer</button>
@@ -94,6 +95,7 @@
 <div id="dialogo" class="dialogo" hidden></div>
 <div id="toast" hidden></div>
 <input id="archivo" type="file" accept="application/pdf,.pdf" multiple hidden>
+<input id="imagen" type="file" accept="image/*" hidden>
 
 <script src="lib/pdf-lib.min.js"></script>
 <script type="module" src="app.js"></script>

@@ -1,9 +1,15 @@
 // PdFOL para Android · visor de PDF: buscar, marcar y firmar · by Meneses999
 // Usa pdf.js (dibujo, texto, busqueda y marcas) y pdf-lib (para estampar la firma al guardar).
 
-const VERSION = "1.0";
+const VERSION = "1.1";
 const REPO = "realmenes-gif/PdFOL";
 const CAMBIOS = [
+  ["1.1", [
+    "Firmar ahora tiene Firmas y Sellos: hasta 5 de cada uno guardados.",
+    "Firmas y sellos desde una foto o imagen: el fondo claro se quita solo y queda transparente.",
+    "Lápiz con 5 plumas (bolígrafo, pluma, plumón, rotulador y fosforito), 10 colores y opacidad.",
+    "Las mismas plumas, colores y opacidad para dibujar la firma.",
+  ]],
   ["1.0", [
     "Primera versión para Android: visor de PDF con la misma interfaz de PdFOL.",
     "Buscar en el documento, con todas las coincidencias resaltadas.",
@@ -57,12 +63,24 @@ const ACCIONES = [
 ];
 
 const COLORES_RES = [["Amarillo", "#FFE15C"], ["Verde", "#7EE2A0"], ["Celeste", "#8FD3FF"], ["Rosa", "#FFA6D2"], ["Naranja", "#FFB566"]];
-const COLORES_TINTA = [["Negro", "#1E2730"], ["Azul", "#1F4FB8"], ["Rojo", "#D32F2F"], ["Verde", "#1B7F4B"]];
+const COLORES_TINTA = [["Negro", "#1E2730"], ["Gris", "#6B7280"], ["Azul", "#1F4FB8"], ["Celeste", "#0EA5E9"], ["Rojo", "#D32F2F"],
+  ["Naranja", "#F97316"], ["Amarillo", "#FACC15"], ["Verde", "#1B7F4B"], ["Morado", "#7C3AED"], ["Blanco", "#FFFFFF"]];
+// plumas: grosor (puntos) y opacidad (%) de partida; despues se ajustan con los deslizadores
+const PLUMAS = [
+  { k: "boli", t: "Bolígrafo", grosor: 1.5, op: 100 },
+  { k: "pluma", t: "Pluma", grosor: 2.5, op: 100 },
+  { k: "plumon", t: "Plumón", grosor: 5, op: 100 },
+  { k: "rotulador", t: "Rotulador", grosor: 9, op: 85 },
+  { k: "fosforito", t: "Fosforito", grosor: 16, op: 40 },
+];
 
 // ---------------------------------------------------------------- preferencias
-const PREF_DEF = { tema: "azul", modo: "auto", noche: false, minis: true, firmas: [], recientes: [], ultimaRevision: 0, colorRes: 0, colorTinta: 0, grosor: 12, nuevaVersion: null };
+const PREF_DEF = { tema: "azul", modo: "auto", noche: false, minis: true, firmas: [], recientes: [], ultimaRevision: 0, colorRes: 0, grosor: 12, nuevaVersion: null, sellos: [],
+  plumaLapiz: { pluma: "pluma", color: 0, grosor: 2.5, op: 100 }, plumaFirma: { pluma: "pluma", color: 0, grosor: 2, op: 100 } };
 let prefs = { ...PREF_DEF };
 try { prefs = { ...PREF_DEF, ...JSON.parse(localStorage.getItem("pdfol") || "{}") }; } catch (e) { /* sin almacenamiento */ }
+prefs.firmas = (prefs.firmas || []).slice(0, 5);
+prefs.sellos = (prefs.sellos || []).slice(0, 5);
 function guardarPrefs() { try { localStorage.setItem("pdfol", JSON.stringify(prefs)); } catch (e) { /* nada */ } }
 
 // ---------------------------------------------------------------- estado
@@ -675,19 +693,24 @@ function ponerTipoMarca(tipo) {
 }
 for (const b of $("seg-marcar").children) b.onclick = () => ponerTipoMarca(b.dataset.m);
 function dibujarColores() {
-  const lista = marcarTipo === "lapiz" ? COLORES_TINTA : COLORES_RES;
-  const elegido = marcarTipo === "lapiz" ? prefs.colorTinta : prefs.colorRes;
+  const lapiz = marcarTipo === "lapiz";
+  $("lapiz-opc").hidden = !lapiz;
+  $("fila-res").hidden = lapiz;
+  if (lapiz) {
+    if (!$("lapiz-opc").firstChild) {
+      $("lapiz-opc").innerHTML = htmlPlumas("pl");
+      armarPlumas($("lapiz-opc"), "pl", prefs.plumaLapiz, () => { guardarPrefs(); aplicarParams(); });
+    }
+    return;
+  }
   const c = $("colores");
   c.innerHTML = "";
-  lista.forEach(([n, col], i) => {
+  COLORES_RES.forEach(([n, col], i) => {
     const b = document.createElement("button");
-    b.className = "color" + (i === elegido ? " sel" : "");
+    b.className = "color" + (i === prefs.colorRes ? " sel" : "");
     b.style.background = col;
     b.setAttribute("aria-label", n);
-    b.onclick = () => {
-      if (marcarTipo === "lapiz") prefs.colorTinta = i; else prefs.colorRes = i;
-      guardarPrefs(); dibujarColores(); aplicarParams();
-    };
+    b.onclick = () => { prefs.colorRes = i; guardarPrefs(); dibujarColores(); aplicarParams(); };
     c.append(b);
   });
   $("grosor").parentElement.hidden = marcarTipo === "texto";
@@ -702,9 +725,10 @@ function aplicarParams() {
   // se aplica cuando el editor ya existe (despues de cambiar de modo)
   setTimeout(() => {
     if (marcarTipo === "lapiz") {
-      disp(P.INK_COLOR, COLORES_TINTA[prefs.colorTinta]?.[1] || "#1E2730");
-      disp(P.INK_THICKNESS, Math.max(1, Math.round(prefs.grosor / 4)));
-      disp(P.INK_OPACITY, 1);
+      const pl = prefs.plumaLapiz;
+      disp(P.INK_COLOR, COLORES_TINTA[pl.color]?.[1] || "#1E2730");
+      disp(P.INK_THICKNESS, pl.grosor);
+      disp(P.INK_OPACITY, pl.op / 100);
     } else {
       disp(P.HIGHLIGHT_COLOR, COLORES_RES[prefs.colorRes]?.[1] || "#FFE15C");
       disp(P.HIGHLIGHT_THICKNESS, prefs.grosor);
@@ -755,11 +779,23 @@ function resaltarSeleccion() {
   }, 250);
 }
 
-// ---------------------------------------------------------------- firmas
-// cada firma guardada: {id, w, h, trazos: [[x,y,x,y,...]], color, grosor}
+// ---------------------------------------------------------------- firmas y sellos
+// cada una: {id, tipo: "trazo"|"imagen", w, h, trazos?, color, grosor, op}. Las imagenes van aparte (pdfol_img_<id>).
+const MAX_GUARDADAS = 5;
+const cacheImg = new Map();
+function imgDe(f) {
+  if (f.src) return f.src;
+  if (!cacheImg.has(f.id)) { try { cacheImg.set(f.id, localStorage.getItem("pdfol_img_" + f.id) || ""); } catch (e) { cacheImg.set(f.id, ""); } }
+  return cacheImg.get(f.id);
+}
+function listaDe(cat) { return cat === "sellos" ? prefs.sellos : prefs.firmas; }
+function muestra(f) {
+  if (f.tipo === "imagen") return `<img src="${imgDe(f)}" alt="" draggable="false" style="width:100%;height:100%;object-fit:contain;display:block;pointer-events:none">`;
+  return svgFirma(f);
+}
 function svgFirma(f, color) {
   const paths = f.trazos.map((p) => `<path d="${caminoSuave(p)}"/>`).join("");
-  return `<svg viewBox="0 0 ${f.w} ${f.h}" preserveAspectRatio="xMidYMid meet"><g fill="none" stroke="${color || f.color}" stroke-width="${f.grosor}" stroke-linecap="round" stroke-linejoin="round">${paths}</g></svg>`;
+  return `<svg viewBox="0 0 ${f.w} ${f.h}" preserveAspectRatio="xMidYMid meet"><g fill="none" stroke="${color || f.color}" stroke-opacity="${f.op ?? 1}" stroke-width="${f.grosor}" stroke-linecap="round" stroke-linejoin="round">${paths}</g></svg>`;
 }
 function caminoSuave(p) {
   if (p.length < 4) return `M${p[0]} ${p[1]}l0.01 0`;
@@ -771,57 +807,118 @@ function caminoSuave(p) {
   d += `L${p[p.length - 2].toFixed(1)} ${p[p.length - 1].toFixed(1)}`;
   return d;
 }
+function guardarEnLista(cat, f) {
+  const l = listaDe(cat);
+  if (l.length >= MAX_GUARDADAS) {
+    aviso(`Ya tenés ${MAX_GUARDADAS} ${cat} guardados/as: borrá una para guardar otra. Esta se usa igual.`, 4000);
+    return false;
+  }
+  if (f.tipo === "imagen") {
+    try { localStorage.setItem("pdfol_img_" + f.id, f.src); } catch (e) { aviso("No hay espacio para guardar la imagen. Se usa igual."); return false; }
+    cacheImg.set(f.id, f.src);
+  }
+  const g = { ...f };
+  delete g.src;
+  l.unshift(g);
+  guardarPrefs();
+  return true;
+}
+function borrarDeLista(cat, i) {
+  const l = listaDe(cat);
+  const [f] = l.splice(i, 1);
+  if (f?.tipo === "imagen") { try { localStorage.removeItem("pdfol_img_" + f.id); } catch (e) { /* nada */ } cacheImg.delete(f.id); }
+  guardarPrefs();
+}
 
-async function elegirFirma() {
+let catFirma = "firmas";
+async function elegirFirma(cat = catFirma) {
   const t = tabAct();
   if (!t) return;
-  if (!prefs.firmas.length) return dibujarFirmaNueva();
-  const html = `<div class="firmas-guardadas">${prefs.firmas.map((f, i) =>
-    `<button class="firma-g" data-i="${i}">${svgFirma(f)}<span class="x" data-borrar="${i}">${svg(ICO.cerrar)}</span></button>`).join("")}</div>`;
+  catFirma = cat;
+  const l = listaDe(cat);
+  const html = `<div class="seg" id="seg-cat" style="margin-bottom:12px"><button data-c="firmas" class="${cat === "firmas" ? "sel" : ""}">Firmas</button><button data-c="sellos" class="${cat === "sellos" ? "sel" : ""}">Sellos</button></div>
+    <p class="cuenta-g">${l.length ? `Tocá ${cat === "sellos" ? "un sello" : "una firma"} para ponerla. Guardadas: ${l.length} de ${MAX_GUARDADAS}.` : `Todavía no tenés ${cat} guardados/as.`}</p>
+    <div class="firmas-guardadas">${l.map((f, i) => `<button class="firma-g" data-i="${i}">${muestra(f)}<span class="x" data-borrar="${i}">${svg(ICO.cerrar)}</span></button>`).join("")}</div>
+    <div class="fila-herr"><button class="suave" id="g-dibujar">${svg(ICO.firma)}Dibujar</button><button class="suave" id="g-imagen">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-8 8"/>')}Desde imagen</button></div>`;
   const r = await dialogo({
-    titulo: "Firmar", texto: "Elegí una firma guardada o dibujá una nueva.", html,
-    botones: [["no", "Cancelar"], ["nueva", "Nueva firma", true]],
+    titulo: "Firmar", html, botones: [["no", "Cerrar"]],
     alAbrir: (d, fin) => {
+      d.querySelectorAll("#seg-cat button").forEach((b) => { b.onclick = () => fin("cat:" + b.dataset.c); });
+      d.querySelector("#g-dibujar").onclick = () => fin("dibujar");
+      d.querySelector("#g-imagen").onclick = () => fin("imagen");
       d.querySelectorAll(".firma-g").forEach((b) => {
         b.onclick = (e) => {
           const borrar = e.target.closest("[data-borrar]");
-          if (borrar) {
-            prefs.firmas.splice(+borrar.dataset.borrar, 1); guardarPrefs();
-            b.remove();
-            return;
-          }
+          if (borrar) { borrarDeLista(cat, +borrar.dataset.borrar); fin("cat:" + cat); return; }
           fin("f" + b.dataset.i);
         };
       });
     },
   });
-  if (r === "nueva") return dibujarFirmaNueva();
-  if (r && r[0] === "f") ponerFirma(t, prefs.firmas[+r.slice(1)]);
+  if (!r || r === "no") return;
+  if (r.startsWith("cat:")) return elegirFirma(r.slice(4));
+  if (r === "dibujar") return dibujarFirmaNueva(cat);
+  if (r === "imagen") return firmaDesdeImagen(cat);
+  if (r[0] === "f") ponerFirma(t, l[+r.slice(1)], cat);
 }
 
-function dibujarFirmaNueva() {
-  let trazos = [], color = COLORES_TINTA[0][1], guardarla = true;
-  const html = `<canvas class="pad-firma" id="pad"></canvas>
-    <div class="fila-herr" style="margin-top:10px">
-      <div class="tintas">${COLORES_TINTA.slice(0, 2).map(([n, c], i) => `<button class="color${i ? "" : " sel"}" data-c="${c}" style="background:${c}" aria-label="${n}"></button>`).join("")}</div>
-      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--texto2)"><input type="checkbox" id="guardarla" checked style="accent-color:var(--acento)">Guardarla para la próxima</label>
+// selector de pluma, color y transparencia (lo usan el lapiz y el panel de firma)
+function htmlPlumas(id) {
+  return `<div class="plumas" id="${id}-plumas">${PLUMAS.map((p) => `<button data-p="${p.k}" aria-label="${p.t}"><svg viewBox="0 0 40 24" class="muestra-pluma"><path d="M4 16 Q 14 4 20 12 T 36 8" stroke-width="${Math.min(9, p.grosor)}" stroke-opacity="${p.op / 100}"/></svg><span>${p.t}</span></button>`).join("")}</div>
+    <div class="colores" id="${id}-colores">${COLORES_TINTA.map(([n, c], i) => `<button class="color" data-i="${i}" style="background:${c}" aria-label="${n}"></button>`).join("")}</div>
+    <div class="fila-herr deslizadores">
+      <label class="grosor"><span>Grosor</span><input id="${id}-grosor" type="range" min="0.5" max="24" step="0.5"></label>
+      <label class="grosor"><span>Opacidad</span><input id="${id}-op" type="range" min="10" max="100" step="5"><b id="${id}-opv"></b></label>
+    </div>`;
+}
+// estado: {pluma, color, grosor, op}; al cambiar llama a alCambiar(estado)
+function armarPlumas(raiz_, id, estado, alCambiar) {
+  const q = (s) => raiz_.querySelector(s);
+  const pintar = () => {
+    raiz_.querySelectorAll(`#${id}-plumas button`).forEach((b) => b.classList.toggle("sel", b.dataset.p === estado.pluma));
+    raiz_.querySelectorAll(`#${id}-colores .color`).forEach((b) => b.classList.toggle("sel", +b.dataset.i === estado.color));
+    raiz_.querySelectorAll(`#${id}-plumas path`).forEach((p) => { p.style.stroke = COLORES_TINTA[estado.color][1]; });
+    q(`#${id}-grosor`).value = estado.grosor;
+    q(`#${id}-op`).value = estado.op;
+    q(`#${id}-opv`).textContent = estado.op + " %";
+  };
+  raiz_.querySelectorAll(`#${id}-plumas button`).forEach((b) => {
+    b.onclick = () => {
+      const p = PLUMAS.find((x) => x.k === b.dataset.p);
+      Object.assign(estado, { pluma: p.k, grosor: p.grosor, op: p.op });
+      pintar(); alCambiar(estado);
+    };
+  });
+  raiz_.querySelectorAll(`#${id}-colores .color`).forEach((b) => { b.onclick = () => { estado.color = +b.dataset.i; pintar(); alCambiar(estado); }; });
+  q(`#${id}-grosor`).oninput = (e) => { estado.grosor = +e.target.value; pintar(); alCambiar(estado); };
+  q(`#${id}-op`).oninput = (e) => { estado.op = +e.target.value; pintar(); alCambiar(estado); };
+  pintar();
+}
+
+function dibujarFirmaNueva(cat = "firmas") {
+  let trazos = [], guardarla = true;
+  const est = { ...prefs.plumaFirma };
+  const html = `<canvas class="pad-firma" id="pad"></canvas>${htmlPlumas("pf")}
+    <div class="fila-herr" style="margin-top:6px">
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--texto2)"><input type="checkbox" id="guardarla" checked style="accent-color:var(--acento)">Guardar para la próxima</label>
       <button class="suave" id="pad-borrar" style="margin-left:auto">Borrar</button>
     </div>`;
   return dialogo({
-    titulo: "Dibujá tu firma", html,
-    botones: [["no", "Cancelar"], ["ok", "Usar firma", true]],
+    titulo: cat === "sellos" ? "Dibujá tu sello" : "Dibujá tu firma", html,
+    botones: [["no", "Cancelar"], ["ok", "Usar", true]],
     alAbrir: (d) => {
       const cv = d.querySelector("#pad");
       const ctx = cv.getContext("2d");
       const dpr = window.devicePixelRatio || 1;
-      const ajustar = () => { cv.width = cv.clientWidth * dpr; cv.height = cv.clientHeight * dpr; redibujar(); };
       const redibujar = () => {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, cv.width, cv.height);
-        ctx.strokeStyle = color; ctx.lineWidth = 2.6; ctx.lineCap = "round"; ctx.lineJoin = "round";
-        for (const p of trazos) { ctx.stroke(new Path2D(caminoSuave(p))); }
+        ctx.globalAlpha = est.op / 100;
+        ctx.strokeStyle = COLORES_TINTA[est.color][1]; ctx.lineWidth = est.grosor * 1.4; ctx.lineCap = "round"; ctx.lineJoin = "round";
+        for (const p of trazos) ctx.stroke(new Path2D(caminoSuave(p)));
       };
-      requestAnimationFrame(ajustar);
+      requestAnimationFrame(() => { cv.width = cv.clientWidth * dpr; cv.height = cv.clientHeight * dpr; redibujar(); });
+      armarPlumas(d, "pf", est, () => { prefs.plumaFirma = { ...est }; guardarPrefs(); redibujar(); });
       let actual = null;
       const pos = (e) => { const r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
       cv.onpointerdown = (e) => { cv.setPointerCapture(e.pointerId); actual = [...pos(e)]; trazos.push(actual); redibujar(); };
@@ -837,35 +934,159 @@ function dibujarFirmaNueva() {
       cv.onpointerup = cv.onpointercancel = () => { actual = null; };
       d.querySelector("#pad-borrar").onclick = () => { trazos = []; redibujar(); };
       d.querySelector("#guardarla").onchange = (e) => { guardarla = e.target.checked; };
-      d.querySelectorAll(".tintas .color").forEach((b) => {
-        b.onclick = () => {
-          color = b.dataset.c;
-          d.querySelectorAll(".tintas .color").forEach((x) => x.classList.toggle("sel", x === b));
-          redibujar();
-        };
-      });
     },
   }).then((r) => {
     if (r !== "ok") return;
-    if (!trazos.length) { aviso("No dibujaste ninguna firma."); return; }
-    // normalizar: caja justa alrededor de los trazos
+    if (!trazos.length) { aviso("No dibujaste nada."); return; }
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (const p of trazos) for (let i = 0; i < p.length; i += 2) {
       x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); y0 = Math.min(y0, p[i + 1]); y1 = Math.max(y1, p[i + 1]);
     }
-    const m = 3;
+    const g = est.grosor * 1.4, m = g / 2 + 2;
     const f = {
-      id: Date.now(), w: Math.max(10, x1 - x0 + 2 * m), h: Math.max(10, y1 - y0 + 2 * m), color, grosor: 2.6,
+      id: Date.now(), tipo: "trazo", w: Math.max(10, x1 - x0 + 2 * m), h: Math.max(10, y1 - y0 + 2 * m),
+      color: COLORES_TINTA[est.color][1], grosor: g, op: est.op / 100,
       trazos: trazos.map((p) => p.map((v, i) => +(v - (i % 2 ? y0 : x0) + m).toFixed(1))),
     };
-    if (guardarla) { prefs.firmas.unshift(f); prefs.firmas = prefs.firmas.slice(0, 6); guardarPrefs(); }
+    if (guardarla) guardarEnLista(cat, f);
     const t = tabAct();
-    if (t) ponerFirma(t, f);
+    if (t) ponerFirma(t, f, cat);
   });
 }
 
+// ---- firma o sello desde una foto o imagen: se quita el fondo claro (papel) y queda transparente
+function cargarImagen(src) {
+  return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; });
+}
+function elegirImagenArchivo() {
+  return new Promise((res) => {
+    const inp = $("imagen");
+    inp.value = "";
+    inp.onchange = () => res(inp.files[0] || null);
+    inp.click();
+  });
+}
+function recortarAlfa(cv) {
+  const ctx = cv.getContext("2d", { willReadFrequently: true });
+  const { width: w, height: h } = cv;
+  const px = ctx.getImageData(0, 0, w, h).data;
+  let x0 = w, y0 = h, x1 = -1, y1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    if (px[(y * w + x) * 4 + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  }
+  if (x1 < 0) return null;
+  const m = 4;
+  x0 = Math.max(0, x0 - m); y0 = Math.max(0, y0 - m); x1 = Math.min(w - 1, x1 + m); y1 = Math.min(h - 1, y1 + m);
+  const out = document.createElement("canvas");
+  out.width = x1 - x0 + 1; out.height = y1 - y0 + 1;
+  out.getContext("2d").drawImage(cv, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+  return out;
+}
+// sens: 0 (suave) .. 100 (fuerte)
+function quitarFondo(img, quitar, sens) {
+  const MAX = 1200;
+  const k = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight));
+  const w = Math.max(1, Math.round(img.naturalWidth * k)), h = Math.max(1, Math.round(img.naturalHeight * k));
+  const cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  const ctx = cv.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, w, h);
+  if (!quitar) return recortarAlfa(cv);
+  const datos = ctx.getImageData(0, 0, w, h), px = datos.data;
+  // 1) color del papel por bloques (lo mas claro de cada bloque), asi las sombras de la foto no molestan
+  const B = Math.max(8, Math.round(Math.max(w, h) / 36));
+  const bw = Math.ceil(w / B), bh = Math.ceil(h / B);
+  let fondo = new Float32Array(bw * bh * 4); // r, g, b, luz
+  const lum = (i) => px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11;
+  for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+    const ls = [];
+    for (let y = by * B; y < Math.min(h, by * B + B); y += 2) for (let x = bx * B; x < Math.min(w, bx * B + B); x += 2) {
+      const i = (y * w + x) * 4;
+      if (px[i + 3] > 128) ls.push(i);
+    }
+    const o = (by * bw + bx) * 4;
+    if (!ls.length) { fondo.set([255, 255, 255, 255], o); continue; }
+    ls.sort((a, b) => lum(a) - lum(b));
+    const desde = Math.floor(ls.length * 0.8);
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let j = desde; j < ls.length; j++) { r += px[ls[j]]; g += px[ls[j] + 1]; b += px[ls[j] + 2]; n++; }
+    fondo.set([r / n, g / n, b / n, (r * 0.3 + g * 0.59 + b * 0.11) / n], o);
+  }
+  // 2) los bloques llenos de tinta toman el papel del vecino mas claro (dos pasadas)
+  for (let pasada = 0; pasada < 2; pasada++) {
+    const nuevo = fondo.slice();
+    for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+      let mejor = (by * bw + bx) * 4;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const yy = by + dy, xx = bx + dx;
+        if (yy < 0 || xx < 0 || yy >= bh || xx >= bw) continue;
+        const o = (yy * bw + xx) * 4;
+        if (fondo[o + 3] > fondo[mejor + 3] + 12) mejor = o;
+      }
+      nuevo.set(fondo.subarray(mejor, mejor + 4), (by * bw + bx) * 4);
+    }
+    fondo = nuevo;
+  }
+  // 3) cada pixel: cuanto mas oscuro que el papel, mas opaco; el color de la tinta se recupera
+  const t0 = 12 + (100 - sens) * 0.45, t1 = t0 + 40;
+  for (let y = 0; y < h; y++) {
+    const fy = Math.min(bh - 1.001, Math.max(0, y / B - 0.5)), y0i = Math.floor(fy), ty = fy - y0i;
+    for (let x = 0; x < w; x++) {
+      const fx = Math.min(bw - 1.001, Math.max(0, x / B - 0.5)), x0i = Math.floor(fx), tx = fx - x0i;
+      const i = (y * w + x) * 4;
+      const o00 = (y0i * bw + x0i) * 4, o01 = o00 + 4, o10 = o00 + bw * 4, o11 = o10 + 4;
+      const f = [0, 1, 2].map((c) => (fondo[o00 + c] * (1 - tx) + fondo[o01 + c] * tx) * (1 - ty) + (fondo[o10 + c] * (1 - tx) + fondo[o11 + c] * tx) * ty);
+      const dist = Math.max(f[0] - px[i], f[1] - px[i + 1], f[2] - px[i + 2], 0);
+      const a = Math.min(1, Math.max(0, (dist - t0) / (t1 - t0)));
+      if (a <= 0) { px[i + 3] = 0; continue; }
+      for (let c = 0; c < 3; c++) px[i + c] = Math.max(0, Math.min(255, Math.round(f[c] - (f[c] - px[i + c]) / Math.max(a, 0.35))));
+      px[i + 3] = Math.round(px[i + 3] * a);
+    }
+  }
+  ctx.putImageData(datos, 0, 0);
+  return recortarAlfa(cv);
+}
+
+async function firmaDesdeImagen(cat = "firmas") {
+  const archivo = await elegirImagenArchivo();
+  if (!archivo) return;
+  let img;
+  try { img = await cargarImagen(URL.createObjectURL(archivo)); } catch (e) { aviso("No se pudo leer esa imagen."); return; }
+  let quitar = true, sens = 50, guardarla = true, resultado = null;
+  const html = `<div class="vista-img" id="vista-img"></div>
+    <label class="fila-chk"><input type="checkbox" id="quitar" checked> Quitar el fondo claro (queda transparente)</label>
+    <label class="grosor" id="fila-sens"><span>Intensidad</span><input id="sens" type="range" min="0" max="100" value="50"></label>
+    <label class="fila-chk"><input type="checkbox" id="guardarla2" checked> Guardar para la próxima</label>`;
+  const r = await dialogo({
+    titulo: cat === "sellos" ? "Sello desde imagen" : "Firma desde imagen", html,
+    botones: [["no", "Cancelar"], ["ok", "Usar", true]],
+    alAbrir: (d) => {
+      const vista = d.querySelector("#vista-img");
+      const actualizar = () => {
+        resultado = quitarFondo(img, quitar, sens);
+        vista.innerHTML = "";
+        if (resultado) { resultado.style.maxWidth = "100%"; resultado.style.maxHeight = "220px"; vista.append(resultado); }
+        else vista.textContent = "No quedó nada: bajá la intensidad.";
+        d.querySelector("#fila-sens").hidden = !quitar;
+      };
+      let tt = 0;
+      d.querySelector("#quitar").onchange = (e) => { quitar = e.target.checked; actualizar(); };
+      d.querySelector("#sens").oninput = (e) => { sens = +e.target.value; clearTimeout(tt); tt = setTimeout(actualizar, 120); };
+      d.querySelector("#guardarla2").onchange = (e) => { guardarla = e.target.checked; };
+      setTimeout(actualizar, 30);
+    },
+  });
+  URL.revokeObjectURL(img.src);
+  if (r !== "ok" || !resultado) return;
+  const f = { id: Date.now(), tipo: "imagen", w: resultado.width, h: resultado.height, src: resultado.toDataURL("image/webp", 0.92) };
+  if (!f.src.startsWith("data:image/webp")) f.src = resultado.toDataURL("image/png");
+  if (guardarla) guardarEnLista(cat, f);
+  const t = tabAct();
+  if (t) ponerFirma(t, f, cat);
+}
+
 // firma sobre la pagina: posicion en fracciones de la pagina (asi acompaña al zoom)
-function ponerFirma(t, f) {
+function ponerFirma(t, f, cat = "firmas") {
   const n = t.viewer.currentPageNumber;
   const pv = t.viewer.getPageView(n - 1);
   if (!pv) return;
@@ -873,7 +1094,9 @@ function ponerFirma(t, f) {
   const pr = pv.div.getBoundingClientRect(), cr = t.cont.getBoundingClientRect();
   const visY0 = Math.max(pr.top, cr.top), visY1 = Math.min(pr.bottom, cr.bottom);
   const cy = ((visY0 + visY1) / 2 - pr.top) / pr.height;
-  const fw = 0.38, fh = fw * (f.h / f.w) * (pr.width / pr.height);
+  let fw = cat === "sellos" ? 0.3 : 0.38;
+  if (fw * (f.h / f.w) * (pr.width / pr.height) > 0.35) fw = 0.35 / ((f.h / f.w) * (pr.width / pr.height));
+  const fh = fw * (f.h / f.w) * (pr.width / pr.height);
   const firma = { pag: n, x: 0.5 - fw / 2, y: Math.min(1 - fh, Math.max(0, cy - fh / 2)), w: fw, f: { ...f } };
   t.firmas.push(firma);
   marcarModificado(t, true);
@@ -887,7 +1110,7 @@ function dibujarFirmas(t) {
   for (const fi of t.firmas) {
     const el = document.createElement("div");
     el.className = "firma-en-pag" + (fi === t.firmaEdit ? " edit" : "");
-    el.innerHTML = svgFirma(fi.f) + '<div class="tirador"></div>';
+    el.innerHTML = muestra(fi.f) + '<div class="tirador"></div>';
     fi.el = el;
     capa.append(el);
     arrastrarFirma(t, fi, el);
@@ -960,7 +1183,15 @@ $("f-quitar").onclick = () => {
 };
 $("f-otra").onclick = () => { const t = tabAct(); if (t) { editarFirma(t, null); elegirFirma(); } };
 
-// estampa las firmas en el PDF (vectoriales, nitidas a cualquier zoom)
+async function pngDe(src) {
+  const img = await cargarImagen(src);
+  const cv = document.createElement("canvas");
+  cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+  cv.getContext("2d").drawImage(img, 0, 0);
+  const blob = await new Promise((r) => cv.toBlob(r, "image/png"));
+  return new Uint8Array(await blob.arrayBuffer());
+}
+// estampa firmas y sellos en el PDF (los dibujados quedan vectoriales, nitidos a cualquier zoom)
 async function estamparFirmas(t, datos) {
   const L = window.PDFLib;
   const doc = await L.PDFDocument.load(datos, { updateMetadata: false });
@@ -970,6 +1201,16 @@ async function estamparFirmas(t, datos) {
     const x0 = fi.x * vp.width, y0 = fi.y * vp.height;
     const w = fi.w * vp.width, h = w * fi.f.h / fi.f.w;
     const TL = vp.convertToPdfPoint(x0, y0), TR = vp.convertToPdfPoint(x0 + w, y0), BL = vp.convertToPdfPoint(x0, y0 + h);
+    const hoja = doc.getPage(fi.pag - 1);
+    if (fi.f.tipo === "imagen") { // imagen con fondo transparente: se dibuja en su caja
+      const png = await pngDe(imgDe(fi.f));
+      const im = await doc.embedPng(png);
+      const nombre = hoja.node.newXObject("Firma", im.ref);
+      hoja.pushOperators(L.pushGraphicsState(),
+        L.concatTransformationMatrix(TR[0] - TL[0], TR[1] - TL[1], -(BL[0] - TL[0]), -(BL[1] - TL[1]), BL[0], BL[1]),
+        L.drawObject(nombre), L.popGraphicsState());
+      continue;
+    }
     const s = w / fi.f.w; // unidades de la firma -> puntos de pagina
     const a = (TR[0] - TL[0]) / fi.f.w, b = (TR[1] - TL[1]) / fi.f.w, c = (BL[0] - TL[0]) / fi.f.h, d = (BL[1] - TL[1]) / fi.f.h;
     const hex = fi.f.color.replace("#", "");
@@ -977,6 +1218,10 @@ async function estamparFirmas(t, datos) {
     const ops = [L.pushGraphicsState(), L.concatTransformationMatrix(a, b, c, d, TL[0], TL[1]),
       L.setLineWidth(Math.max(fi.f.grosor, 0.7 / s)), L.setLineCap(L.LineCapStyle.Round), L.setLineJoin(L.LineJoinStyle.Round),
       L.setStrokingRgbColor(r, g, bl)];
+    if ((fi.f.op ?? 1) < 1) { // transparencia de la pluma
+      const gs = doc.context.register(doc.context.obj({ Type: "ExtGState", CA: fi.f.op, ca: fi.f.op }));
+      ops.splice(1, 0, L.setGraphicsState(hoja.node.newExtGState("GS", gs)));
+    }
     for (const p of fi.f.trazos) {
       ops.push(L.moveTo(p[0], p[1]));
       if (p.length < 4) { ops.push(L.lineTo(p[0] + 0.01, p[1])); continue; }
@@ -990,7 +1235,7 @@ async function estamparFirmas(t, datos) {
       ops.push(L.lineTo(p[p.length - 2], p[p.length - 1]));
     }
     ops.push(L.stroke(), L.popGraphicsState());
-    doc.getPage(fi.pag - 1).pushOperators(...ops);
+    hoja.pushOperators(...ops);
   }
   return await doc.save({ useObjectStreams: true });
 }

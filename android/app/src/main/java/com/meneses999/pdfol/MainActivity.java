@@ -22,6 +22,7 @@ import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -56,7 +57,8 @@ public class MainActivity extends Activity {
 
     static final String HOST = "appassets.androidplatform.net";
     static final String INICIO = "https://" + HOST + "/www/index.html";
-    static final int REQ_ABRIR = 1, REQ_COPIA = 2;
+    static final int REQ_ABRIR = 1, REQ_COPIA = 2, REQ_IMAGEN = 3;
+    ValueCallback<Uri[]> imagenCb = null;
 
     WebView web;
     FrameLayout raiz;
@@ -116,7 +118,24 @@ public class MainActivity extends Activity {
         w.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         web.setOverScrollMode(View.OVER_SCROLL_NEVER);
         web.addJavascriptInterface(new Puente(), "PdfolAndroid");
-        web.setWebChromeClient(new WebChromeClient());
+        web.setWebChromeClient(new WebChromeClient() {
+            // firmas y sellos desde una imagen (galeria, fotos o archivos)
+            @Override
+            public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams p) {
+                if (imagenCb != null) imagenCb.onReceiveValue(null);
+                imagenCb = cb;
+                Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+                i.addCategory(Intent.CATEGORY_OPENABLE);
+                i.setType("image/*");
+                try {
+                    startActivityForResult(Intent.createChooser(i, "Elegí la imagen"), REQ_IMAGEN);
+                    return true;
+                } catch (ActivityNotFoundException e) {
+                    imagenCb = null;
+                    return false;
+                }
+            }
+        });
         web.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
@@ -269,6 +288,11 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int req, int res, Intent datos) {
         super.onActivityResult(req, res, datos);
+        if (req == REQ_IMAGEN) {
+            if (imagenCb != null) imagenCb.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(res, datos));
+            imagenCb = null;
+            return;
+        }
         if (req == REQ_ABRIR) {
             if (res != RESULT_OK || datos == null) return;
             List<Uri> uris = new ArrayList<>();
