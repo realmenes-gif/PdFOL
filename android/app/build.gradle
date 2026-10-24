@@ -10,8 +10,8 @@ android {
         applicationId 'com.meneses999.pdfol'
         minSdk 30          // Android 11 en adelante
         targetSdk 35
-        versionCode 2
-        versionName '1.1'
+        versionCode 3
+        versionName '1.2'
     }
 
     signingConfigs {
@@ -44,4 +44,9 @@ android {
         includeInApk false
         includeInBundle false
     }
+}
+
+dependencies {
+    // reconocer texto en paginas escaneadas (el modelo lo baja Google Play Services: el APK sigue liviano)
+    implementation 'com.google.android.gms:play-services-mlkit-text-recognition:19.0.1'
 }

@@ -329,3 +329,10 @@ button:disabled { opacity: .4; pointer-events: none; }
 .dialogo .deslizadores .grosor input { width: auto; flex: 1; min-width: 0; }
 .dialogo .colores, .dialogo .plumas { max-width: 100%; }
 .dialogo { overflow-x: hidden; }
+
+/* elegir y copiar texto (el resto de la interfaz no se selecciona) */
+.visor .textLayer, .visor .textLayer span, .visor .textLayer br { -webkit-user-select: text; user-select: text; }
+.barra-sel { position: fixed; z-index: 15; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; padding: 6px;
+  background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 14px; box-shadow: var(--sombra); }
+#chip-ocr { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 3; background: var(--tarjeta);
+  color: var(--texto2); border: 1px solid var(--borde); border-radius: 14px; padding: 5px 12px; font-size: 12px; box-shadow: var(--sombra); white-space: nowrap; }

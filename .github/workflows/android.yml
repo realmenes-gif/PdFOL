@@ -99,7 +99,7 @@ jobs:
             capturas/*
 
       - name: Publicar la version
-        if: steps.ver.outputs.oficial == '1' && github.event.inputs.publicar == 'si'
+        if: contains(github.event.head_commit.message, '[publicar]') || github.event.inputs.publicar == 'si'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: android-v${{ steps.ver.outputs.version }}

@@ -1,9 +1,13 @@
 // PdFOL para Android · visor de PDF: buscar, marcar y firmar · by Meneses999
 // Usa pdf.js (dibujo, texto, busqueda y marcas) y pdf-lib (para estampar la firma al guardar).
 
-const VERSION = "1.1";
+const VERSION = "1.2";
 const REPO = "realmenes-gif/PdFOL";
 const CAMBIOS = [
+  ["1.2", [
+    "Copiar texto: elegí el texto (mantené apretado) y tocá «Copiar».",
+    "Páginas escaneadas o fotos: PdFOL reconoce las letras y también se pueden elegir y copiar.",
+  ]],
   ["1.1", [
     "Firmar ahora tiene Firmas y Sellos: hasta 5 de cada uno guardados.",
     "Firmas y sellos desde una foto o imagen: el fondo claro se quita solo y queda transparente.",
@@ -420,6 +424,7 @@ function conectarEventos(t) {
   eventBus.on("scalechanging", () => { if (t === tabAct()) actualizarZoomTxt(); ubicarFirmas(t); });
   eventBus.on("updateviewarea", () => ubicarFirmas(t));
   eventBus.on("pagerendered", () => ubicarFirmas(t));
+  eventBus.on("textlayerrendered", (e) => revisarTextoPagina(t, e.pageNumber));
   eventBus.on("updatefindmatchescount", (e) => cuentaBusqueda(t, e.matchesCount));
   eventBus.on("updatefindcontrolstate", (e) => cuentaBusqueda(t, e.matchesCount, e.state));
   eventBus.on("annotationeditoruimanager", (e) => { t.uiManager = e.uiManager; });
@@ -741,7 +746,7 @@ $("m-rehacer").onclick = () => accionEditor("redo");
 $("m-borrar").onclick = () => accionEditor("delete");
 $("m-listo").onclick = salirDeModo;
 
-// boton «Resaltar» cuando hay texto elegido (con el modo Marcar o sin el)
+// botones «Copiar» y «Resaltar» cuando hay texto elegido (texto del PDF o reconocido de una imagen)
 function textoElegido() {
   const s = document.getSelection();
   if (!s || s.isCollapsed || !s.rangeCount) return null;
@@ -753,18 +758,140 @@ document.addEventListener("selectionchange", () => {
   let b = $("btn-res-sel");
   if (!s) { b?.remove(); return; }
   if (!b) {
-    b = document.createElement("button");
+    b = document.createElement("div");
     b.id = "btn-res-sel";
-    b.className = "primario";
-    b.innerHTML = svg(ICO.marcador) + "Resaltar";
-    b.style.cssText = "position:fixed;z-index:15;left:50%;transform:translateX(-50%);box-shadow:var(--sombra)";
+    b.className = "barra-sel";
+    b.innerHTML = `<button class="suave" id="sel-copiar">${svg(ICO.copia)}Copiar</button><button class="primario" id="sel-resaltar">${svg(ICO.marcador)}Resaltar</button>`;
     b.onpointerdown = (e) => e.preventDefault(); // que no se pierda la seleccion
-    b.onclick = resaltarSeleccion;
+    b.querySelector("#sel-copiar").onclick = copiarSeleccion;
+    b.querySelector("#sel-resaltar").onclick = resaltarSeleccion;
     document.body.append(b);
   }
   const abajo = $("herr-marcar").hidden ? 70 : $("herr-marcar").offsetHeight + 16;
   b.style.bottom = abajo + "px";
 });
+async function copiarSeleccion() {
+  const s = textoElegido();
+  if (!s) return;
+  const txt = s.toString().replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  let ok = false;
+  try { if (AN && AN.copiar) { AN.copiar(txt); ok = true; } } catch (e) { /* nada */ }
+  if (!ok) { try { await navigator.clipboard.writeText(txt); ok = true; } catch (e) { ok = document.execCommand("copy"); } }
+  s.removeAllRanges();
+  $("btn-res-sel")?.remove();
+  aviso(ok ? "Texto copiado." : "No se pudo copiar.");
+}
+
+// ---------------------------------------------------------------- reconocer texto en paginas escaneadas (OCR)
+// Si una pagina no trae texto (foto o escaneo), Android reconoce los caracteres y se agrega una capa de texto
+// invisible: asi se puede elegir y copiar igual que en un PDF con texto.
+const ocrCola = [];
+let ocrTrabajando = false, ocrAvisado = false;
+const ocrPend = new Map();
+window.pdfolNativo.ocrListo = (token, json) => { ocrPend.get(token)?.(json); ocrPend.delete(token); };
+const ocrDisponible = () => !!(AN && AN.ocr) || !!window._ocrPrueba;
+
+function revisarTextoPagina(t, n) {
+  if (!ocrDisponible()) return;
+  t.ocr ||= {};
+  const pv = t.viewer.getPageView(n - 1);
+  const capa = pv?.textLayer?.div;
+  if (!capa) return;
+  if (Array.isArray(t.ocr[n])) { ponerCapaOcr(t, n); return; }
+  if (t.ocr[n]) return; // en cola, trabajando o sin resultado
+  const propio = [...capa.querySelectorAll("span:not(.ocr)")].map((x) => x.textContent).join("").replace(/\s/g, "");
+  if (propio.length >= 15) { t.ocr[n] = "texto"; return; }
+  t.ocr[n] = "cola";
+  ocrCola.push([t, n]);
+  siguienteOcr();
+}
+
+async function siguienteOcr() {
+  if (ocrTrabajando) return;
+  // primero las paginas que se estan viendo
+  const t0 = tabAct();
+  let i = ocrCola.findIndex(([t, n]) => t === t0 && Math.abs(n - t.viewer.currentPageNumber) <= 1);
+  if (i < 0) i = ocrCola.findIndex(([t]) => pest.includes(t));
+  if (i < 0) { ocrCola.length = 0; return; }
+  const [t, n] = ocrCola.splice(i, 1)[0];
+  if (!pest.includes(t)) { siguienteOcr(); return; }
+  ocrTrabajando = true;
+  const chip = $("chip-ocr");
+  chip.textContent = `Reconociendo texto · pág. ${n}`;
+  chip.hidden = t !== tabAct();
+  try {
+    const r = await reconocerPagina(t, n);
+    if (r?.error === "descargando") {
+      t.ocr[n] = null; // se reintenta despues
+      aviso("Preparando el reconocimiento de texto (la primera vez necesita internet)…", 4000);
+      setTimeout(() => revisarTextoPagina(t, n), 8000);
+    } else {
+      t.ocr[n] = r?.lineas || [];
+      console.info(`PdFOL OCR pag ${n}: ${t.ocr[n].length} lineas` + (r?.error ? ` (error ${r.error})` : ""));
+      ponerCapaOcr(t, n);
+      if (t.ocr[n].length && !ocrAvisado) { ocrAvisado = true; aviso("Texto reconocido: mantené apretado para elegirlo y copiarlo."); }
+    }
+  } catch (e) {
+    t.ocr[n] = "error";
+  }
+  chip.hidden = true;
+  ocrTrabajando = false;
+  if (ocrCola.length) setTimeout(siguienteOcr, 50);
+}
+
+async function reconocerPagina(t, n) {
+  const pag = await t.pdf.getPage(n);
+  const vp1 = pag.getViewport({ scale: 1 });
+  const esc = Math.min(4, 2400 / Math.max(vp1.width, vp1.height));
+  const vp = pag.getViewport({ scale: esc });
+  const cv = document.createElement("canvas");
+  cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
+  await pag.render({ canvas: cv, canvasContext: ctx, viewport: vp, annotationMode: pdfjsLib.AnnotationMode.DISABLE }).promise;
+  const jpg = cv.toDataURL("image/jpeg", 0.9);
+  cv.width = cv.height = 0;
+  const datos = await new Promise((resolve) => {
+    if (window._ocrPrueba) { window._ocrPrueba(jpg).then(resolve); return; }
+    const token = "o" + Date.now() + Math.random().toString(36).slice(2, 7);
+    ocrPend.set(token, (json) => { try { resolve(JSON.parse(json)); } catch (e) { resolve(null); } });
+    AN.ocr(token, jpg.slice(jpg.indexOf(",") + 1));
+  });
+  if (!datos || datos.error) return datos;
+  // a fracciones de la pagina (asi acompaña al zoom)
+  return {
+    lineas: (datos.lineas || []).filter((l) => l.t && l.t.trim()).map((l) => ({
+      t: l.t, x: l.x / datos.w, y: l.y / datos.h, w: l.w / datos.w, h: l.h / datos.h, a: l.a || 0,
+    })),
+  };
+}
+
+let ctxMedir = null;
+function ponerCapaOcr(t, n) {
+  const lineas = t.ocr?.[n];
+  const pv = t.viewer.getPageView(n - 1);
+  const capa = pv?.textLayer?.div;
+  if (!Array.isArray(lineas) || !capa || capa.querySelector(".ocr")) return;
+  const vp1 = pv.pdfPage.getViewport({ scale: 1 });
+  ctxMedir ||= document.createElement("canvas").getContext("2d");
+  ctxMedir.font = "100px sans-serif";
+  const frag = document.createDocumentFragment();
+  for (const l of lineas) {
+    const s = document.createElement("span");
+    s.className = "ocr";
+    s.textContent = l.t;
+    const alto = l.h * vp1.height;                    // en unidades de pagina
+    const anchoTexto = ctxMedir.measureText(l.t).width / 100 * alto;
+    s.style.cssText = `left:${(l.x * 100).toFixed(3)}%;top:${(l.y * 100).toFixed(3)}%;font-family:sans-serif;`
+      + `--font-height:${alto.toFixed(2)}px;--scale-x:${anchoTexto > 0 ? ((l.w * vp1.width) / anchoTexto).toFixed(4) : 1};--rotate:${l.a.toFixed(1)}deg`;
+    frag.append(s);
+    const br = document.createElement("br");
+    br.className = "ocr";
+    frag.append(br);
+  }
+  capa.append(frag);
+}
+
 function resaltarSeleccion() {
   const t = tabAct();
   $("btn-res-sel")?.remove();

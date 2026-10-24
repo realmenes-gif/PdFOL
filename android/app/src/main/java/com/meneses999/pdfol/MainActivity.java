@@ -7,7 +7,12 @@ import android.content.Intent;
 import android.content.UriPermission;
 import android.content.res.Configuration;
 import android.database.Cursor;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Point;
 import android.graphics.Color;
 import android.graphics.ColorFilter;
 import android.graphics.Insets;
@@ -30,6 +35,12 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
+
+import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.text.Text;
+import com.google.mlkit.vision.text.TextRecognition;
+import com.google.mlkit.vision.text.TextRecognizer;
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -66,6 +77,8 @@ public class MainActivity extends Activity {
     final Map<String, Doc> docs = new HashMap<>();
     final List<Doc> pendientes = new ArrayList<>();
     final ExecutorService hilo = Executors.newSingleThreadExecutor();
+    final ExecutorService hiloOcr = Executors.newSingleThreadExecutor();
+    TextRecognizer reconocedor = null;
     volatile boolean paginaLista = false;
     String copiaToken = null, copiaNombre = null;
 
@@ -190,6 +203,8 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         hilo.shutdown();
+        hiloOcr.shutdown();
+        if (reconocedor != null) reconocedor.close();
         if (web != null) web.destroy();
         super.onDestroy();
     }
@@ -504,6 +519,45 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public void copiar(String texto) {
+            runOnUiThread(() -> {
+                ClipboardManager cm = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+                if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("PdFOL", texto));
+            });
+        }
+
+        // reconoce el texto de una pagina escaneada (ML Kit, en el telefono) y devuelve las lineas con su lugar
+        @JavascriptInterface
+        public void ocr(String token, String b64) {
+            hiloOcr.execute(() -> {
+                Bitmap bm;
+                try {
+                    byte[] b = Base64.decode(b64, Base64.DEFAULT);
+                    bm = BitmapFactory.decodeByteArray(b, 0, b.length);
+                } catch (Throwable e) {
+                    bm = null;
+                }
+                if (bm == null) { ocrListo(token, "{\"error\":\"imagen\"}"); return; }
+                final Bitmap img = bm;
+                try {
+                    if (reconocedor == null) reconocedor = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+                    reconocedor.process(InputImage.fromBitmap(img, 0))
+                            .addOnSuccessListener(texto -> {
+                                ocrListo(token, jsonOcr(texto, img.getWidth(), img.getHeight()));
+                                img.recycle();
+                            })
+                            .addOnFailureListener(e -> {
+                                String m = String.valueOf(e.getMessage()).toLowerCase();
+                                ocrListo(token, m.contains("download") ? "{\"error\":\"descargando\"}" : "{\"error\":\"ocr\"}");
+                                img.recycle();
+                            });
+                } catch (Throwable e) {
+                    ocrListo(token, "{\"error\":\"ocr\"}");
+                }
+            });
+        }
+
+        @JavascriptInterface
         public String version() {
             try {
                 return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
@@ -533,6 +587,36 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void abrirUrl(String url) {
             if (url != null && url.startsWith("https://")) runOnUiThread(() -> abrirFuera(Uri.parse(url)));
+        }
+    }
+
+    void ocrListo(String token, String json) {
+        js("pdfolNativo.ocrListo(" + JSONObject.quote(token) + "," + JSONObject.quote(json) + ")");
+    }
+
+    static String jsonOcr(Text texto, int w, int h) {
+        JSONArray lineas = new JSONArray();
+        try {
+            for (Text.TextBlock b : texto.getTextBlocks()) {
+                for (Text.Line l : b.getLines()) {
+                    Point[] c = l.getCornerPoints();
+                    JSONObject o = new JSONObject().put("t", l.getText());
+                    if (c != null && c.length == 4) {
+                        double ang = Math.toDegrees(Math.atan2(c[1].y - c[0].y, c[1].x - c[0].x));
+                        o.put("x", c[0].x).put("y", c[0].y)
+                                .put("w", Math.hypot(c[1].x - c[0].x, c[1].y - c[0].y))
+                                .put("h", Math.hypot(c[3].x - c[0].x, c[3].y - c[0].y))
+                                .put("a", Math.abs(ang) < 1.5 ? 0 : ang);
+                    } else if (l.getBoundingBox() != null) {
+                        o.put("x", l.getBoundingBox().left).put("y", l.getBoundingBox().top)
+                                .put("w", l.getBoundingBox().width()).put("h", l.getBoundingBox().height()).put("a", 0);
+                    } else continue;
+                    lineas.put(o);
+                }
+            }
+            return new JSONObject().put("w", w).put("h", h).put("lineas", lineas).toString();
+        } catch (JSONException e) {
+            return "{\"error\":\"ocr\"}";
         }
     }
 

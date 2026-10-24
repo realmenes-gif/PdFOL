@@ -19,6 +19,17 @@ adb shell am start -W -a android.intent.action.VIEW -d "content://media/external
 sleep 14
 adb exec-out screencap -p > "$OUT/2_documento.png"
 # buscar con el teclado: toca la lupa (arriba a la derecha) no es fiable por coordenadas: se usa la tecla de busqueda
+# pagina escaneada: reconocer texto (OCR)
+adb push android/prueba/escaneado.pdf /sdcard/Download/escaneado.pdf
+adb shell content call --uri content://media --method scan_volume --arg external_primary || true
+sleep 3
+ID2=$(adb shell content query --uri content://media/external/file --projection _id --where "_display_name=\'escaneado.pdf\'" | grep -oE "_id=[0-9]+" | head -1 | cut -d= -f2)
+adb shell am start -W -a android.intent.action.VIEW -d "content://media/external/file/$ID2" -t application/pdf --grant-read-uri-permission -n com.meneses999.pdfol/.MainActivity
+sleep 40
+adb exec-out screencap -p > "$OUT/2b_escaneado.png"
+adb logcat -d | grep -E "PdFOL OCR" | tail -5
+adb shell input keyevent KEYCODE_BACK
+sleep 2
 adb shell input keyevent KEYCODE_BACK
 sleep 3
 adb exec-out screencap -p > "$OUT/3_atras.png"

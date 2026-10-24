@@ -1,8 +1,7 @@
-## PdFOL para Android v1.1 · by Meneses999
+## PdFOL para Android v1.2 · by Meneses999
 
-- **Firmas y sellos**: hasta 5 de cada uno guardados.
-- Firmas y sellos **desde una foto o imagen**: el fondo claro se quita solo y queda transparente.
-- **Lápiz con 5 plumas** (bolígrafo, pluma, plumón, rotulador y fosforito), 10 colores y **opacidad**.
-- Las mismas plumas, colores y opacidad para **dibujar la firma**.
+- **Copiar texto**: elegí el texto (mantené apretado) y tocá «Copiar».
+- **Páginas escaneadas o fotos**: PdFOL reconoce las letras y también se pueden elegir y copiar.
+- Incluye lo de la v1.1: firmas y sellos desde imagen con fondo transparente, plumas y opacidad.
 
-**Descarga:** `PdFOL_Android_v1.1.apk`. Si Android pregunta, permití instalar apps de esta fuente.
+**Descarga:** `PdFOL_Android_v1.2.apk`. Si Android pregunta, permití instalar apps de esta fuente.
