@@ -1,0 +1,47 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.meneses999.pdfol'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'com.meneses999.pdfol'
+        minSdk 30          // Android 11 en adelante
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+    }
+
+    signingConfigs {
+        release {
+            def ks = System.getenv('PDFOL_KEYSTORE')
+            if (ks) {
+                storeFile file(ks)
+                storePassword System.getenv('PDFOL_KS_PASS')
+                keyAlias 'pdfol'
+                keyPassword System.getenv('PDFOL_KS_PASS')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig System.getenv('PDFOL_KEYSTORE') ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    dependenciesInfo {
+        includeInApk false
+        includeInBundle false
+    }
+}

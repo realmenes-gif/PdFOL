@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>PdFOL</title>
+<link rel="stylesheet" href="lib/pdf_viewer.min.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header id="barra">
+  <button id="logo" class="logo" aria-label="Menú de PdFOL">
+    <img src="img/husky.png" alt="" width="34" height="34">
+    <span class="punto" hidden></span>
+    <span class="logo-txt"><b>PdFOL</b> <i id="ver"></i><small>Visor · by Meneses999</small></span>
+  </button>
+  <nav id="acciones"></nav>
+</header>
+
+<div id="fila-pest"><div id="pestanas"></div></div>
+
+<div id="busqueda" hidden>
+  <div class="caja-busq">
+    <svg viewBox="0 0 24 24" class="ico-l"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg>
+    <input id="q" type="search" placeholder="Buscar en el documento" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <span id="q-cuenta"></span>
+  </div>
+  <button class="redondo" id="q-ant" aria-label="Anterior"><svg viewBox="0 0 24 24"><path d="m6 15 6-6 6 6"/></svg></button>
+  <button class="redondo" id="q-sig" aria-label="Siguiente"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+  <button class="redondo" id="q-cerrar" aria-label="Cerrar"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+</div>
+
+<main id="area">
+  <aside id="miniaturas" hidden><div id="minis"></div></aside>
+  <div id="velo-minis" hidden></div>
+  <div id="docs"></div>
+
+  <section id="inicio">
+    <div class="tarjeta-inicio">
+      <img src="img/husky.png" alt="" class="husky-grande">
+      <h1>PdFOL <span id="ver2"></span></h1>
+      <p class="sub">Visor de PDF · buscar, marcar y firmar</p>
+      <button id="btn-abrir-grande" class="primario grande">
+        <svg viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>
+        Abrir PDF
+      </button>
+      <div id="recientes"></div>
+      <p class="credito">by Meneses999</p>
+    </div>
+  </section>
+
+  <div id="indicador" hidden><span id="ind-txt"></span></div>
+  <div id="zoom-fab" hidden>
+    <button class="redondo" id="z-menos" aria-label="Alejar"><svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg></button>
+    <button class="redondo txt" id="z-val">100 %</button>
+    <button class="redondo" id="z-mas" aria-label="Acercar"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  </div>
+</main>
+
+<!-- herramientas de marcar (abajo) -->
+<div id="herr-marcar" class="hoja-abajo" hidden>
+  <div class="seg" id="seg-marcar">
+    <button data-m="texto" class="sel">Resaltar texto</button>
+    <button data-m="libre">Marcador</button>
+    <button data-m="lapiz">Lápiz</button>
+  </div>
+  <div class="fila-herr">
+    <div id="colores" class="colores"></div>
+    <label class="grosor"><span>Grosor</span><input id="grosor" type="range" min="4" max="24" value="12"></label>
+  </div>
+  <div class="fila-herr">
+    <button class="suave" id="m-deshacer"><svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>Deshacer</button>
+    <button class="suave" id="m-rehacer"><svg viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg>Rehacer</button>
+    <button class="suave" id="m-borrar"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Quitar</button>
+    <button class="primario" id="m-listo">Listo</button>
+  </div>
+  <p class="ayuda-marcar" id="ayuda-marcar"></p>
+</div>
+
+<!-- colocar firma (abajo) -->
+<div id="herr-firma" class="hoja-abajo" hidden>
+  <p class="ayuda-marcar">Arrastrá la firma a su lugar. La esquina la agranda o achica.</p>
+  <div class="fila-herr">
+    <button class="suave" id="f-otra"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Otra firma</button>
+    <button class="suave" id="f-quitar"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Quitar</button>
+    <button class="primario" id="f-listo">Listo</button>
+  </div>
+</div>
+
+<!-- capas: menu, hojas y dialogos -->
+<div id="velo" hidden></div>
+<div id="menu" class="menu" hidden></div>
+<div id="dialogo" class="dialogo" hidden></div>
+<div id="toast" hidden></div>
+<input id="archivo" type="file" accept="application/pdf,.pdf" multiple hidden>
+
+<script src="lib/pdf-lib.min.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
