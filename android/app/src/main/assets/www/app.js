@@ -1219,6 +1219,14 @@ window.addEventListener("resize", () => {
   dibujarAcciones();
   const t = tabAct();
   if (t) { $("zoom-fab").hidden = !esAncho(); ubicarFirmas(t); }
+  // al girar el telefono o cambiar el tamaño: «Ajustar al ancho» se vuelve a ajustar
+  clearTimeout(window._tAjuste);
+  window._tAjuste = setTimeout(() => {
+    for (const x of pest) {
+      const v = x.viewer.currentScaleValue;
+      if (v && isNaN(+v)) x.viewer.currentScaleValue = v;
+    }
+  }, 150);
   if (esAncho()) $("velo-minis").hidden = true;
 });
 $("ver").textContent = "v" + VERSION;
