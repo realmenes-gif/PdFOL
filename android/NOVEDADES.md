@@ -4,4 +4,4 @@
 - **Páginas escaneadas o fotos**: PdFOL reconoce las letras y también se pueden elegir y copiar.
 - Incluye lo de la v1.1: firmas y sellos desde imagen con fondo transparente, plumas y opacidad.
 
-**Descarga:** `PdFOL_Android_v1.2.apk`. Si Android pregunta, permití instalar apps de esta fuente.
+**Descarga:** `PdFOL_Android_v1.2.apk` (casi todos los teléfonos). Para teléfonos viejos de 32 bits: `PdFOL_Android_v1.2_32bits.apk`. Si Android pregunta, permití instalar apps de esta fuente.
