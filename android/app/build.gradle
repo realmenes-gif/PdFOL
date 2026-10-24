@@ -12,6 +12,9 @@ android {
         targetSdk 35
         versionCode 3
         versionName '1.2'
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+        }
     }
 
     signingConfigs {
@@ -47,6 +50,6 @@ android {
 }
 
 dependencies {
-    // reconocer texto en paginas escaneadas (el modelo lo baja Google Play Services: el APK sigue liviano)
-    implementation 'com.google.android.gms:play-services-mlkit-text-recognition:19.0.1'
+    // reconocer texto en paginas escaneadas: el modelo va dentro de la app (funciona sin internet y sin Google Play)
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
 }

@@ -40,11 +40,6 @@
             </intent-filter>
         </activity>
 
-        <!-- el modelo para reconocer texto se baja apenas se instala la app -->
-        <meta-data
-            android:name="com.google.mlkit.vision.DEPENDENCIES"
-            android:value="ocr" />
-
         <provider
             android:name=".Archivos"
             android:authorities="com.meneses999.pdfol.archivos"
