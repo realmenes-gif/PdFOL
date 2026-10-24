@@ -1537,7 +1537,11 @@ async function buscarActualizacion(manual) {
     for (const rel of lista) {
       const m = /^android-v(\d+(?:\.\d+)*)$/.exec(rel.tag_name || "");
       if (!m || rel.draft) continue;
-      const apk = (rel.assets || []).find((a) => a.name.endsWith(".apk"));
+      let abi = "";
+      try { abi = AN?.abi ? AN.abi() : ""; } catch (e) { /* nada */ }
+      const apks = (rel.assets || []).filter((a) => a.name.endsWith(".apk"));
+      const de32 = apks.find((a) => /32bits/i.test(a.name)), de64 = apks.find((a) => !/32bits/i.test(a.name));
+      const apk = abi && !abi.startsWith("arm64") && de32 ? de32 : de64 || apks[0];
       if (apk && compararVersion(m[1], VERSION) > 0 && (!mejor || compararVersion(m[1], mejor.version) > 0)) {
         mejor = { version: m[1], url: apk.browser_download_url, notas: rel.body || "" };
       }

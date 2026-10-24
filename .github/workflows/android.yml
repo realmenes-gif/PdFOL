@@ -53,7 +53,12 @@ jobs:
       - name: Armar el APK
         run: |
           gradle -p android assembleRelease --no-daemon --stacktrace
-          cp android/app/build/outputs/apk/release/app-release.apk "PdFOL_Android_v${{ steps.ver.outputs.version }}.apk"
+          d=android/app/build/outputs/apk/release
+          ls -la $d
+          v="${{ steps.ver.outputs.version }}"
+          cp $d/app-arm64-v8a-release.apk "PdFOL_Android_v$v.apk"
+          cp $d/app-armeabi-v7a-release.apk "PdFOL_Android_v${v}_32bits.apk"
+          mkdir -p emulador && cp $d/app-x86_64-release.apk emulador/PdFOL_emulador.apk
           ls -la *.apk
 
       - name: Habilitar KVM (emulador)
@@ -70,7 +75,7 @@ jobs:
           arch: x86_64
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: bash android/prueba/probar.sh "PdFOL_Android_v${{ steps.ver.outputs.version }}.apk" capturas
+          script: bash android/prueba/probar.sh emulador/PdFOL_emulador.apk capturas
 
       - name: Guardar APK y capturas
         if: always()

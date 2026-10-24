@@ -577,6 +577,11 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public String abi() {
+            return android.os.Build.SUPPORTED_ABIS.length > 0 ? android.os.Build.SUPPORTED_ABIS[0] : "";
+        }
+
+        @JavascriptInterface
         public boolean modoOscuro() {
             return modoOscuroSistema();
         }

@@ -12,9 +12,6 @@ android {
         targetSdk 35
         versionCode 3
         versionName '1.2'
-        ndk {
-            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
-        }
     }
 
     signingConfigs {
@@ -36,6 +33,20 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             signingConfig System.getenv('PDFOL_KEYSTORE') ? signingConfigs.release : signingConfigs.debug
         }
+    }
+
+    // un APK por tipo de procesador: cada uno lleva solo lo suyo (el del OCR pesa)
+    splits {
+        abi {
+            enable true
+            reset()
+            include 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+            universalApk false
+        }
+    }
+
+    packaging {
+        jniLibs { useLegacyPackaging true } // comprimidas: el APK baja menos
     }
 
     compileOptions {
