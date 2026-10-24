@@ -1,9 +1,13 @@
 // PdFOL para Android · visor de PDF: buscar, marcar y firmar · by Meneses999
 // Usa pdf.js (dibujo, texto, busqueda y marcas) y pdf-lib (para estampar la firma al guardar).
 
-const VERSION = "1.2";
+const VERSION = "1.3";
 const REPO = "realmenes-gif/PdFOL";
 const CAMBIOS = [
+  ["1.3", [
+    "Elegir texto nuevo y suave: mantené apretado para elegir la palabra y estirá con los tiradores.",
+    "Botón «Todo» para elegir el texto de toda la página.",
+  ]],
   ["1.2", [
     "Copiar texto: elegí el texto (mantené apretado) y tocá «Copiar».",
     "Páginas escaneadas o fotos: PdFOL reconoce las letras y también se pueden elegir y copiar.",
@@ -267,6 +271,7 @@ function dibujarPestanas() {
 
 function activar(i) {
   if (i === act && pest[i]) return;
+  limpiarSel();
   if (modo !== "ver") salirDeModo();
   pest.forEach((t, j) => { t.cont.hidden = j !== i; });
   act = i;
@@ -410,6 +415,7 @@ async function abrirDoc(f, { reemplazar = null } = {}) {
   }
   if (f.persistente && f.uri) anotarReciente(t.nombre, f.uri);
   armarGestos(t);
+  armarSeleccion(t);
   return t;
 }
 
@@ -421,7 +427,7 @@ function conectarEventos(t) {
     actualizarIndicador(); actualizarZoomTxt();
   });
   eventBus.on("pagechanging", () => { if (t === tabAct()) { actualizarIndicador(true); marcarMiniAct(); } });
-  eventBus.on("scalechanging", () => { if (t === tabAct()) actualizarZoomTxt(); ubicarFirmas(t); });
+  eventBus.on("scalechanging", () => { if (t === tabAct()) actualizarZoomTxt(); ubicarFirmas(t); if (sel?.t === t) requestAnimationFrame(dibujarSel); });
   eventBus.on("updateviewarea", () => ubicarFirmas(t));
   eventBus.on("pagerendered", () => ubicarFirmas(t));
   eventBus.on("textlayerrendered", (e) => revisarTextoPagina(t, e.pageNumber));
@@ -746,39 +752,253 @@ $("m-rehacer").onclick = () => accionEditor("redo");
 $("m-borrar").onclick = () => accionEditor("delete");
 $("m-listo").onclick = salirDeModo;
 
-// botones «Copiar» y «Resaltar» cuando hay texto elegido (texto del PDF o reconocido de una imagen)
-function textoElegido() {
-  const s = document.getSelection();
-  if (!s || s.isCollapsed || !s.rangeCount) return null;
-  const n = s.anchorNode?.nodeType === 1 ? s.anchorNode : s.anchorNode?.parentElement;
-  return n?.closest?.(".visor .textLayer") ? s : null;
+// ---------------------------------------------------------------- elegir texto (propio, suave en pantallas tactiles)
+// Mantener apretado elige la palabra; despues se estira con los dos tiradores. Funciona igual con el texto del PDF
+// y con el reconocido de una imagen (OCR). La seleccion del navegador no se usa: en el celular salta de lado a lado.
+let sel = null; // {t, n, s, e, idx}
+const indices = new WeakMap(); // capa de texto -> indice de letras
+
+function indiceDePagina(t, n) {
+  const pv = t.viewer.getPageView(n - 1);
+  const capa = pv?.textLayer?.div;
+  if (!capa) return null;
+  const spans = [...capa.querySelectorAll("span")].filter((s) => s.firstChild?.nodeType === 3 && s.getAttribute("role") !== "img");
+  const prev = indices.get(capa);
+  if (prev && prev.cuantos === spans.length) return prev;
+  const pr = pv.div.getBoundingClientRect();
+  if (!pr.width) return null;
+  const letras = [];
+  const rg = document.createRange();
+  for (const sp of spans) {
+    const nodo = sp.firstChild, txt = nodo.textContent;
+    for (let i = 0; i < txt.length; i++) {
+      rg.setStart(nodo, i); rg.setEnd(nodo, i + 1);
+      const r = rg.getBoundingClientRect();
+      if (!r.width && !r.height) continue;
+      letras.push({ nodo, i, c: txt[i], x0: (r.left - pr.left) / pr.width, x1: (r.right - pr.left) / pr.width,
+        y0: (r.top - pr.top) / pr.height, y1: (r.bottom - pr.top) / pr.height, sp });
+    }
+  }
+  // renglones: letras seguidas a la misma altura
+  const lineas = [];
+  let cur = null;
+  letras.forEach((l, k) => {
+    const cy = (l.y0 + l.y1) / 2, h = l.y1 - l.y0;
+    if (!cur || Math.abs(cy - cur.cy) > 0.55 * Math.max(h, cur.h) || (l.x0 < cur.x1 - 0.02 && l.sp !== letras[k - 1].sp)) {
+      cur = { cy, h, y0: l.y0, y1: l.y1, x1: l.x1, desde: k, hasta: k };
+      lineas.push(cur);
+    } else {
+      cur.hasta = k; cur.y0 = Math.min(cur.y0, l.y0); cur.y1 = Math.max(cur.y1, l.y1); cur.x1 = Math.max(cur.x1, l.x1);
+    }
+    l.linea = lineas.length - 1;
+  });
+  const idx = { cuantos: spans.length, letras, lineas };
+  indices.set(capa, idx);
+  return idx;
 }
-document.addEventListener("selectionchange", () => {
-  const s = textoElegido();
+
+// pagina y punto (en fracciones de la pagina) debajo de un punto de la pantalla
+function paginaEnPunto(t, x, y) {
+  for (const pv of t.viewer._pages || []) {
+    const r = pv.div.getBoundingClientRect();
+    if (y >= r.top && y <= r.bottom && x >= r.left - 20 && x <= r.right + 20) return { n: pv.id, fx: (x - r.left) / r.width, fy: (y - r.top) / r.height, r };
+  }
+  return null;
+}
+// renglon mas cercano en vertical y, dentro de el, el borde entre letras mas cercano (0..letras.length)
+function bordeCercano(idx, fx, fy) {
+  let mejor = null, dmin = Infinity;
+  idx.lineas.forEach((ln) => {
+    const d = fy < ln.y0 ? ln.y0 - fy : fy > ln.y1 ? fy - ln.y1 : 0;
+    if (d < dmin) { dmin = d; mejor = ln; }
+  });
+  if (!mejor) return null;
+  let k = mejor.desde, dx = Infinity;
+  for (let j = mejor.desde; j <= mejor.hasta; j++) {
+    const l = idx.letras[j];
+    const a = Math.abs(fx - l.x0);
+    if (a < dx) { dx = a; k = j; }
+    if (j === mejor.hasta && Math.abs(fx - l.x1) < dx) { dx = Math.abs(fx - l.x1); k = j + 1; }
+  }
+  return k;
+}
+function palabraEn(idx, fx, fy) {
+  let k = -1, dmin = Infinity;
+  idx.letras.forEach((l, j) => {
+    const dx = fx < l.x0 ? l.x0 - fx : fx > l.x1 ? fx - l.x1 : 0, dy = fy < l.y0 ? l.y0 - fy : fy > l.y1 ? fy - l.y1 : 0;
+    const d = dx * dx + dy * dy * 4;
+    if (d < dmin) { dmin = d; k = j; }
+  });
+  if (k < 0 || dmin > 0.0016) return null;
+  const L = idx.letras, esLetra = (j) => L[j] && L[j].linea === L[k].linea && /[\p{L}\p{N}@._\-/:%$#°ºª]/u.test(L[j].c);
+  if (!esLetra(k)) return [k, k + 1];
+  let s = k, e = k + 1;
+  while (esLetra(s - 1)) s--;
+  while (esLetra(e)) e++;
+  return [s, e];
+}
+
+function textoDeSel() {
+  if (!sel) return "";
+  const L = sel.idx.letras;
+  let out = "", linea = null;
+  for (let j = sel.s; j < sel.e; j++) {
+    const l = L[j];
+    if (linea !== null && l.linea !== linea) out = out.replace(/ +$/, "") + "\n";
+    else if (linea !== null && l.sp !== L[j - 1].sp && !/\s$/.test(out) && l.x0 - L[j - 1].x1 > 0.004) out += " ";
+    out += l.c;
+    linea = l.linea;
+  }
+  return out.replace(/[ \t]+\n/g, "\n").trim();
+}
+
+function capaSel(t) {
+  let c = t.cont.querySelector(".capa-sel");
+  if (!c) { c = document.createElement("div"); c.className = "capa-sel"; t.cont.append(c); }
+  return c;
+}
+function dibujarSel(arrastrado = null) {
+  for (const t of pest) if (!sel || sel.t !== t) t.cont.querySelector(".capa-sel")?.replaceChildren();
+  if (!sel) { $("btn-res-sel")?.remove(); return; }
+  const { t, n, s, e, idx } = sel;
+  const pv = t.viewer.getPageView(n - 1);
+  const d = pv.div, W = d.offsetWidth, H = d.offsetHeight, ox = d.offsetLeft, oy = d.offsetTop;
+  const capa = capaSel(t);
+  for (const ch of [...capa.children]) if (ch !== arrastrado) ch.remove();
+  const porLinea = new Map();
+  for (let j = s; j < e; j++) {
+    const l = idx.letras[j];
+    const r = porLinea.get(l.linea) || { x0: 1, x1: 0 };
+    r.x0 = Math.min(r.x0, l.x0); r.x1 = Math.max(r.x1, l.x1);
+    porLinea.set(l.linea, r);
+  }
+  for (const [ln, r] of porLinea) {
+    const L = idx.lineas[ln];
+    const div = document.createElement("div");
+    div.className = "sel-rect";
+    Object.assign(div.style, { left: ox + r.x0 * W + "px", top: oy + L.y0 * H + "px", width: (r.x1 - r.x0) * W + "px", height: (L.y1 - L.y0) * H + "px" });
+    capa.append(div);
+  }
+  const a = idx.letras[s], b = idx.letras[e - 1];
+  const la = idx.lineas[a.linea], lb = idx.lineas[b.linea];
+  for (const [cual, x, y] of [["ini", a.x0, la.y1], ["fin", b.x1, lb.y1]]) {
+    if (arrastrado && arrastrado.dataset.cual === cual) {
+      Object.assign(arrastrado.style, { left: ox + x * W + "px", top: oy + y * H + "px" });
+      arrastrado.className = "sel-tirador arrastrando " + cual;
+      continue;
+    }
+    const h = document.createElement("div");
+    h.className = "sel-tirador " + cual;
+    h.dataset.cual = cual;
+    Object.assign(h.style, { left: ox + x * W + "px", top: oy + y * H + "px" });
+    capa.append(h);
+    tirador(h);
+  }
+  mostrarBarraSel();
+}
+function tirador(h) {
+  let ini = null;
+  h.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault(); ev.stopPropagation();
+    h.setPointerCapture(ev.pointerId);
+    const r = h.getBoundingClientRect();
+    ini = { dx: ev.clientX - (r.left + r.width / 2), dy: ev.clientY - r.top };
+    h.classList.add("arrastrando");
+  });
+  h.addEventListener("pointermove", (ev) => {
+    if (!ini || !sel) return;
+    const { t, n, idx } = sel;
+    const pv = t.viewer.getPageView(n - 1), pr = pv.div.getBoundingClientRect();
+    const cr = t.cont.getBoundingClientRect();
+    if (ev.clientY < cr.top + 48) t.cont.scrollTop -= 10; // cerca del borde: la hoja se mueve sola
+    else if (ev.clientY > cr.bottom - 48) t.cont.scrollTop += 10;
+    // el punto que se busca es la base del renglon, arriba del dedo
+    const ln = idx.lineas[idx.letras[h.dataset.cual === "ini" ? sel.s : sel.e - 1].linea];
+    const px = (ev.clientX - ini.dx - pr.left) / pr.width;
+    const py = (ev.clientY - ini.dy - pr.top) / pr.height - (ln.y1 - ln.y0) / 2;
+    const k = bordeCercano(idx, px, py);
+    if (k === null) return;
+    if (h.dataset.cual === "ini") {
+      if (k < sel.e) sel.s = k; else { sel.s = sel.e - 1; sel.e = k; h.dataset.cual = "fin"; }
+    } else if (k > sel.s) sel.e = k; else { sel.e = sel.s + 1; sel.s = k; h.dataset.cual = "ini"; }
+    if (sel.e <= sel.s) sel.e = sel.s + 1;
+    dibujarSel(h); // el tirador que se arrastra sigue siendo el mismo (no pierde el dedo)
+  });
+  const fin = () => { ini = null; h.classList.remove("arrastrando"); if (sel) dibujarSel(); };
+  h.addEventListener("pointerup", fin);
+  h.addEventListener("pointercancel", fin);
+}
+function limpiarSel() {
+  if (!sel) return;
+  sel = null;
+  dibujarSel();
+}
+
+// mantener apretado sobre el texto: elige la palabra
+function armarSeleccion(t) {
+  const c = t.cont;
+  let toque = null;
+  c.addEventListener("contextmenu", (e) => e.preventDefault());
+  c.addEventListener("pointerdown", (e) => {
+    if (e.target.closest(".sel-tirador, .firma-en-pag, .annotationEditorLayer .selectedEditor")) return;
+    if (!e.isPrimary || (modo === "marcar" && marcarTipo !== "texto") || modo === "firma") return;
+    const x = e.clientX, y = e.clientY;
+    clearTimeout(toque?.timer);
+    toque = { x, y, movio: false, timer: setTimeout(() => elegirPalabra(t, x, y), e.pointerType === "mouse" ? 600 : 450) };
+  });
+  c.addEventListener("pointermove", (e) => {
+    if (toque && Math.hypot(e.clientX - toque.x, e.clientY - toque.y) > 10) { toque.movio = true; clearTimeout(toque.timer); }
+  });
+  const soltar = (e) => {
+    if (!toque) return;
+    clearTimeout(toque.timer);
+    // un toque corto fuera de la seleccion la quita
+    if (!toque.movio && !toque.largo && e.type === "pointerup" && sel && !e.target.closest(".sel-tirador, .barra-sel")) limpiarSel();
+    toque = null;
+  };
+  c.addEventListener("pointerup", soltar);
+  c.addEventListener("pointercancel", (e) => { if (toque) { clearTimeout(toque.timer); toque = null; } });
+  c.addEventListener("scroll", () => { if (toque) { clearTimeout(toque.timer); toque.movio = true; } }, { passive: true });
+  function elegirPalabra(t_, x, y) {
+    if (toque) toque.largo = true;
+    const p = paginaEnPunto(t_, x, y);
+    if (!p) return;
+    const idx = indiceDePagina(t_, p.n);
+    if (!idx || !idx.letras.length) {
+      if (t_.ocr?.[p.n] === "cola" || ocrTrabajando) aviso("Todavía se está reconociendo el texto de esta página…");
+      return;
+    }
+    const w = palabraEn(idx, p.fx, p.fy);
+    if (!w) { limpiarSel(); return; }
+    try { navigator.vibrate?.(12); } catch (e) { /* nada */ }
+    sel = { t: t_, n: p.n, s: w[0], e: w[1], idx };
+    dibujarSel();
+  }
+}
+
+// botones «Copiar» y «Resaltar» mientras hay texto elegido
+function mostrarBarraSel() {
   let b = $("btn-res-sel");
-  if (!s) { b?.remove(); return; }
   if (!b) {
     b = document.createElement("div");
     b.id = "btn-res-sel";
     b.className = "barra-sel";
-    b.innerHTML = `<button class="suave" id="sel-copiar">${svg(ICO.copia)}Copiar</button><button class="primario" id="sel-resaltar">${svg(ICO.marcador)}Resaltar</button>`;
-    b.onpointerdown = (e) => e.preventDefault(); // que no se pierda la seleccion
+    b.innerHTML = `<button class="suave" id="sel-todo">Todo</button><button class="suave" id="sel-copiar">${svg(ICO.copia)}Copiar</button><button class="primario" id="sel-resaltar">${svg(ICO.marcador)}Resaltar</button>`;
     b.querySelector("#sel-copiar").onclick = copiarSeleccion;
     b.querySelector("#sel-resaltar").onclick = resaltarSeleccion;
+    b.querySelector("#sel-todo").onclick = () => { if (sel) { sel.s = 0; sel.e = sel.idx.letras.length; dibujarSel(); } };
     document.body.append(b);
   }
   const abajo = $("herr-marcar").hidden ? 70 : $("herr-marcar").offsetHeight + 16;
   b.style.bottom = abajo + "px";
-});
+}
 async function copiarSeleccion() {
-  const s = textoElegido();
-  if (!s) return;
-  const txt = s.toString().replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  const txt = textoDeSel();
+  if (!txt) return;
   let ok = false;
   try { if (AN && AN.copiar) { AN.copiar(txt); ok = true; } } catch (e) { /* nada */ }
-  if (!ok) { try { await navigator.clipboard.writeText(txt); ok = true; } catch (e) { ok = document.execCommand("copy"); } }
-  s.removeAllRanges();
-  $("btn-res-sel")?.remove();
+  if (!ok) { try { await navigator.clipboard.writeText(txt); ok = true; } catch (e) { ok = false; } }
+  limpiarSel();
   aviso(ok ? "Texto copiado." : "No se pudo copiar.");
 }
 
@@ -859,11 +1079,17 @@ async function reconocerPagina(t, n) {
   });
   if (!datos || datos.error) return datos;
   // a fracciones de la pagina (asi acompaña al zoom)
-  return {
-    lineas: (datos.lineas || []).filter((l) => l.t && l.t.trim()).map((l) => ({
-      t: l.t, x: l.x / datos.w, y: l.y / datos.h, w: l.w / datos.w, h: l.h / datos.h, a: l.a || 0,
-    })),
-  };
+  const lineas = (datos.lineas || []).filter((l) => l.t && l.t.trim()).map((l) => ({
+    t: l.t, x: l.x / datos.w, y: l.y / datos.h, w: l.w / datos.w, h: l.h / datos.h, a: l.a || 0,
+  }));
+  // orden de lectura: por renglones (de arriba hacia abajo) y, en cada renglon, de izquierda a derecha
+  lineas.sort((p, q) => (p.y + p.h / 2) - (q.y + q.h / 2));
+  const renglones = [];
+  for (const l of lineas) {
+    const cy = l.y + l.h / 2, r = renglones[renglones.length - 1];
+    if (r && Math.abs(cy - r.cy) < 0.5 * Math.min(l.h, r.h)) { r.items.push(l); } else renglones.push({ cy, h: l.h, items: [l] });
+  }
+  return { lineas: renglones.flatMap((r) => r.items.sort((p, q) => p.x - q.x)) };
 }
 
 let ctxMedir = null;
@@ -893,14 +1119,22 @@ function ponerCapaOcr(t, n) {
 }
 
 function resaltarSeleccion() {
-  const t = tabAct();
-  $("btn-res-sel")?.remove();
-  if (!t?.uiManager) return;
+  const t = sel?.t;
+  if (!t?.uiManager || !sel) return;
+  // el resaltado de pdf.js toma la seleccion del documento: se arma con las letras elegidas
+  const L = sel.idx.letras, a = L[sel.s], b = L[sel.e - 1];
+  document.body.classList.add("eligiendo");
+  const r = document.createRange();
+  r.setStart(a.nodo, a.i); r.setEnd(b.nodo, b.i + 1);
+  const ds = document.getSelection();
+  ds.removeAllRanges(); ds.addRange(r);
+  limpiarSel();
   const P = pdfjsLib.AnnotationEditorParamsType;
   t.eventBus.dispatch("switchannotationeditorparams", { source: window, type: P.HIGHLIGHT_COLOR, value: COLORES_RES[prefs.colorRes]?.[1] });
   t.uiManager.highlightSelection("main_toolbar");
-  // vuelve al modo en que estaba (asi una nueva seleccion no se resalta sola)
   setTimeout(() => {
+    document.body.classList.remove("eligiendo");
+    document.getSelection().removeAllRanges();
     if (modo === "marcar" && marcarTipo !== "texto") return;
     try { t.viewer.annotationEditorMode = { mode: pdfjsLib.AnnotationEditorType.NONE }; } catch (e) { /* nada */ }
   }, 250);
@@ -1578,6 +1812,7 @@ async function ofrecerActualizacion() {
 // ---------------------------------------------------------------- boton Atras de Android
 window.pdfolAtras = function () {
   if (dialogoAbierto) { dialogoAbierto.alVelo ? dialogoAbierto.alVelo() : cerrarCapas(); return true; }
+  if (sel) { limpiarSel(); return true; }
   if (!$("miniaturas").hidden && !esAncho()) { alternarMinis(); return true; }
   if (!$("busqueda").hidden) { cerrarBusqueda(); return true; }
   if (modo !== "ver") { salirDeModo(); return true; }

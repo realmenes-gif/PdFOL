@@ -331,8 +331,24 @@ button:disabled { opacity: .4; pointer-events: none; }
 .dialogo { overflow-x: hidden; }
 
 /* elegir y copiar texto (el resto de la interfaz no se selecciona) */
-.visor .textLayer, .visor .textLayer span, .visor .textLayer br { -webkit-user-select: text; user-select: text; }
+.visor .textLayer, .visor .textLayer span { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+body.eligiendo .visor .textLayer, body.eligiendo .visor .textLayer span { -webkit-user-select: text; user-select: text; }
+.visor .capa-sel { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 3; }
+.sel-rect { position: absolute; background: rgba(76, 111, 159, .30); border-radius: 2px; pointer-events: none; mix-blend-mode: multiply; }
+:root[data-tema="verde"] .sel-rect { background: rgba(95, 125, 108, .32); }
+.sel-tirador { position: absolute; width: 26px; height: 26px; margin-left: -13px; touch-action: none; z-index: 4; }
+.sel-tirador::before { content: ""; position: absolute; left: 12px; top: -4px; width: 2px; height: 8px; background: var(--acento); }
+.sel-tirador::after { content: ""; position: absolute; left: 3px; top: 4px; width: 20px; height: 20px; border-radius: 50%; background: var(--acento);
+  border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); box-sizing: border-box; }
+.sel-tirador.arrastrando::after { transform: scale(1.15); }
+.sel-tirador::marker { content: none; }
 .barra-sel { position: fixed; z-index: 15; left: 50%; transform: translateX(-50%); display: flex; gap: 8px; padding: 6px;
   background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 14px; box-shadow: var(--sombra); }
 #chip-ocr { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 3; background: var(--tarjeta);
   color: var(--texto2); border: 1px solid var(--borde); border-radius: 14px; padding: 5px 12px; font-size: 12px; box-shadow: var(--sombra); white-space: nowrap; }
+/* tiradores en forma de gota, como los de Android: el de inicio hacia la izquierda y el del final hacia la derecha */
+.sel-tirador::before { display: none; }
+.sel-tirador.ini::after { left: -8px; top: 0; border-radius: 50% 0 50% 50%; }
+.sel-tirador.fin::after { left: 8px; top: 0; border-radius: 0 50% 50% 50%; }
+.sel-tirador.ini { margin-left: -12px; }
+.sel-tirador.fin { margin-left: -8px; }
