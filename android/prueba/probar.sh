@@ -30,7 +30,7 @@ for f in plano girado; do
   adb shell am start -W -a android.intent.action.VIEW -d "content://media/external/file/$IDF" -t application/pdf --grant-read-uri-permission -n com.meneses999.pdfol/.MainActivity
   sleep 12
   adb exec-out screencap -p > "$OUT/6_$f.png"
-  adb shell input swipe 300 900 300 300 120
+  adb shell input swipe 160 520 160 160 120
   sleep 4
   adb exec-out screencap -p > "$OUT/6_${f}_b.png"
 done
