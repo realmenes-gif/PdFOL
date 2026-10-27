@@ -1,9 +1,16 @@
 // PdFOL para Android · visor de PDF: buscar, marcar y firmar · by Meneses999
 // Usa pdf.js (dibujo, texto, busqueda y marcas) y pdf-lib (para estampar la firma al guardar).
 
-const VERSION = "1.3";
+const VERSION = "1.4";
 const REPO = "realmenes-gif/PdFOL";
 const CAMBIOS = [
+  ["1.4", [
+    "Planos mucho más rápidos: las hojas las dibuja el motor de PDF del teléfono, como imagen plana.",
+    "Texto: escribí sobre la hoja (Marcar → Texto), con color y tamaño.",
+    "Firmar pone directo tu última firma o sello; «Cambiar…» para elegir otra.",
+    "Arreglado: deslizar rápido ya no hace zoom sin querer.",
+    "Pdf-lib (para firmar) se carga solo al guardar: la app abre más rápido.",
+  ]],
   ["1.3", [
     "Elegir texto nuevo y suave: mantené apretado para elegir la palabra y estirá con los tiradores.",
     "Botón «Todo» para elegir el texto de toda la página.",
@@ -83,7 +90,7 @@ const PLUMAS = [
 ];
 
 // ---------------------------------------------------------------- preferencias
-const PREF_DEF = { tema: "azul", modo: "auto", noche: false, minis: true, firmas: [], recientes: [], ultimaRevision: 0, colorRes: 0, grosor: 12, nuevaVersion: null, sellos: [],
+const PREF_DEF = { tema: "azul", modo: "auto", noche: false, minis: true, firmas: [], recientes: [], ultimaRevision: 0, colorRes: 0, grosor: 12, nuevaVersion: null, sellos: [], colorTexto: 0, tamTexto: 16, catUlt: "firmas", firmaUlt: null, selloUlt: null,
   plumaLapiz: { pluma: "pluma", color: 0, grosor: 2.5, op: 100 }, plumaFirma: { pluma: "pluma", color: 0, grosor: 2, op: 100 } };
 let prefs = { ...PREF_DEF };
 try { prefs = { ...PREF_DEF, ...JSON.parse(localStorage.getItem("pdfol") || "{}") }; } catch (e) { /* sin almacenamiento */ }
@@ -210,7 +217,7 @@ function accion(k, boton) {
     case "minis": return alternarMinis();
     case "buscar": return alternarBusqueda();
     case "marcar": return modo === "marcar" ? salirDeModo() : entrarMarcar();
-    case "firmar": return modo === "firma" ? salirDeModo() : elegirFirma();
+    case "firmar": return modo === "firma" ? salirDeModo() : firmarRapido();
     case "guardar": return guardar();
     case "compartir": return compartir();
     case "apariencia": return dialogoApariencia();
@@ -344,6 +351,112 @@ window.pdfolNativo = {
 
 const MAX_PIX = Math.min(16777216, Math.round(4096 * 4096 * Math.min(1, (window.devicePixelRatio || 1) / 2.5)) || 16777216);
 
+// ---------------------------------------------------------------- dibujo nativo (motor de PDF de Android)
+// Los planos con miles de lineas son lentos para pdf.js. Si el telefono tiene su motor de PDF, la hoja se
+// dibuja ahi (en C++) y se muestra como imagen plana; pdf.js queda solo para el texto (buscar, copiar, marcar).
+let renderOrig = null;
+const NATIVO = (() => { try { return !!(AN && AN.renderNativo && AN.renderNativo()); } catch (e) { return false; } })();
+const MAX_NATIVO = 8e6; // pixeles de la imagen base de cada hoja (lo que pasa de eso va en un detalle aparte)
+function tareaVacia() { return { promise: Promise.resolve(), cancel() {}, onContinue: null, separateAnnots: false }; }
+function parchearRender(pag) {
+  if (renderOrig) return;
+  const proto = Object.getPrototypeOf(pag);
+  renderOrig = proto.render;
+  proto.render = function (params) {
+    if (this._pdfolNativo && !params?._pdfolPropio) return tareaVacia();
+    return renderOrig.call(this, params);
+  };
+}
+function renderPropio(pag, params) {
+  params._pdfolPropio = true;
+  return (renderOrig || pag.render).call(pag, params);
+}
+function prepararNativo(t) {
+  t.nativo = !!(NATIVO && t.idNativo);
+  t.verNativo = Date.now();
+  const gp = t.pdf.getPage.bind(t.pdf);
+  t.pdf.getPage = async (n) => {
+    const p = await gp(n);
+    parchearRender(p);
+    p._pdfolNativo = t.nativo;
+    return p;
+  };
+}
+function urlNativa(t, n, w, recorte) {
+  let u = `/render/${encodeURIComponent(t.idNativo)}/${n - 1}?w=${w}&v=${t.verNativo}`;
+  if (recorte) u += `&x=${recorte[0]}&y=${recorte[1]}&cw=${recorte[2]}&ch=${recorte[3]}`;
+  return new URL(u, location.href).href;
+}
+function ponerImagenNativa(t, pv) {
+  if (!t.nativo || !pv?.viewport) return;
+  const wrap = pv.div.querySelector(".canvasWrapper");
+  if (!wrap) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = Math.round(pv.viewport.width * dpr), H = Math.round(pv.viewport.height * dpr);
+  const k = Math.min(1, Math.sqrt(MAX_NATIVO / Math.max(1, W * H)), 4096 / Math.max(W, H));
+  const url = urlNativa(t, pv.id, Math.max(1, Math.round(W * k)));
+  const viejo = wrap.querySelector("img.nativa");
+  if (!viejo || viejo.dataset.u !== url) {
+    const img = new Image();
+    img.className = "nativa";
+    img.alt = "";
+    img.decoding = "async";
+    img.dataset.u = url;
+    img.onload = () => {
+      const v = wrap.querySelector("img.nativa");
+      if (v && v !== img) v.replaceWith(img); else if (!img.isConnected) wrap.prepend(img);
+    };
+    img.onerror = () => fallarNativo(t);
+    img.src = url;
+    if (!viejo) wrap.prepend(img); // la primera vez va directo (asi no queda la hoja en blanco)
+  }
+  t.detalleK ||= {};
+  t.detalleK[pv.id] = k < 1 ? [W, H] : null;
+  if (k < 1) programarDetalle(t); else wrap.querySelector("img.detalle")?.remove();
+}
+// zoom alto: la parte que se ve, a resolucion completa
+function programarDetalle(t) {
+  clearTimeout(t.tDetalle);
+  t.tDetalle = setTimeout(() => ponerDetalles(t), 220);
+}
+function ponerDetalles(t) {
+  if (!t.nativo) return;
+  const cr = t.cont.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  for (const pv of t.viewer._pages || []) {
+    const wrap = pv.div.querySelector(".canvasWrapper");
+    const dims = t.detalleK?.[pv.id];
+    if (!wrap) continue;
+    const pr = pv.div.getBoundingClientRect();
+    const x0 = Math.max(cr.left, pr.left), x1 = Math.min(cr.right, pr.right);
+    const y0 = Math.max(cr.top, pr.top), y1 = Math.min(cr.bottom, pr.bottom);
+    let det = wrap.querySelector("img.detalle");
+    if (!dims || x1 <= x0 || y1 <= y0) { det?.remove(); continue; }
+    const [W, H] = dims, sx = W / pr.width, sy = H / pr.height;
+    const rc = [Math.floor((x0 - pr.left) * sx), Math.floor((y0 - pr.top) * sy), Math.ceil((x1 - x0) * sx), Math.ceil((y1 - y0) * sy)];
+    const url = urlNativa(t, pv.id, W, rc);
+    if (det && det.dataset.u === url) continue;
+    const img = new Image();
+    img.className = "detalle";
+    img.alt = "";
+    img.dataset.u = url;
+    Object.assign(img.style, { left: (rc[0] / W * 100) + "%", top: (rc[1] / H * 100) + "%", width: (rc[2] / W * 100) + "%", height: (rc[3] / H * 100) + "%" });
+    img.onload = () => { const v = wrap.querySelector("img.detalle"); if (v && v !== img) v.remove(); if (!img.isConnected) wrap.append(img); };
+    img.src = url;
+  }
+}
+// si el motor del telefono no puede (por ejemplo, un PDF con contraseña), vuelve pdf.js
+async function fallarNativo(t) {
+  if (!t.nativo) return;
+  t.nativo = false;
+  console.warn("PdFOL: dibujo nativo no disponible para este documento; se usa pdf.js");
+  for (let n = 1; n <= t.pdf.numPages; n++) {
+    try { (await t.pdf.getPage(n))._pdfolNativo = false; } catch (e) { /* nada */ }
+  }
+  t.cont.querySelectorAll("img.nativa, img.detalle").forEach((x) => x.remove());
+  try { t.viewer.refresh(); } catch (e) { t.viewer.currentScaleValue = t.viewer.currentScaleValue; }
+}
+
 async function abrirDoc(f, { reemplazar = null } = {}) {
   // si ya esta abierto, se va a su pestana
   if (!reemplazar) {
@@ -360,7 +473,7 @@ async function abrirDoc(f, { reemplazar = null } = {}) {
   const findController = new V.PDFFindController({ eventBus, linkService });
   const viewer = new V.PDFViewer({
     container: cont, viewer: cont.firstElementChild, eventBus, linkService, findController,
-    textLayerMode: 1, removePageBorders: true, maxCanvasPixels: MAX_PIX, enableDetailCanvas: true,
+    textLayerMode: 1, removePageBorders: true, maxCanvasPixels: MAX_PIX, enableDetailCanvas: !(NATIVO && f.idNativo),
     annotationEditorMode: pdfjsLib.AnnotationEditorType.NONE,
     annotationEditorHighlightColors: COLORES_RES.map(([n, c]) => `${n.toLowerCase()}=${c}`).join(","),
     enableHighlightFloatingButton: false, supportsPinchToZoom: true, imageResourcesPath: "lib/images/",
@@ -399,6 +512,7 @@ async function abrirDoc(f, { reemplazar = null } = {}) {
     if (!/destroy/i.test(String(e))) aviso(`No se pudo abrir «${t.nombre}».`);
     return null;
   }
+  prepararNativo(t);
   conectarEventos(t);
   viewer.setDocument(t.pdf);
   linkService.setDocument(t.pdf);
@@ -429,7 +543,7 @@ function conectarEventos(t) {
   eventBus.on("pagechanging", () => { if (t === tabAct()) { actualizarIndicador(true); marcarMiniAct(); } });
   eventBus.on("scalechanging", () => { if (t === tabAct()) actualizarZoomTxt(); ubicarFirmas(t); if (sel?.t === t) requestAnimationFrame(dibujarSel); });
   eventBus.on("updateviewarea", () => ubicarFirmas(t));
-  eventBus.on("pagerendered", () => ubicarFirmas(t));
+  eventBus.on("pagerendered", (e) => { ubicarFirmas(t); ponerImagenNativa(t, e.source); });
   eventBus.on("textlayerrendered", (e) => revisarTextoPagina(t, e.pageNumber));
   eventBus.on("updatefindmatchescount", (e) => cuentaBusqueda(t, e.matchesCount));
   eventBus.on("updatefindcontrolstate", (e) => cuentaBusqueda(t, e.matchesCount, e.state));
@@ -444,6 +558,7 @@ function conectarEventos(t) {
   });
   let tScroll = 0;
   t.cont.addEventListener("scroll", () => {
+    if (t.nativo && t.detalleK && Object.values(t.detalleK).some(Boolean)) programarDetalle(t);
     if (t !== tabAct()) return;
     actualizarIndicador(true);
     clearTimeout(tScroll);
@@ -503,27 +618,31 @@ async function irAPagina() {
 // ---------------------------------------------------------------- gestos: pellizcar, doble toque y dos dedos
 function armarGestos(t) {
   const c = t.cont;
-  let pinza = null, toque = null;
+  let pinza = null, toque = null, previo = null, ultScroll = 0, ultTipo = "touch";
   const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
   const centro = (a, b) => [(a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2];
+  c.addEventListener("scroll", () => { ultScroll = Date.now(); }, { passive: true });
+  c.addEventListener("pointerdown", (e) => { ultTipo = e.pointerType; }, { passive: true });
   c.addEventListener("touchstart", (e) => {
     if (e.touches.length === 2) {
       const [a, b] = e.touches;
-      pinza = { d0: dist(a, b), esc0: t.viewer.currentScale, c0: centro(a, b) };
+      pinza = { d0: dist(a, b), esc0: t.viewer.currentScale, c0: centro(a, b), activa: false };
+      toque = previo = null;
       e.preventDefault();
     } else if (e.touches.length === 1) {
       const p = e.touches[0];
-      const ahora = Date.now();
-      if (modo === "ver" && toque && ahora - toque.t < 300 && Math.hypot(p.clientX - toque.x, p.clientY - toque.y) < 30) {
-        e.preventDefault();
-        dobleToque(t, p.clientX, p.clientY);
-        toque = null;
-      } else {
-        toque = { t: ahora, x: p.clientX, y: p.clientY };
-      }
+      // un toque mientras la hoja todavia se desliza solo la frena: no cuenta como toque
+      toque = { t: Date.now(), x: p.clientX, y: p.clientY, sy: c.scrollTop, sx: c.scrollLeft,
+        movio: Date.now() - ultScroll < 150 };
+    } else {
+      toque = previo = null;
     }
   }, { passive: false });
   c.addEventListener("touchmove", (e) => {
+    if (toque && e.touches.length === 1) {
+      const p = e.touches[0];
+      if (Math.hypot(p.clientX - toque.x, p.clientY - toque.y) > 10) toque.movio = true;
+    }
     if (!pinza || e.touches.length !== 2) return;
     e.preventDefault();
     const [a, b] = e.touches;
@@ -532,19 +651,37 @@ function armarGestos(t) {
     c.scrollLeft -= cen[0] - pinza.c0[0];
     c.scrollTop -= cen[1] - pinza.c0[1];
     pinza.c0 = cen;
-    const objetivo = Math.min(10, Math.max(0.25, pinza.esc0 * dist(a, b) / pinza.d0));
+    const rel = dist(a, b) / pinza.d0;
+    if (!pinza.activa && Math.abs(rel - 1) < 0.06) return; // el zoom empieza solo con un pellizco claro
+    pinza.activa = true;
+    const objetivo = Math.min(10, Math.max(0.25, pinza.esc0 * rel));
     const f = objetivo / t.viewer.currentScale;
     if (Math.abs(f - 1) > 0.015) t.viewer.updateScale({ scaleFactor: f, origin: cen, drawingDelay: 350 });
   }, { passive: false });
-  c.addEventListener("touchend", (e) => { if (e.touches.length < 2) pinza = null; });
-  c.addEventListener("touchcancel", () => { pinza = null; });
-  // con mouse (tablet con teclado o navegador): Ctrl + rueda
+  c.addEventListener("touchend", (e) => {
+    if (e.touches.length < 2) pinza = null;
+    if (!toque || e.touches.length) { if (e.touches.length) toque = null; return; }
+    const ahora = Date.now();
+    const esToque = !toque.movio && ahora - toque.t < 260 && c.scrollTop === toque.sy && c.scrollLeft === toque.sx;
+    if (esToque && modo === "ver" && previo && ahora - previo.t < 320 && Math.hypot(toque.x - previo.x, toque.y - previo.y) < 30) {
+      e.preventDefault();
+      dobleToque(t, toque.x, toque.y);
+      previo = null;
+    } else {
+      previo = esToque ? { t: ahora, x: toque.x, y: toque.y } : null;
+    }
+    toque = null;
+  }, { passive: false });
+  c.addEventListener("touchcancel", () => { pinza = null; toque = previo = null; });
+  // con mouse (tablet con teclado o navegador): Ctrl + rueda y doble clic
   c.addEventListener("wheel", (e) => {
     if (!e.ctrlKey) return;
     e.preventDefault();
     t.viewer.updateScale({ scaleFactor: e.deltaY < 0 ? 1.1 : 1 / 1.1, origin: [e.clientX, e.clientY], drawingDelay: 250 });
   }, { passive: false });
-  c.addEventListener("dblclick", (e) => { if (modo === "ver" && !e.target.closest(".textLayer span")) dobleToque(t, e.clientX, e.clientY); });
+  c.addEventListener("dblclick", (e) => {
+    if (ultTipo === "mouse" && modo === "ver" && !e.target.closest(".textLayer span")) dobleToque(t, e.clientX, e.clientY);
+  });
 }
 function dobleToque(t, x, y) {
   const v = t.viewer;
@@ -604,11 +741,19 @@ async function dibujarMini(t, el) {
     const vp1 = pag.getViewport({ scale: 1 });
     const esc = (110 * Math.min(2, window.devicePixelRatio || 1)) / vp1.width;
     const vp = pag.getViewport({ scale: esc });
-    const cv = document.createElement("canvas");
-    cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
-    await pag.render({ canvas: cv, canvasContext: cv.getContext("2d"), viewport: vp }).promise;
     const hoja = el.querySelector(".hoja");
     hoja.style.height = Math.round(96 * vp.height / vp.width) + "px";
+    if (t.nativo) {
+      const img = new Image();
+      img.alt = "";
+      img.style.cssText = "width:100%;height:100%;display:block";
+      img.src = urlNativa(t, +el.dataset.n, Math.round(vp.width));
+      hoja.append(img);
+      return;
+    }
+    const cv = document.createElement("canvas");
+    cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+    await renderPropio(pag, { canvas: cv, canvasContext: cv.getContext("2d"), viewport: vp }).promise;
     hoja.append(cv);
   } catch (e) { /* pagina dañada: queda en blanco */ }
 }
@@ -691,13 +836,14 @@ function ponerTipoMarca(tipo) {
   marcarTipo = tipo;
   for (const b of $("seg-marcar").children) b.classList.toggle("sel", b.dataset.m === tipo);
   const T = pdfjsLib.AnnotationEditorType, P = pdfjsLib.AnnotationEditorParamsType;
-  const modoPdf = tipo === "lapiz" ? T.INK : tipo === "libre" ? T.HIGHLIGHT : T.NONE;
+  const modoPdf = tipo === "lapiz" ? T.INK : tipo === "libre" ? T.HIGHLIGHT : tipo === "escribir" ? T.FREETEXT : T.NONE;
   try { t.viewer.annotationEditorMode = { mode: modoPdf }; } catch (e) { /* nada */ }
-  t.cont.classList.toggle("dibujando", tipo !== "texto");
+  t.cont.classList.toggle("dibujando", tipo === "lapiz" || tipo === "libre");
   t.cont.classList.toggle("libre", tipo === "libre");
   $("ayuda-marcar").textContent = tipo === "texto"
     ? "Mantené apretado sobre el texto, ajustá la selección y tocá «Resaltar»."
     : tipo === "libre" ? "Pasá el dedo sobre la hoja para marcar. Con dos dedos movés la hoja."
+    : tipo === "escribir" ? "Tocá la hoja donde querés escribir. Tocá el texto para moverlo o cambiarlo."
       : "Dibujá con el dedo. Con dos dedos movés y hacés zoom.";
   dibujarColores();
   aplicarParams();
@@ -716,18 +862,24 @@ function dibujarColores() {
   }
   const c = $("colores");
   c.innerHTML = "";
-  COLORES_RES.forEach(([n, col], i) => {
+  const escribir = marcarTipo === "escribir";
+  (escribir ? COLORES_TINTA.slice(0, 9) : COLORES_RES).forEach(([n, col], i) => {
     const b = document.createElement("button");
-    b.className = "color" + (i === prefs.colorRes ? " sel" : "");
+    b.className = "color" + (i === (escribir ? prefs.colorTexto : prefs.colorRes) ? " sel" : "");
     b.style.background = col;
     b.setAttribute("aria-label", n);
-    b.onclick = () => { prefs.colorRes = i; guardarPrefs(); dibujarColores(); aplicarParams(); };
+    b.onclick = () => { if (escribir) prefs.colorTexto = i; else prefs.colorRes = i; guardarPrefs(); dibujarColores(); aplicarParams(); };
     c.append(b);
   });
-  $("grosor").parentElement.hidden = marcarTipo === "texto";
-  $("grosor").value = prefs.grosor;
+  const g = $("grosor");
+  g.parentElement.hidden = marcarTipo === "texto";
+  g.parentElement.querySelector("span").textContent = escribir ? "Tamaño" : "Grosor";
+  if (escribir) { g.min = 8; g.max = 48; g.value = prefs.tamTexto; } else { g.min = 4; g.max = 24; g.value = prefs.grosor; }
 }
-$("grosor").oninput = () => { prefs.grosor = +$("grosor").value; guardarPrefs(); aplicarParams(); };
+$("grosor").oninput = () => {
+  if (marcarTipo === "escribir") prefs.tamTexto = +$("grosor").value; else prefs.grosor = +$("grosor").value;
+  guardarPrefs(); aplicarParams();
+};
 function aplicarParams() {
   const t = tabAct();
   if (!t) return;
@@ -740,6 +892,9 @@ function aplicarParams() {
       disp(P.INK_COLOR, COLORES_TINTA[pl.color]?.[1] || "#1E2730");
       disp(P.INK_THICKNESS, pl.grosor);
       disp(P.INK_OPACITY, pl.op / 100);
+    } else if (marcarTipo === "escribir") {
+      disp(P.FREETEXT_COLOR, COLORES_TINTA[prefs.colorTexto]?.[1] || "#1E2730");
+      disp(P.FREETEXT_SIZE, prefs.tamTexto);
     } else {
       disp(P.HIGHLIGHT_COLOR, COLORES_RES[prefs.colorRes]?.[1] || "#FFE15C");
       disp(P.HIGHLIGHT_THICKNESS, prefs.grosor);
@@ -1060,6 +1215,15 @@ async function siguienteOcr() {
 }
 
 async function reconocerPagina(t, n) {
+  if (t.nativo && AN?.ocrNativo) {
+    const datos = await new Promise((resolve) => {
+      const token = "o" + Date.now() + Math.random().toString(36).slice(2, 7);
+      ocrPend.set(token, (json) => { try { resolve(JSON.parse(json)); } catch (e) { resolve(null); } });
+      AN.ocrNativo(token, t.idNativo, n - 1);
+    });
+    if (datos && !datos.error) return ordenarOcr(datos);
+    if (datos?.error === "descargando") return datos;
+  }
   const pag = await t.pdf.getPage(n);
   const vp1 = pag.getViewport({ scale: 1 });
   const esc = Math.min(4, 2400 / Math.max(vp1.width, vp1.height));
@@ -1068,7 +1232,7 @@ async function reconocerPagina(t, n) {
   cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
   const ctx = cv.getContext("2d");
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, cv.width, cv.height);
-  await pag.render({ canvas: cv, canvasContext: ctx, viewport: vp, annotationMode: pdfjsLib.AnnotationMode.DISABLE }).promise;
+  await renderPropio(pag, { canvas: cv, canvasContext: ctx, viewport: vp, annotationMode: pdfjsLib.AnnotationMode.DISABLE }).promise;
   const jpg = cv.toDataURL("image/jpeg", 0.9);
   cv.width = cv.height = 0;
   const datos = await new Promise((resolve) => {
@@ -1078,6 +1242,9 @@ async function reconocerPagina(t, n) {
     AN.ocr(token, jpg.slice(jpg.indexOf(",") + 1));
   });
   if (!datos || datos.error) return datos;
+  return ordenarOcr(datos);
+}
+function ordenarOcr(datos) {
   // a fracciones de la pagina (asi acompaña al zoom)
   const lineas = (datos.lineas || []).filter((l) => l.t && l.t.trim()).map((l) => ({
     t: l.t, x: l.x / datos.w, y: l.y / datos.h, w: l.w / datos.w, h: l.h / datos.h, a: l.a || 0,
@@ -1199,7 +1366,7 @@ async function elegirFirma(cat = catFirma) {
   const l = listaDe(cat);
   const html = `<div class="seg" id="seg-cat" style="margin-bottom:12px"><button data-c="firmas" class="${cat === "firmas" ? "sel" : ""}">Firmas</button><button data-c="sellos" class="${cat === "sellos" ? "sel" : ""}">Sellos</button></div>
     <p class="cuenta-g">${l.length ? `Tocá ${cat === "sellos" ? "un sello" : "una firma"} para ponerla. Guardadas: ${l.length} de ${MAX_GUARDADAS}.` : `Todavía no tenés ${cat} guardados/as.`}</p>
-    <div class="firmas-guardadas">${l.map((f, i) => `<button class="firma-g" data-i="${i}">${muestra(f)}<span class="x" data-borrar="${i}">${svg(ICO.cerrar)}</span></button>`).join("")}</div>
+    <div class="firmas-guardadas">${l.map((f, i) => `<button class="firma-g${f.id === (cat === "sellos" ? prefs.selloUlt : prefs.firmaUlt) ? " ult" : ""}" data-i="${i}">${muestra(f)}<span class="x" data-borrar="${i}">${svg(ICO.cerrar)}</span></button>`).join("")}</div>
     <div class="fila-herr"><button class="suave" id="g-dibujar">${svg(ICO.firma)}Dibujar</button><button class="suave" id="g-imagen">${svg('<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-8 8"/>')}Desde imagen</button></div>`;
   const r = await dialogo({
     titulo: "Firmar", html, botones: [["no", "Cerrar"]],
@@ -1447,7 +1614,24 @@ async function firmaDesdeImagen(cat = "firmas") {
 }
 
 // firma sobre la pagina: posicion en fracciones de la pagina (asi acompaña al zoom)
+// v1.4: Firmar pone directo la ultima firma (o sello) que usaste; «Cambiar…» abre la lista
+function ultimaDe(cat) {
+  const l = listaDe(cat);
+  const id = cat === "sellos" ? prefs.selloUlt : prefs.firmaUlt;
+  return l.find((x) => x.id === id) || l[0] || null;
+}
+function firmarRapido(cat = prefs.catUlt || "firmas") {
+  const t = tabAct();
+  if (!t) return;
+  const f = ultimaDe(cat) || ultimaDe(cat === "sellos" ? "firmas" : "sellos");
+  if (!f) return elegirFirma(cat);
+  ponerFirma(t, f, ultimaDe(cat) ? cat : (cat === "sellos" ? "firmas" : "sellos"));
+  aviso("Tu última " + (cat === "sellos" ? "imagen de sello" : "firma") + ". «Cambiar…» para elegir otra.", 2600);
+}
 function ponerFirma(t, f, cat = "firmas") {
+  prefs.catUlt = cat;
+  if (cat === "sellos") prefs.selloUlt = f.id; else prefs.firmaUlt = f.id;
+  guardarPrefs();
   const n = t.viewer.currentPageNumber;
   const pv = t.viewer.getPageView(n - 1);
   if (!pv) return;
@@ -1543,7 +1727,22 @@ $("f-quitar").onclick = () => {
   if (!t.firmas.length && !t.editado) marcarModificado(t, false);
 };
 $("f-otra").onclick = () => { const t = tabAct(); if (t) { editarFirma(t, null); elegirFirma(); } };
+$("f-mas-firma").onclick = () => { const t = tabAct(); if (t) { editarFirma(t, null); firmarRapido("firmas"); } };
+$("f-mas-sello").onclick = () => { const t = tabAct(); if (t) { editarFirma(t, null); firmarRapido("sellos"); } };
 
+// pdf-lib (para estampar firmas y sellos) se carga recien al guardar con firma: la app abre mas rapido
+let promesaPdfLib = null;
+function cargarPdfLib() {
+  if (window.PDFLib) return Promise.resolve(window.PDFLib);
+  promesaPdfLib ||= new Promise((res, rej) => {
+    const sc = document.createElement("script");
+    sc.src = "lib/pdf-lib.min.js";
+    sc.onload = () => res(window.PDFLib);
+    sc.onerror = () => { promesaPdfLib = null; rej(new Error("No se pudo cargar pdf-lib")); };
+    document.head.append(sc);
+  });
+  return promesaPdfLib;
+}
 async function pngDe(src) {
   const img = await cargarImagen(src);
   const cv = document.createElement("canvas");
@@ -1554,7 +1753,7 @@ async function pngDe(src) {
 }
 // estampa firmas y sellos en el PDF (los dibujados quedan vectoriales, nitidos a cualquier zoom)
 async function estamparFirmas(t, datos) {
-  const L = window.PDFLib;
+  const L = await cargarPdfLib();
   const doc = await L.PDFDocument.load(datos, { updateMetadata: false });
   for (const fi of t.firmas) {
     const pag = await t.pdf.getPage(fi.pag);

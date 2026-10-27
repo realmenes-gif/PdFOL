@@ -12,7 +12,11 @@ import android.content.ClipboardManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Matrix;
 import android.graphics.Point;
+import android.graphics.pdf.PdfRenderer;
+import android.os.ParcelFileDescriptor;
+import java.io.ByteArrayOutputStream;
 import android.graphics.Color;
 import android.graphics.ColorFilter;
 import android.graphics.Insets;
@@ -210,6 +214,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        cerrarMotores();
         hilo.shutdown();
         hiloOcr.shutdown();
         if (reconocedor != null) reconocedor.close();
@@ -240,6 +245,7 @@ public class MainActivity extends Activity {
                 String a = p.substring(1);
                 return new WebResourceResponse(tipo(a), null, 200, "OK", cab, getAssets().open(a));
             }
+            if (p.startsWith("/render/")) return dibujarPagina(u, cab);
             if (p.startsWith("/doc/")) {
                 Doc d;
                 synchronized (docs) { d = docs.get(u.getLastPathSegment()); }
@@ -251,6 +257,105 @@ public class MainActivity extends Activity {
             }
         } catch (Exception e) { /* no existe o sin permiso */ }
         return new WebResourceResponse("text/plain", "utf-8", 404, "Not Found", cab, null);
+    }
+
+    // ------------------------------------------------------------------ motor de PDF del telefono (PdfRenderer)
+    // Dibuja las hojas en C++ (mucho mas rapido que pdf.js con planos llenos de lineas) como imagen plana.
+    static class Motor {
+        PdfRenderer r;
+        ParcelFileDescriptor pfd;
+        File copia;
+    }
+
+    final Map<String, Motor> motores = new HashMap<>();
+
+    PdfRenderer motor(String id) throws IOException {
+        Motor m = motores.get(id);
+        if (m != null) return m.r;
+        Doc d;
+        synchronized (docs) { d = docs.get(id); }
+        if (d == null) throw new IOException("sin documento");
+        m = new Motor();
+        try {
+            m.pfd = getContentResolver().openFileDescriptor(d.uri, "r");
+            m.r = new PdfRenderer(m.pfd);
+        } catch (Exception e) { // algunos proveedores no dejan saltar dentro del archivo: se copia a la cache
+            try { if (m.pfd != null) m.pfd.close(); } catch (IOException ignorada) { /* nada */ }
+            File dir = new File(getCacheDir(), "motor");
+            dir.mkdirs();
+            m.copia = new File(dir, id.replaceAll("[^a-zA-Z0-9]", "") + ".pdf");
+            try (InputStream in = getContentResolver().openInputStream(d.uri);
+                 OutputStream out = new FileOutputStream(m.copia)) {
+                if (in == null) throw new IOException("sin datos");
+                byte[] buf = new byte[256 * 1024];
+                int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            }
+            m.pfd = ParcelFileDescriptor.open(m.copia, ParcelFileDescriptor.MODE_READ_ONLY);
+            m.r = new PdfRenderer(m.pfd); // con contraseña falla: la pagina vuelve a pdf.js
+        }
+        motores.put(id, m);
+        return m.r;
+    }
+
+    void cerrarMotor(String id) {
+        synchronized (motores) {
+            Motor m = motores.remove(id);
+            if (m == null) return;
+            try { m.r.close(); } catch (Exception e) { /* nada */ }
+            try { m.pfd.close(); } catch (Exception e) { /* nada */ }
+            if (m.copia != null) m.copia.delete();
+        }
+    }
+
+    void cerrarMotores() {
+        for (String id : new ArrayList<>(motores.keySet())) cerrarMotor(id);
+    }
+
+    static int num(Uri u, String k, int def) {
+        try { return Integer.parseInt(u.getQueryParameter(k)); } catch (Exception e) { return def; }
+    }
+
+    WebResourceResponse dibujarPagina(Uri u, Map<String, String> cab) {
+        List<String> seg = u.getPathSegments();
+        if (seg.size() < 3) return null;
+        String id = seg.get(1);
+        int pag = Integer.parseInt(seg.get(2));
+        int w = Math.max(1, Math.min(8192, num(u, "w", 1000)));
+        int cw = num(u, "cw", 0), ch = num(u, "ch", 0), x = num(u, "x", 0), y = num(u, "y", 0);
+        Bitmap bm;
+        long t0 = System.currentTimeMillis();
+        try {
+            synchronized (motores) {
+                PdfRenderer r = motor(id);
+                if (pag < 0 || pag >= r.getPageCount()) return null;
+                PdfRenderer.Page pg = r.openPage(pag);
+                float pw = pg.getWidth(), ph = pg.getHeight();
+                int h = Math.max(1, Math.round(w * ph / pw));
+                Matrix mt = new Matrix();
+                mt.setScale(w / pw, h / ph);
+                if (cw > 0 && ch > 0) {
+                    cw = Math.min(cw, 4096);
+                    ch = Math.min(ch, 4096);
+                    bm = Bitmap.createBitmap(cw, ch, Bitmap.Config.ARGB_8888);
+                    mt.postTranslate(-x, -y);
+                } else {
+                    bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                }
+                bm.eraseColor(Color.WHITE);
+                pg.render(bm, null, mt, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+                pg.close();
+            }
+        } catch (Throwable e) {
+            Log.w("PdFOL", "motor nativo: " + e);
+            return new WebResourceResponse("text/plain", "utf-8", 500, "Error", cab, null);
+        }
+        ByteArrayOutputStream o = new ByteArrayOutputStream();
+        bm.compress(Bitmap.CompressFormat.JPEG, 90, o);
+        Log.i("PdFOL", "pagina " + (pag + 1) + " " + bm.getWidth() + "x" + bm.getHeight() + " en " + (System.currentTimeMillis() - t0) + " ms");
+        bm.recycle();
+        cab.put("Cache-Control", "max-age=600");
+        return new WebResourceResponse("image/jpeg", null, 200, "OK", cab, new java.io.ByteArrayInputStream(o.toByteArray()));
     }
 
     static String tipo(String a) {
@@ -403,6 +508,7 @@ public class MainActivity extends Activity {
             synchronized (docs) { d = docs.get(idDoc); }
             if (d == null) { resultado(token, false, "sinpermiso", null); return; }
             try {
+                cerrarMotor(d.id); // el archivo cambio: el motor lo vuelve a abrir
                 copiar(f, d.uri);
                 File g = new File(f.getPath());
                 d.tam = g.length();
@@ -574,6 +680,50 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
                 return "";
             }
+        }
+
+        @JavascriptInterface
+        public boolean renderNativo() {
+            return true;
+        }
+
+        // reconoce el texto de una pagina (la dibuja el motor nativo, sin pasar la imagen por la pagina web)
+        @JavascriptInterface
+        public void ocrNativo(String token, String idDoc, int pag) {
+            hiloOcr.execute(() -> {
+                Bitmap bm = null;
+                try {
+                    synchronized (motores) {
+                        PdfRenderer r = motor(idDoc);
+                        PdfRenderer.Page pg = r.openPage(pag);
+                        float esc = 2400f / Math.max(pg.getWidth(), pg.getHeight());
+                        int w = Math.max(1, Math.round(pg.getWidth() * esc)), h = Math.max(1, Math.round(pg.getHeight() * esc));
+                        bm = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                        bm.eraseColor(Color.WHITE);
+                        pg.render(bm, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+                        pg.close();
+                    }
+                } catch (Throwable e) {
+                    Log.w("PdFOL", "OCR nativo: " + e);
+                    ocrListo(token, "{\"error\":\"nativo\"}");
+                    return;
+                }
+                final Bitmap img = bm;
+                try {
+                    if (reconocedor == null) reconocedor = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
+                    reconocedor.process(InputImage.fromBitmap(img, 0))
+                            .addOnSuccessListener(texto -> {
+                                ocrListo(token, jsonOcr(texto, img.getWidth(), img.getHeight()));
+                                img.recycle();
+                            })
+                            .addOnFailureListener(e -> {
+                                ocrListo(token, "{\"error\":\"ocr\"}");
+                                img.recycle();
+                            });
+                } catch (Throwable e) {
+                    ocrListo(token, "{\"error\":\"ocr\"}");
+                }
+            });
         }
 
         @JavascriptInterface

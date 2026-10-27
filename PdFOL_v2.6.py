@@ -352,12 +352,18 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v2.5"
-VERSION_INTERNA = "2.5"
+VERSION = "v2.6"
+VERSION_INTERNA = "2.6"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v2.6", [
+        "Firmar y sellar: hasta 5 firmas y 5 sellos desde imagen; el fondo blanco se quita solo y queda transparente.",
+        "Se usa por defecto la última firma y el último sello que usaste. Se mueven y se cambia el tamaño con el mouse.",
+        "Texto: escribí texto nuevo sobre la hoja, o cambiá un texto que ya está en el PDF.",
+        "Más liviano: fuera librerías que no se usaban; el proceso de buscar arranca después, así abre más rápido.",
+    ]),
     ("v2.5", [
         "PdFOL abre más rápido: la ventana aparece antes y lo que no se ve se arma después.",
         "Al abrir otro documento (también con doble clic en el Explorador) ya no queda la hoja del anterior.",
@@ -2444,6 +2450,8 @@ ICONOS = [  # clave, titulo, color del icono, grupo, texto corto (barra de arrib
     ("organizar", "Organizar y unir", "#06B6D4", 0, "Organizar"),
     ("imprimir", "Imprimir", "#6366F1", 0, "Imprimir"),
     ("comparar", "Comparar", "#0D9488", 0, "Comparar"),
+    ("firmar", "Firmar y sellar", "#7C3AED", 0, "Firmar"),
+    ("texto", "Texto", "#0284C7", 0, "Texto"),
     ("aplanar", "Aplanar", "#8B5CF6", 1, "Aplanar"),
     ("foliar", "Foliar", "#F59E0B", 1, "Foliar"),
     ("comprimir", "Comprimir", "#10B981", 1, "Comprimir"),
@@ -2452,7 +2460,7 @@ ICONOS = [  # clave, titulo, color del icono, grupo, texto corto (barra de arrib
 ]
 ACCIONES = {"abrir"}                 # botones que no son una pagina (hacen algo)
 PROXIMAMENTE = {}  # botones que todavia no hacen nada (ninguno)
-EN_PANEL = {"aplanar", "foliar", "comprimir"}  # se abren en el panel derecho, junto al documento
+EN_PANEL = {"aplanar", "foliar", "comprimir", "firmar", "texto"}  # se abren en el panel derecho, junto al documento
 COLORES_FOLIO = [
     ("Negro", (0, 0, 0)), ("Grafito", (64, 72, 84)), ("Azul", (0, 70, 200)),
     ("Azul marino", (18, 40, 100)), ("Rojo", (200, 0, 0)), ("Vino", (128, 20, 40)),
@@ -2569,6 +2577,16 @@ def _icono(clave, color, tam=30, escala=4):
     elif clave == "apariencia":
         d.ellipse([7.5 * s, 7.5 * s, 22.5 * s, 22.5 * s], outline=w, width=lw)
         d.pieslice([7.5 * s, 7.5 * s, 22.5 * s, 22.5 * s], 90, 270, fill=w)
+    elif clave == "firmar":  # firma sobre una raya
+        d.line([(6 * s, 23 * s), (24 * s, 23 * s)], fill=w, width=max(1, lw - 1))
+        d.line([(6.5 * s, 18.5 * s), (8.5 * s, 10 * s), (10.5 * s, 17.5 * s), (13 * s, 9 * s), (15 * s, 17 * s),
+                (17.5 * s, 12.5 * s), (19.5 * s, 16.5 * s), (23.5 * s, 13.5 * s)], fill=w, width=lw, joint="curve")
+    elif clave == "texto":  # T con cursor
+        d.line([(7 * s, 8 * s), (19 * s, 8 * s)], fill=w, width=lw + 1)
+        d.line([(13 * s, 8 * s), (13 * s, 23 * s)], fill=w, width=lw + 1)
+        d.line([(22.5 * s, 11 * s), (22.5 * s, 23 * s)], fill=w, width=max(1, lw - 1))
+        d.line([(20.5 * s, 11 * s), (24.5 * s, 11 * s)], fill=w, width=max(1, lw - 1))
+        d.line([(20.5 * s, 23 * s), (24.5 * s, 23 * s)], fill=w, width=max(1, lw - 1))
     elif clave == "abrir":  # carpeta
         d.polygon([(6 * s, 9 * s), (12 * s, 9 * s), (14 * s, 11 * s), (24 * s, 11 * s), (24 * s, 22.5 * s),
                    (6 * s, 22.5 * s)], outline=w, width=lw)
@@ -2644,6 +2662,61 @@ def icono_husky(tam=64):
     import base64
     img = Image.open(io.BytesIO(base64.b64decode(ICONO_PNG_B64))).convert("RGBA")
     return img.resize((tam, tam), Image.LANCZOS) if img.size != (tam, tam) else img
+
+
+# ---------------------------------------------------------------- v2.6: firmas, sellos y texto
+MAX_FIRMAS = 5
+FUENTES_TEXTO = {"Helvetica": ("helv", "hebo"), "Times": ("tiro", "tibo"), "Courier": ("cour", "cobo")}
+
+
+def carpeta_firmas():
+    d_ = os.path.join(_carpeta_config(), "PdFOL_firmas")
+    os.makedirs(d_, exist_ok=True)
+    return d_
+
+
+def quitar_fondo_imagen(img, quitar=True, intensidad=50):
+    """Firma o sello desde una foto: el papel (fondo claro) queda transparente y se recorta a lo dibujado.
+    Busca el color del papel por zonas, asi las sombras de la foto no molestan."""
+    from PIL import ImageFilter
+    img = img.convert("RGBA")
+    k = min(1.0, 1400 / max(img.size))
+    if k < 1:
+        img = img.resize((max(1, round(img.width * k)), max(1, round(img.height * k))), Image.LANCZOS)
+    if quitar:
+        rgb = img.convert("RGB")
+        w, h = rgb.size
+        B = max(8, round(max(w, h) / 36))
+        peq = rgb.resize((max(1, -(-w // B)), max(1, -(-h // B))), Image.BOX)
+        for _ in range(2):  # el papel: lo mas claro de los vecinos (los bloques llenos de tinta no cuentan)
+            peq = peq.filter(ImageFilter.MaxFilter(3))
+        fondo = peq.resize((w, h), Image.BILINEAR)
+        r_, g_, b_ = ImageChops.subtract(fondo, rgb).split()
+        dist = ImageChops.lighter(ImageChops.lighter(r_, g_), b_)
+        t0 = 12 + (100 - intensidad) * 0.45
+        t1 = t0 + 40
+        alfa = dist.point(lambda v: 0 if v <= t0 else 255 if v >= t1 else int((v - t0) * 255 / (t1 - t0)))
+        alfa = ImageChops.multiply(alfa, img.getchannel("A"))
+        img = rgb.copy()
+        img.putalpha(alfa)
+    caja = img.getchannel("A").point(lambda v: 255 if v > 24 else 0).getbbox()
+    if not caja:
+        return None
+    m_ = 4
+    caja = (max(0, caja[0] - m_), max(0, caja[1] - m_), min(img.width, caja[2] + m_), min(img.height, caja[3] + m_))
+    return img.crop(caja)
+
+
+def fuente_parecida(flags, nombre):
+    """Fuente base del PDF que mas se parece a la del texto original (para «Cambiar texto»)."""
+    n_ = (nombre or "").lower()
+    negrita = bool(flags & 16) or "bold" in n_ or "black" in n_ or "heavy" in n_
+    cursiva = bool(flags & 2) or "italic" in n_ or "oblique" in n_
+    if flags & 8 or "courier" in n_ or "mono" in n_ or "consol" in n_:
+        return {(0, 0): "cour", (1, 0): "cobo", (0, 1): "coit", (1, 1): "cobi"}[(int(negrita), int(cursiva))]
+    if flags & 4 or "times" in n_ or "serif" in n_ and "sans" not in n_ or "roman" in n_ or "georgia" in n_:
+        return {(0, 0): "tiro", (1, 0): "tibo", (0, 1): "tiit", (1, 1): "tibi"}[(int(negrita), int(cursiva))]
+    return {(0, 0): "helv", (1, 0): "hebo", (0, 1): "heit", (1, 1): "hebi"}[(int(negrita), int(cursiva))]
 
 
 def ruta_icono_ico():
@@ -2842,7 +2915,7 @@ def iniciar_interfaz():
     # v2.5: los procesos que dibujan las paginas arrancan ya, mientras se arma la ventana (usan otros nucleos)
     q_pag, q_min, q_bus, q_sal = mp.Queue(), mp.Queue(), mp.Queue(), mp.Queue()
     procs_inicio = []
-    for q_, f_ in ((q_pag, _proceso_render), (q_min, _proceso_render), (q_bus, _proceso_buscar)):
+    for q_, f_ in ((q_pag, _proceso_render), (q_min, _proceso_render)):  # v2.6: el de buscar, despues
         try:
             pr_ = mp.Process(target=f_, args=(q_, q_sal), daemon=True)
             pr_.start()
@@ -3224,7 +3297,7 @@ def iniciar_interfaz():
 
     # ================================================== COMPONENTES
     def pagina_nueva(clave):
-        en_panel = clave in ("aplanar", "foliar", "comprimir")
+        en_panel = clave in EN_PANEL
         p = ctk.CTkScrollableFrame(panel_der if en_panel else contenido, fg_color=C["fondo"], corner_radius=0,
                                    scrollbar_button_color=C["suave_h"], scrollbar_button_hover_color=C["borde"])
         p.grid_columnconfigure(0, weight=1)
@@ -3689,6 +3762,75 @@ def iniciar_interfaz():
         for n_, b_ in botones_tema.items():
             b_.configure(border_color=C["acento"] if n_ == V["apariencia"].get() else C["tarjeta"])
     por_armar["apariencia"] = _armar_apariencia
+
+    # ================================================== v2.6: PANEL FIRMAR Y SELLAR
+    v_fcat = tk.StringVar(value="Firmas")
+    caja_firmas = None
+    b_agregar_firma = None
+    v_firma_info = tk.StringVar(value="")
+
+    def _armar_firmar():
+        nonlocal caja_firmas, b_agregar_firma
+        p = pagina_nueva("firmar")
+        t = Tarjeta(p, 0)
+        seg_ = segmentado(t, ["Firmas", "Sellos"], v_fcat, ancho=200, cmd=lambda _v: dibujar_firmas_panel())
+        t.fila("Elegí", seg_)
+        seccion(p, "Guardadas", 1)
+        t = Tarjeta(p, 2)
+        caja_firmas = ctk.CTkFrame(t, fg_color="transparent")
+        caja_firmas.grid(row=0, column=0, columnspan=2, sticky="ew", padx=14, pady=(12, 6))
+        b_agregar_firma = boton(t, "Agregar desde imagen…", primario=True, ancho=200,
+                                command=lambda: agregar_firma_dialogo())
+        b_agregar_firma.grid(row=1, column=0, columnspan=2, sticky="w", padx=14, pady=(4, 14))
+        ctk.CTkLabel(p, textvariable=v_firma_info, font=F(11), text_color=C["texto2"], anchor="w", justify="left",
+                     wraplength=440).grid(row=3, column=0, sticky="ew", padx=18, pady=(8, 4))
+        ctk.CTkLabel(p, text="Cómo se usa: hacé clic en la hoja donde va. Arrastrala para moverla y tirá de la "
+                             "esquina para cambiar el tamaño. Clic derecho o Supr la quita. «Guardar cambios» "
+                             "(arriba) la deja fija en el PDF.\n\nEs una firma en imagen, no un certificado digital.",
+                     font=F(11), text_color=C["texto2"], anchor="w", justify="left", wraplength=440).grid(
+            row=4, column=0, sticky="ew", padx=18, pady=(4, 20))
+        dibujar_firmas_panel()
+
+    por_armar["firmar"] = _armar_firmar
+
+    # ================================================== v2.6: PANEL TEXTO
+    v_tmodo = tk.StringVar(value="Agregar")
+    v_tfuente = tk.StringVar(value=almacen.datos.get("texto_fuente", "Helvetica"))
+    v_tneg = tk.BooleanVar(value=bool(almacen.datos.get("texto_negrita", False)))
+    v_ttam = tk.StringVar(value=str(almacen.datos.get("texto_tam", 12)))
+    texto_col = {"rgb": tuple(almacen.datos.get("texto_color", (0, 0, 0))), "puntos": []}
+    v_texto_ayuda = tk.StringVar(value="")
+
+    def _armar_texto():
+        p = pagina_nueva("texto")
+        t = Tarjeta(p, 0)
+        t.fila("Qué hacer", segmentado(t, ["Agregar", "Cambiar"], v_tmodo, ancho=200, cmd=lambda _v: ayuda_texto()))
+        ctk.CTkLabel(p, textvariable=v_texto_ayuda, font=F(11), text_color=C["texto2"], anchor="w", justify="left",
+                     wraplength=440).grid(row=1, column=0, sticky="ew", padx=18, pady=(4, 6))
+        seccion(p, "Letra", 2)
+        t = Tarjeta(p, 3)
+        t.fila("Fuente", menu(t, list(FUENTES_TEXTO), v_tfuente, 150, cmd=lambda _v: estilo_texto_cambio()))
+        t.fila("Negrita", switch(t, v_tneg))
+        t.fila("Tamaño (pt)", Contador(t, v_ttam, 4, 144, ancho=50, decimales=True))
+        caja_c = ctk.CTkFrame(t, fg_color="transparent")
+        texto_col["puntos"] = []
+        for _n, rgb in COLORES_FOLIO:
+            hx = "#%02x%02x%02x" % rgb
+            b_ = ctk.CTkButton(caja_c, text="", width=22, height=22, corner_radius=11, fg_color=hx, hover_color=hx,
+                               border_width=0, border_color=C["acento"], command=lambda c_=rgb: color_texto(c_))
+            b_.pack(side="left", padx=3)
+            texto_col["puntos"].append((b_, rgb))
+        t.fila("Color", caja_c, abajo=True)
+        ctk.CTkLabel(p, text="«Cambiar» usa la letra estándar más parecida a la original (las fuentes de adentro del "
+                             "PDF no siempre se pueden reutilizar). Nada se escribe en el PDF hasta «Guardar cambios».",
+                     font=F(11), text_color=C["texto2"], anchor="w", justify="left", wraplength=440).grid(
+            row=4, column=0, sticky="ew", padx=18, pady=(10, 20))
+        color_texto(texto_col["rgb"], aplicar=False)
+        ayuda_texto()
+
+    por_armar["texto"] = _armar_texto
+    for v_ in (v_tneg, v_ttam):
+        v_.trace_add("write", lambda *_: estilo_texto_cambio())
 
     # ================================================== PAGINA: ORGANIZAR
     # Miniaturas livianas: se dibujan solo las que se ven (y algunas mas), en un hilo aparte,
@@ -4947,8 +5089,23 @@ def iniciar_interfaz():
            "busq": None, "nbusq": 0, "res": {}, "res_pila": [], "modo_res": False, "capas": {},
            "pest_w": {}, "arr_mini": None, "arr_pest": None, "npal": 0}
 
+    buscador = {"proc": None}
+
+    def asegurar_buscador():
+        """v2.6: el proceso de buscar (y de elegir texto) arranca recien cuando hace falta
+        o unos segundos despues de abrir: asi no compite con el arranque."""
+        if buscador["proc"] is None:
+            try:
+                pr_ = mp.Process(target=_proceso_buscar, args=(q_bus, q_sal), daemon=True)
+                pr_.start()
+                buscador["proc"] = pr_
+                vis["procs"].append(pr_)
+            except Exception:
+                buscador["proc"] = False
+
     def iniciar_dibujantes():
         vis["procs"].extend(procs_inicio)  # ya arrancaron al principio
+        raiz.after(3500, asegurar_buscador)
 
     def detener_dibujantes():
         for q_ in (q_pag, q_min, q_bus):
@@ -5498,6 +5655,17 @@ def iniciar_interfaz():
                     for it_ in items_:
                         bx_, by_, ft_ = capa_item(it_, M, (round(z, 5), rot, parar))
                         cv_.create_image(x + bx_, y + by_, anchor="nw", image=ft_)
+                    e_ = vis.get("edit_item")  # v2.6: la firma o el texto elegido, con su marco y tirador
+                    if e_ and e_[0] == ruta and e_[1] == pag and app.get("panel") in ("firmar", "texto"):
+                        rr_ = fitz.Rect(e_[2]["rect"])
+                        qs_ = [q_ * M for q_ in (rr_.tl, rr_.tr, rr_.br, rr_.bl)]
+                        cv_.create_rectangle(x + min(q.x for q in qs_) - 2, y + min(q.y for q in qs_) - 2,
+                                             x + max(q.x for q in qs_) + 2, y + max(q.y for q in qs_) + 2,
+                                             outline=col("acento"), width=2, dash=(5, 3))
+                        if e_[2]["tipo"] == "firma":
+                            q_ = rr_.br * M
+                            cv_.create_oval(x + q_.x - 7, y + q_.y - 7, x + q_.x + 7, y + q_.y + 7,
+                                            fill=col("acento"), outline="#FFFFFF", width=2)
                 sel_ = vis.get("seleccion")
                 if sel_ and sel_["vista"] is self and sel_["base"][0] == i:
                     chars_ = caracteres_de(ruta, pag) or []
@@ -5556,6 +5724,10 @@ def iniciar_interfaz():
 
         def _press(self, ev):
             self.activar()
+            self._ed = None
+            if app["pagina"] == "visor" and app.get("panel") in ("firmar", "texto") and not vis["modo_res"]:
+                if edicion_press(self, ev):  # v2.6: firmar, sellar y texto
+                    return
             if not vis["modo_res"]:
                 self._arrastre_mano = False
                 if v_herr.get() == "Seleccionar":
@@ -5609,6 +5781,9 @@ def iniciar_interfaz():
                 self._trazo = {"base": base, "pts": [p_]}
 
         def _motion(self, ev):
+            if getattr(self, "_ed", None):
+                edicion_motion(self, ev)
+                return
             if not vis["modo_res"]:
                 sel_ = vis.get("seleccion")
                 if sel_ and sel_["vista"] is self and not getattr(self, "_arrastre_mano", False):
@@ -5660,6 +5835,9 @@ def iniciar_interfaz():
                     caracteres_de(base[1], base[2])
 
         def _release(self, ev):
+            if getattr(self, "_ed", None):
+                edicion_release(self, ev)
+                return
             if not vis["modo_res"]:
                 self.cv.configure(cursor=cursor_herramienta())
                 sel_ = vis.get("seleccion")
@@ -5697,6 +5875,8 @@ def iniciar_interfaz():
 
         def _doble_clic(self, ev, renglon=False):
             """Doble clic: la palabra; triple clic: el renglon (o cierra la polilinea)."""
+            if app.get("panel") == "texto" and not renglon and edicion_doble(self, ev):
+                return
             if getattr(self, "_poly", None):
                 self.cerrar_poligono()
                 return
@@ -5772,7 +5952,9 @@ def iniciar_interfaz():
                 p_ = fitz.Point(cx_ - x, cy_ - y) * ~M
                 toco = [it for it in vis["res"].get(ruta, {}).get(pag, []) if item_contiene(it, p_)]
                 if toco:
-                    m_.add_command(label="Quitar este resaltado", command=lambda: quitar_resaltado(ruta, pag, toco[-1]),
+                    que_ = {"firma": "Quitar esta firma o sello", "texto_n": "Quitar este texto",
+                            "reemplazo": "Deshacer este cambio de texto"}.get(toco[-1]["tipo"], "Quitar este resaltado")
+                    m_.add_command(label=que_, command=lambda: quitar_resaltado(ruta, pag, toco[-1]),
                                    punto="#EF4444")
                     m_.add_separator()
             punto = "#%02x%02x%02x" % tuple(vis["res_color"])
@@ -6315,6 +6497,7 @@ def iniciar_interfaz():
         vis["nbusq"] += 1
         vis["busq"] = {"id": vis["nbusq"], "texto": texto, "tab": t_["id"], "ver": version_de(t_), "hits": [],
                        "por_pos": {}, "i": -1, "fin": False, "hechas": 0, "total": 0}
+        asegurar_buscador()
         q_bus.put(("buscar", vis["nbusq"], texto, [(r_, p_) for r_, p_, _g in paginas_de(t_)]))
         busq_mostrar()
 
@@ -6470,6 +6653,7 @@ def iniciar_interfaz():
             return vis["chars"][k_]
         if ("pedido",) + k_ not in vis["chars"]:
             vis["chars"][("pedido",) + k_] = True
+            asegurar_buscador()
             q_bus.put(("caracteres", ruta, pag, ver_arch(ruta)))
         return None
 
@@ -6502,6 +6686,8 @@ def iniciar_interfaz():
 
     def imagen_item(item, M):
         """Imagen RGBA del resaltado (en pantalla) y su esquina (x, y) relativa a la pagina."""
+        if item["tipo"] in ("firma", "texto_n", "reemplazo"):
+            return imagen_edicion(item, M)
         rgba = tuple(item["color"]) + (int(255 * float(item["op"])),)
         z = abs(M.a) + abs(M.b)
         if item["tipo"] in ("texto", "rect"):
@@ -6535,7 +6721,7 @@ def iniciar_interfaz():
         return bx, by, img
 
     def capa_item(item, M, clave_m):
-        k_ = (item["id"], clave_m)
+        k_ = (item["id"], item.get("ver", 0), clave_m)
         v_ = vis["capas_it"].get(k_)
         if v_ is None:
             if len(vis["capas_it"]) > 400:
@@ -6546,6 +6732,8 @@ def iniciar_interfaz():
 
     def item_contiene(item, p_):
         p_ = fitz.Point(p_)
+        if item["tipo"] in ("firma", "texto_n", "reemplazo"):
+            return fitz.Rect(item["rect"]).contains(p_)
         if item["tipo"] in ("texto", "rect"):
             return any(fitz.Rect(r_).contains(p_) for r_ in item["rects"])
         xs_ = [q[0] for q in item["pts"]]
@@ -6584,6 +6772,10 @@ def iniciar_interfaz():
             quitar_resaltado(ruta, pag, item)
 
     def cursor_herramienta():
+        if app.get("panel") == "firmar" and not vis["modo_res"]:
+            return "tcross"
+        if app.get("panel") == "texto" and not vis["modo_res"]:
+            return "xterm"
         if vis["modo_res"]:
             return CURSOR_RES[v_res_modo.get()]
         return "xterm" if v_herr.get() == "Seleccionar" else "hand2"
@@ -6648,7 +6840,7 @@ def iniciar_interfaz():
     def actualizar_resaltes():
         n = n_resaltes()
         if n:
-            b_guardar_res.configure(text=f"Guardar resaltados ({n})")
+            b_guardar_res.configure(text=f"Guardar cambios ({n})")
             if not b_guardar_res.winfo_ismapped():
                 b_guardar_res.pack(side="left", padx=(0, 6), after=b_resaltar)
         else:
@@ -6672,12 +6864,12 @@ def iniciar_interfaz():
         w.resizable(False, False)
         w.transient(raiz)
         rutas = [r_ for r_, ps in vis["res"].items() if any(ps.values())]
-        ctk.CTkLabel(w, text=f"Guardar {n_resaltes()} resaltado(s)", font=F(15, "bold"), text_color=C["texto"],
+        ctk.CTkLabel(w, text=f"Guardar {n_resaltes()} cambio(s)", font=F(15, "bold"), text_color=C["texto"],
                      anchor="w").pack(fill="x", padx=22, pady=(18, 2))
         ctk.CTkLabel(w, text="\n".join(os.path.basename(original_de(r_)) for r_ in rutas), font=F(11),
                      text_color=C["texto2"], anchor="w", justify="left").pack(fill="x", padx=22)
-        ctk.CTkLabel(w, text="«En este PDF» los agrega al mismo archivo (solo suma los resaltados; el resto queda "
-                             "igual). «Como copia» deja el original sin tocar.", font=F(11), text_color=C["texto2"],
+        ctk.CTkLabel(w, text="Resaltados, firmas, sellos y textos. «En este PDF» los agrega al mismo archivo (el "
+                             "resto queda igual). «Como copia» deja el original sin tocar.", font=F(11), text_color=C["texto2"],
                      anchor="w", justify="left", wraplength=420).pack(fill="x", padx=22, pady=(8, 0))
         pie = ctk.CTkFrame(w, fg_color="transparent")
         pie.pack(fill="x", padx=22, pady=16)
@@ -6719,7 +6911,12 @@ def iniciar_interfaz():
                     for pag, items_ in pags.items():
                         pg = d[pag]
                         dm = pg.derotation_matrix
+                        editables_ = [it_ for it_ in items_ if it_["tipo"] in ("firma", "texto_n", "reemplazo")]
+                        if editables_:
+                            guardar_editables(pg, editables_)
                         for it_ in items_:
+                            if it_["tipo"] in ("firma", "texto_n", "reemplazo"):
+                                continue
                             c_ = tuple(v_ / 255 for v_ in it_["color"])
                             if it_["tipo"] in ("texto", "rect"):
                                 a_ = pg.add_highlight_annot([fitz.Rect(r_) * dm for r_ in it_["rects"]])
@@ -6765,12 +6962,464 @@ def iniciar_interfaz():
         elif hechos:
             v_estado.set(f"{hechos} resaltado(s) guardados " + ("en la copia." if copia else "en el PDF."))
 
+    # ================= v2.6: firmas, sellos y texto (se dibujan como los resaltados y se guardan con ellos)
+    EDITABLES = ("firma", "texto_n", "reemplazo")
+    cache_firma = {}
+
+    def clave_cat(cat=None):
+        return "sellos" if (cat or v_fcat.get()) == "Sellos" else "firmas"
+
+    def lista_firmas(cat=None):
+        k_ = clave_cat(cat)
+        d_ = carpeta_firmas()
+        lista = [n_ for n_ in almacen.datos.get(k_, []) if os.path.isfile(os.path.join(d_, n_))]
+        almacen.datos[k_] = lista
+        return lista
+
+    def firma_elegida(cat=None):
+        lista = lista_firmas(cat)
+        ult = almacen.datos.get(clave_cat(cat)[:-1] + "_ult")
+        return ult if ult in lista else (lista[0] if lista else None)
+
+    def miniatura_firma(nombre, w_=120, h_=56):
+        k_ = ("mini", nombre, modo_oscuro())
+        if k_ not in cache_firma:
+            try:
+                im_ = Image.open(os.path.join(carpeta_firmas(), nombre)).convert("RGBA")
+                im_.thumbnail((w_ * 2, h_ * 2), Image.LANCZOS)
+                fondo_ = Image.new("RGBA", (w_ * 2, h_ * 2), (255, 255, 255, 255))
+                dch = ImageDraw.Draw(fondo_)
+                for yy in range(0, h_ * 2, 12):  # cuadritos: se ve que el fondo es transparente
+                    for xx in range(0, w_ * 2, 12):
+                        if (xx // 12 + yy // 12) % 2:
+                            dch.rectangle([xx, yy, xx + 11, yy + 11], fill=(232, 236, 241, 255))
+                fondo_.alpha_composite(im_, ((w_ * 2 - im_.width) // 2, (h_ * 2 - im_.height) // 2))
+                cache_firma[k_] = ctk.CTkImage(fondo_, size=(w_, h_))
+            except Exception:
+                cache_firma[k_] = None
+        return cache_firma[k_]
+
+    def dibujar_firmas_panel():
+        if caja_firmas is None:
+            return
+        for w_ in caja_firmas.winfo_children():
+            w_.destroy()
+        lista = lista_firmas()
+        sel_ = firma_elegida()
+        que = "sellos" if clave_cat() == "sellos" else "firmas"
+        if not lista:
+            ctk.CTkLabel(caja_firmas, text=f"Todavía no hay {que}. Agregá una desde una foto o imagen escaneada.",
+                         font=F(12), text_color=C["texto2"], anchor="w", justify="left", wraplength=380).pack(
+                anchor="w", pady=6)
+        for k_, n_ in enumerate(lista):
+            celda = ctk.CTkFrame(caja_firmas, fg_color="transparent")
+            celda.grid(row=k_ // 2, column=k_ % 2, padx=6, pady=6, sticky="w")
+            b_ = ctk.CTkButton(celda, text="", image=miniatura_firma(n_), width=132, height=66, corner_radius=10,
+                               fg_color="transparent", hover_color=C["suave"], border_width=2,
+                               border_color=C["acento"] if n_ == sel_ else C["borde"],
+                               command=lambda n2=n_: elegir_firma(n2))
+            b_.pack(side="left")
+            ctk.CTkButton(celda, text="✕", width=24, height=24, corner_radius=12, font=F(11), fg_color=C["suave"],
+                          hover_color=C["suave_h"], text_color=C["texto2"],
+                          command=lambda n2=n_: borrar_firma(n2)).pack(side="left", padx=(4, 0), anchor="n")
+        if b_agregar_firma is not None:
+            b_agregar_firma.configure(state="normal" if len(lista) < MAX_FIRMAS else "disabled")
+        v_firma_info.set(f"{len(lista)} de {MAX_FIRMAS} {que} guardados/as. "
+                         + ("Se usa la marcada (la última que usaste)." if lista else "")
+                         + (" Para agregar otra, borrá una." if len(lista) >= MAX_FIRMAS else ""))
+
+    def elegir_firma(nombre):
+        almacen.datos[clave_cat()[:-1] + "_ult"] = nombre
+        almacen.guardar()
+        dibujar_firmas_panel()
+        v_estado.set("Hacé clic en la hoja donde va.")
+
+    def borrar_firma(nombre):
+        if not messagebox.askyesno(NOMBRE, "¿Borrar esta " + ("firma" if clave_cat() == "firmas" else "imagen de sello")
+                                   + " guardada?\n\n(Lo que ya está guardado en tus PDF no cambia.)"):
+            return
+        k_ = clave_cat()
+        almacen.datos[k_] = [n_ for n_ in almacen.datos.get(k_, []) if n_ != nombre]
+        almacen.guardar()
+        dibujar_firmas_panel()
+
+    def agregar_firma_dialogo():
+        if len(lista_firmas()) >= MAX_FIRMAS:
+            return
+        r_ = filedialog.askopenfilename(title="Elegí la imagen de la " + ("firma" if clave_cat() == "firmas" else "sello"),
+                                        filetypes=[("Imágenes", "*.png *.jpg *.jpeg *.bmp *.webp *.tif *.tiff"),
+                                                   ("Todos", "*.*")])
+        if not r_:
+            return
+        try:
+            original = Image.open(r_)
+            original.load()
+        except Exception:
+            messagebox.showerror(NOMBRE, "No se pudo abrir esa imagen.")
+            return
+        w = ctk.CTkToplevel(raiz)
+        w.title(f"{NOMBRE} · " + ("firma" if clave_cat() == "firmas" else "sello") + " desde imagen")
+        w.configure(fg_color=C["fondo"])
+        w.resizable(False, False)
+        w.transient(raiz)
+        est = {"res": None}
+        v_quitar = tk.BooleanVar(value=True)
+        v_int = tk.DoubleVar(value=50)
+        ctk.CTkLabel(w, text="Vista previa (los cuadritos son lo transparente)", font=F(13, "bold"),
+                     text_color=C["texto"], anchor="w").pack(fill="x", padx=20, pady=(16, 6))
+        l_prev = ctk.CTkLabel(w, text="", width=440, height=220, fg_color=C["campo"], corner_radius=10)
+        l_prev.pack(padx=20)
+        fila_ = ctk.CTkFrame(w, fg_color="transparent")
+        fila_.pack(fill="x", padx=20, pady=(10, 0))
+        ctk.CTkCheckBox(fila_, text="Quitar el fondo claro", variable=v_quitar, font=F(12), text_color=C["texto"],
+                        fg_color=C["acento"], hover_color=C["acento_h"], border_color=C["texto2"], checkbox_width=18,
+                        checkbox_height=18, border_width=2, command=lambda: actualizar()).pack(side="left")
+        ctk.CTkLabel(fila_, text="Intensidad", font=F(12), text_color=C["texto2"]).pack(side="left", padx=(18, 6))
+        ctk.CTkSlider(fila_, from_=0, to=100, variable=v_int, width=150, button_color=C["acento"],
+                      button_hover_color=C["acento_h"], progress_color=C["acento"],
+                      command=lambda _v: programar()).pack(side="left")
+        ctk.CTkLabel(w, text="Si queda una sombra del papel, subí la intensidad; si se pierden trazos finos, bajala.",
+                     font=F(11), text_color=C["texto2"], anchor="w").pack(fill="x", padx=20, pady=(6, 0))
+        pie = ctk.CTkFrame(w, fg_color="transparent")
+        pie.pack(fill="x", padx=20, pady=14)
+        trabajo = {"id": None}
+
+        def programar():
+            if trabajo["id"]:
+                w.after_cancel(trabajo["id"])
+            trabajo["id"] = w.after(150, actualizar)
+
+        def actualizar():
+            trabajo["id"] = None
+            est["res"] = quitar_fondo_imagen(original, v_quitar.get(), float(v_int.get()))
+            if est["res"] is None:
+                l_prev.configure(image=None, text="No quedó nada: bajá la intensidad.")
+                return
+            W_, H_ = 440, 220
+            vista_ = Image.new("RGBA", (W_ * 2, H_ * 2), (255, 255, 255, 255))
+            dch = ImageDraw.Draw(vista_)
+            for yy in range(0, H_ * 2, 16):
+                for xx in range(0, W_ * 2, 16):
+                    if (xx // 16 + yy // 16) % 2:
+                        dch.rectangle([xx, yy, xx + 15, yy + 15], fill=(232, 236, 241, 255))
+            im_ = est["res"].copy()
+            im_.thumbnail((W_ * 2 - 40, H_ * 2 - 40), Image.LANCZOS)
+            vista_.alpha_composite(im_, ((W_ * 2 - im_.width) // 2, (H_ * 2 - im_.height) // 2))
+            est["foto"] = ctk.CTkImage(vista_, size=(W_, H_))
+            l_prev.configure(image=est["foto"], text="")
+
+        def guardar_():
+            if est["res"] is None:
+                return
+            nombre = f"{clave_cat()[:-1]}_{int(time.time() * 1000)}.png"
+            try:
+                est["res"].save(os.path.join(carpeta_firmas(), nombre), optimize=True)
+            except Exception as e:
+                messagebox.showerror(NOMBRE, f"No se pudo guardar:\n{e}")
+                return
+            k_ = clave_cat()
+            almacen.datos[k_] = [nombre] + lista_firmas()
+            almacen.datos[k_[:-1] + "_ult"] = nombre
+            almacen.guardar()
+            w.destroy()
+            dibujar_firmas_panel()
+            v_estado.set("Guardada. Hacé clic en la hoja donde va.")
+
+        boton(pie, "Guardar", primario=True, ancho=110, command=guardar_).pack(side="right", padx=(8, 0))
+        boton(pie, "Cancelar", ancho=96, command=w.destroy).pack(side="right")
+        w.bind("<Escape>", lambda _e: w.destroy())
+        actualizar()
+        w.update_idletasks()
+        w.geometry(f"+{raiz.winfo_rootx() + (raiz.winfo_width() - w.winfo_reqwidth()) // 2}"
+                   f"+{raiz.winfo_rooty() + (raiz.winfo_height() - w.winfo_reqheight()) // 3}")
+        w.after(100, lambda: (w.grab_set(), w.focus_force()))
+
+    # ---- texto
+    def ayuda_texto():
+        v_texto_ayuda.set("Hacé clic en la hoja donde querés escribir. Después lo podés arrastrar; doble clic "
+                          "lo edita. Clic derecho o Supr lo quita." if v_tmodo.get() == "Agregar" else
+                          "Hacé clic sobre un texto del PDF para cambiarlo. Se reemplaza el renglón (o el trozo) "
+                          "que tocaste. En planos escaneados no hay texto para cambiar.")
+
+    def fuente_texto():
+        return FUENTES_TEXTO.get(v_tfuente.get(), FUENTES_TEXTO["Helvetica"])[1 if v_tneg.get() else 0]
+
+    def tam_texto():
+        try:
+            return max(4.0, min(144.0, float(v_ttam.get().replace(",", "."))))
+        except ValueError:
+            return 12.0
+
+    def color_texto(rgb, aplicar=True):
+        texto_col["rgb"] = tuple(int(x) for x in rgb)
+        for b_, c_ in texto_col["puntos"]:
+            b_.configure(border_width=3 if tuple(c_) == texto_col["rgb"] else 0)
+        if aplicar:
+            estilo_texto_cambio()
+
+    def estilo_texto_cambio():
+        almacen.datos.update(texto_fuente=v_tfuente.get(), texto_negrita=bool(v_tneg.get()), texto_tam=tam_texto(),
+                             texto_color=list(texto_col["rgb"]))
+        e_ = vis.get("edit_item")
+        if e_ and e_[2]["tipo"] in ("texto_n", "reemplazo"):  # cambia el texto elegido
+            it_ = e_[2]
+            it_.update(fuente=fuente_texto(), tam=tam_texto(), color=texto_col["rgb"])
+            if it_["tipo"] == "texto_n":
+                it_["rect"] = rect_texto(it_["rect"][:2], it_["txt"], it_["fuente"], it_["tam"])
+            it_["ver"] = it_.get("ver", 0) + 1
+            visor_pedir_dibujo()
+
+    def rect_texto(esq, txt, fuente, tam):
+        lineas = txt.split("\n") or [""]
+        ancho = max(fitz.get_text_length(l_, fontname=fuente, fontsize=tam) for l_ in lineas)
+        return (esq[0], esq[1], esq[0] + ancho + tam * 0.6, esq[1] + len(lineas) * tam * 1.25 + tam * 0.45)
+
+    def pedir_texto(titulo, inicial=""):
+        """Ventanita para escribir (varios renglones). Devuelve el texto o None."""
+        w = ctk.CTkToplevel(raiz)
+        w.title(f"{NOMBRE} · {titulo.lower()}")
+        w.configure(fg_color=C["fondo"])
+        w.resizable(False, False)
+        w.transient(raiz)
+        ctk.CTkLabel(w, text=titulo, font=F(14, "bold"), text_color=C["texto"], anchor="w").pack(
+            fill="x", padx=20, pady=(16, 6))
+        caja_ = ctk.CTkTextbox(w, width=420, height=110, font=F(13), fg_color=C["campo"], text_color=C["texto"],
+                               border_color=C["borde"], border_width=1, corner_radius=8)
+        caja_.pack(padx=20)
+        caja_.insert("1.0", inicial)
+        ctk.CTkLabel(w, text="Enter: nuevo renglón · Ctrl+Enter: listo", font=F(11), text_color=C["texto2"],
+                     anchor="w").pack(fill="x", padx=20, pady=(4, 0))
+        res = {"t": None}
+
+        def ok_(*_):
+            res["t"] = caja_.get("1.0", "end").rstrip("\n")
+            w.destroy()
+            return "break"
+
+        pie = ctk.CTkFrame(w, fg_color="transparent")
+        pie.pack(fill="x", padx=20, pady=14)
+        boton(pie, "Listo", primario=True, ancho=100, command=ok_).pack(side="right", padx=(8, 0))
+        boton(pie, "Cancelar", ancho=96, command=w.destroy).pack(side="right")
+        w.bind("<Escape>", lambda _e: w.destroy())
+        caja_.bind("<Control-Return>", ok_)
+        w.update_idletasks()
+        w.geometry(f"+{raiz.winfo_rootx() + (raiz.winfo_width() - w.winfo_reqwidth()) // 2}"
+                   f"+{raiz.winfo_rooty() + (raiz.winfo_height() - w.winfo_reqheight()) // 3}")
+        w.after(80, lambda: (w.grab_set(), caja_.focus_set()))
+        raiz.wait_window(w)
+        t_ = res["t"]
+        return t_ if t_ is not None and t_.strip() else None
+
+    def span_en(ruta, pag, p_):
+        """El trozo de texto del PDF bajo el punto (coordenadas de la pagina como se ve)."""
+        try:
+            d_ = fitz.open(ruta)
+            pg = d_[pag]
+            m_ = pg.rotation_matrix
+            for bl in pg.get_text("dict")["blocks"]:
+                for ln in bl.get("lines", []):
+                    for sp in ln["spans"]:
+                        r_ = fitz.Rect(sp["bbox"]) * m_
+                        if r_.contains(fitz.Point(p_)) and sp["text"].strip():
+                            if abs(ln["dir"][1]) > 0.01:
+                                return "girado"
+                            return {"rect": tuple(r_), "txt": sp["text"], "tam": round(sp["size"], 2),
+                                    "fuente": fuente_parecida(sp["flags"], sp["font"]),
+                                    "color": ((sp["color"] >> 16) & 255, (sp["color"] >> 8) & 255, sp["color"] & 255),
+                                    "origen": tuple(fitz.Point(sp["origin"]) * m_)}
+        except Exception:
+            pass
+        return None
+
+    # ---- en la hoja: poner, mover, cambiar tamaño
+    def agregar_item(ruta, pag, item):
+        vis["nres"] += 1
+        item.update(id=vis["nres"], ver=0, op=item.get("op", 1.0), color=tuple(item.get("color", (0, 0, 0))))
+        vis["res"].setdefault(ruta, {}).setdefault(pag, []).append(item)
+        vis["res_pila"].append((ruta, pag, item))
+        vis["edit_item"] = (ruta, pag, item)
+        actualizar_resaltes()
+        v_estado.set(f"{n_resaltes()} cambio(s) sin guardar · Ctrl+Z deshace · Ctrl+S los guarda en el PDF.")
+
+    def edicion_press(vista, ev):
+        cx_, cy_ = vista.cv.canvasx(ev.x), vista.cv.canvasy(ev.y)
+        base = vista._punto_pagina(cx_, cy_)
+        if not base:
+            return False
+        _i, ruta, pag, M, x, y = base
+        p_ = vista._pt(ev, base)
+        e_ = vis.get("edit_item")
+        if e_ and e_[0] == ruta and e_[1] == pag and e_[2]["tipo"] == "firma":  # tirador de la esquina
+            q_ = fitz.Point(e_[2]["rect"][2], e_[2]["rect"][3]) * M
+            if abs(q_.x + x - cx_) < 11 and abs(q_.y + y - cy_) < 11:
+                vista._ed = {"it": e_[2], "base": base, "p0": p_, "r0": tuple(e_[2]["rect"]), "modo": "tam"}
+                return True
+        for it_ in reversed(vis["res"].get(ruta, {}).get(pag, [])):
+            if it_["tipo"] in EDITABLES and fitz.Rect(it_["rect"]).contains(fitz.Point(p_)):
+                vis["edit_item"] = (ruta, pag, it_)
+                vista._ed = {"it": it_, "base": base, "p0": p_, "r0": tuple(it_["rect"]),
+                             "modo": "mover" if it_["tipo"] != "reemplazo" else "nada"}
+                visor_pedir_dibujo()
+                return True
+        if vis.get("edit_item"):  # clic fuera: se suelta la que estaba elegida
+            vis["edit_item"] = None
+            visor_pedir_dibujo()
+        if app.get("panel") == "firmar":
+            nombre = firma_elegida()
+            if not nombre:
+                v_estado.set("Primero agregá una firma o un sello (panel de la derecha).")
+                return True
+            try:
+                with Image.open(os.path.join(carpeta_firmas(), nombre)) as im_:
+                    prop = im_.height / max(1, im_.width)
+            except Exception:
+                return True
+            dims = vista.lay["dims"][_i]
+            ancho = min(dims[0], dims[1]) * (0.30 if clave_cat() == "firmas" else 0.22)
+            alto = ancho * prop
+            r_ = (p_[0] - ancho / 2, p_[1] - alto / 2, p_[0] + ancho / 2, p_[1] + alto / 2)
+            almacen.datos[clave_cat()[:-1] + "_ult"] = nombre
+            agregar_item(ruta, pag, {"tipo": "firma", "rect": r_, "archivo": os.path.join(carpeta_firmas(), nombre)})
+            return True
+        if app.get("panel") == "texto":
+            if v_tmodo.get() == "Agregar":
+                txt = pedir_texto("Escribí el texto")
+                if txt:
+                    f_, t_ = fuente_texto(), tam_texto()
+                    agregar_item(ruta, pag, {"tipo": "texto_n", "txt": txt, "fuente": f_, "tam": t_,
+                                             "color": texto_col["rgb"],
+                                             "rect": rect_texto((p_[0], p_[1] - t_ * 0.6), txt, f_, t_)})
+                return True
+            sp_ = span_en(ruta, pag, p_)
+            if sp_ == "girado":
+                v_estado.set("Ese texto está inclinado o vertical: por ahora solo se cambia texto horizontal.")
+                return True
+            if not sp_:
+                v_estado.set("Ahí no hay texto del PDF para cambiar (si es un escaneo, usá «Agregar»).")
+                return True
+            txt = pedir_texto("Cambiar el texto", sp_["txt"])
+            if txt is not None and txt != sp_["txt"]:
+                agregar_item(ruta, pag, {"tipo": "reemplazo", "rect": sp_["rect"], "txt": txt.replace("\n", " "),
+                                         "orig": sp_["txt"], "fuente": sp_["fuente"], "tam": sp_["tam"],
+                                         "color": sp_["color"], "origen": sp_["origen"]})
+            return True
+        return False
+
+    def edicion_motion(vista, ev):
+        ed = vista._ed
+        if ed["modo"] == "nada":
+            return
+        p_ = vista._pt(ev, ed["base"])
+        dx, dy = p_[0] - ed["p0"][0], p_[1] - ed["p0"][1]
+        x0, y0, x1, y1 = ed["r0"]
+        if ed["modo"] == "tam":  # misma proporcion
+            ancho = max(8.0, (x1 - x0) + dx)
+            ed["it"]["rect"] = (x0, y0, x0 + ancho, y0 + ancho * (y1 - y0) / max(0.01, x1 - x0))
+        else:
+            ed["it"]["rect"] = (x0 + dx, y0 + dy, x1 + dx, y1 + dy)
+        ed["it"]["ver"] = ed["it"].get("ver", 0) + 1
+        vista.dibujar()
+
+    def edicion_release(vista, ev):
+        vista._ed = None
+        mini_pedir_dibujo()
+
+    def edicion_doble(vista, ev):
+        e_ = vis.get("edit_item")
+        if not e_ or e_[2]["tipo"] not in ("texto_n", "reemplazo"):
+            return False
+        it_ = e_[2]
+        txt = pedir_texto("Editar el texto", it_["txt"])
+        if txt:
+            it_["txt"] = txt if it_["tipo"] == "texto_n" else txt.replace("\n", " ")
+            if it_["tipo"] == "texto_n":
+                it_["rect"] = rect_texto(it_["rect"][:2], it_["txt"], it_["fuente"], it_["tam"])
+            it_["ver"] = it_.get("ver", 0) + 1
+            visor_pedir_dibujo()
+        return True
+
+    def quitar_editado(*_):
+        e_ = vis.get("edit_item")
+        if not e_ or app["pagina"] != "visor":
+            return
+        foco = raiz.focus_get()
+        if foco is not None and foco.winfo_class() in ("Entry", "Text"):
+            return
+        vis["edit_item"] = None
+        quitar_resaltado(*e_)
+        return "break"
+
+    def imagen_edicion(item, M):
+        """Firma, sello o texto como imagen en pantalla (y su esquina relativa a la pagina)."""
+        r_ = fitz.Rect(item["rect"])
+        qs = [p_ * M for p_ in (r_.tl, r_.tr, r_.br, r_.bl)]
+        bx, by = min(q.x for q in qs), min(q.y for q in qs)
+        z = math.hypot(M.a, M.b)
+        ang = round(math.degrees(math.atan2(M.b, M.a)) / 90) % 4 * 90
+        w_, h_ = max(1, round(r_.width * z)), max(1, round(r_.height * z))
+        if item["tipo"] == "firma":
+            k_ = ("img", item["archivo"])
+            if k_ not in cache_firma:
+                try:
+                    cache_firma[k_] = Image.open(item["archivo"]).convert("RGBA")
+                except Exception:
+                    cache_firma[k_] = Image.new("RGBA", (10, 10), (0, 0, 0, 0))
+            img = cache_firma[k_].resize((w_, h_), Image.LANCZOS)
+        else:
+            d_ = fitz.open()
+            pg = d_.new_page(width=max(1.0, r_.width), height=max(1.0, r_.height))
+            c_ = tuple(v_ / 255 for v_ in item["color"])
+            if item["tipo"] == "reemplazo":
+                pg.draw_rect(pg.rect, color=None, fill=(1, 1, 1))  # tapa el texto original en la vista
+                o_ = fitz.Point(item["origen"]) - r_.tl
+                pg.insert_text(o_, item["txt"], fontsize=item["tam"], fontname=item["fuente"], color=c_)
+            else:
+                pg.insert_textbox(fitz.Rect(0, 0, r_.width, r_.height) + (item["tam"] * 0.3, 0, 0, 0), item["txt"],
+                                  fontsize=item["tam"], fontname=item["fuente"], color=c_, lineheight=1.25)
+            pix = pg.get_pixmap(matrix=fitz.Matrix(z, z), alpha=True)
+            img = Image.frombytes("RGBA", (pix.width, pix.height), pix.samples)
+            d_.close()
+        if ang:
+            img = img.rotate(-ang, expand=True)
+        return int(bx), int(by), img
+
+    def guardar_editables(pg, items_):
+        """Escribe en la pagina las firmas, sellos y textos (quedan fijos en el PDF)."""
+        dm = pg.derotation_matrix
+        reemplazos = [it_ for it_ in items_ if it_["tipo"] == "reemplazo"]
+        if reemplazos:  # se borra el texto original (sin tocar dibujos ni imagenes) y se escribe el nuevo
+            for it_ in reemplazos:
+                r_ = fitz.Rect(it_["rect"])
+                corto = r_.height * 0.18
+                pg.add_redact_annot(fitz.Rect(r_.x0, r_.y0 + corto, r_.x1, r_.y1 - corto) * dm)
+            pg.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=fitz.PDF_REDACT_LINE_ART_NONE,
+                                text=fitz.PDF_REDACT_TEXT_REMOVE)
+            for it_ in reemplazos:
+                pg.insert_text(fitz.Point(it_["origen"]) * dm, it_["txt"], fontsize=it_["tam"],
+                               fontname=it_["fuente"], color=tuple(v_ / 255 for v_ in it_["color"]),
+                               rotate=pg.rotation)
+        for it_ in items_:
+            if it_["tipo"] == "firma":
+                pg.insert_image(fitz.Rect(it_["rect"]) * dm, filename=it_["archivo"], rotate=pg.rotation,
+                                overlay=True)
+            elif it_["tipo"] == "texto_n":
+                r_ = fitz.Rect(it_["rect"])
+                c_ = tuple(v_ / 255 for v_ in it_["color"])
+                rr = (fitz.Rect(r_.x0 + it_["tam"] * 0.3, r_.y0, r_.x1 + it_["tam"], r_.y1 + it_["tam"])) * dm
+                if pg.insert_textbox(rr, it_["txt"], fontsize=it_["tam"], fontname=it_["fuente"], color=c_,
+                                     lineheight=1.25, rotate=pg.rotation) < 0:
+                    y_ = r_.y0 + it_["tam"]  # no entro en la caja: renglon por renglon
+                    for l_ in it_["txt"].split("\n"):
+                        pg.insert_text(fitz.Point(r_.x0 + it_["tam"] * 0.3, y_) * dm, l_, fontsize=it_["tam"],
+                                       fontname=it_["fuente"], color=c_, rotate=pg.rotation)
+                        y_ += it_["tam"] * 1.25
+
     def preguntar_resaltes(rutas, que):
         """Antes de cerrar / procesar: ofrece guardar los resaltados pendientes. False = cancelar."""
         n = n_resaltes(rutas)
         if not n:
             return True
-        r_ = messagebox.askyesnocancel(NOMBRE, f"Hay {n} resaltado(s) sin guardar.\n\n¿Guardarlos en el PDF antes "
+        r_ = messagebox.askyesnocancel(NOMBRE, f"Hay {n} cambio(s) sin guardar (resaltados, firmas o textos).\n\n¿Guardarlos en el PDF antes "
                                                f"de {que}?\n(No = se descartan)")
         if r_ is None:
             return False
@@ -7299,6 +7948,13 @@ def iniciar_interfaz():
         if not panel_der.winfo_ismapped():
             panel_der.grid(row=1, column=1, sticky="ns", padx=(0, 14), pady=(10, 12))
         app["panel"] = clave
+        vis["edit_item"] = None
+        for v_ in vistas:
+            v_.cv.configure(cursor=cursor_herramienta())
+        if clave == "firmar":
+            v_estado.set("Firmar: elegí la firma o el sello y hacé clic en la hoja donde va.")
+        elif clave == "texto":
+            v_estado.set("Texto: hacé clic en la hoja para escribir, o elegí «Cambiar» y tocá un texto del PDF.")
         dibujar_lateral()
         if clave == "foliar":
             actualizar_ejemplo()
@@ -7307,6 +7963,9 @@ def iniciar_interfaz():
     def cerrar_panel():
         panel_der.grid_forget()
         app["panel"] = None
+        vis["edit_item"] = None
+        for v_ in vistas:
+            v_.cv.configure(cursor=cursor_herramienta())
         dibujar_lateral()
         raiz.after(30, visor_pedir_dibujo)
 
@@ -7906,6 +8565,7 @@ def iniciar_interfaz():
     raiz.bind("<Control-p>", abrir_imprimir)
     raiz.bind("<Control-P>", abrir_imprimir)
     raiz.bind("<Control-s>", guardar_resaltados_dialogo)
+    raiz.bind("<Delete>", quitar_editado, add="+")
     raiz.bind("<Control-S>", guardar_resaltados_dialogo)
     raiz.bind("<F3>", lambda e: busq_mover(-1 if e.state & 0x1 else 1))
     raiz.bind("<Control-Tab>", lambda e: (activar_pestana((vis["act"] + 1) % len(pest)) if pest else None, "break")[1])
@@ -8677,6 +9337,8 @@ def iniciar_interfaz():
             os._exit(3)
 
         raiz.report_callback_exception = _fallo
+        if os.name == "nt" and not app.get("soltar"):  # v2.6: que no falte lo de arrastrar al quitar archivos sobrantes
+            _fallo(RuntimeError, RuntimeError("No se pudo activar arrastrar archivos (tkdnd)"), None)
         claves_ = ["organizar", "visor"] + [c_ for c_, *_ in ICONOS if c_ in EN_PANEL and c_ not in PROXIMAMENTE]
         pasos_ = [lambda: abrir_pestana(auto_) if os.path.isfile(auto_) else None]
         pasos_ += [lambda c_=c_: mostrar_pagina(c_) for c_ in claves_]

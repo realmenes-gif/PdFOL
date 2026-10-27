@@ -19,6 +19,21 @@ adb shell am start -W -a android.intent.action.VIEW -d "content://media/external
 sleep 14
 adb exec-out screencap -p > "$OUT/2_documento.png"
 # buscar con el teclado: toca la lupa (arriba a la derecha) no es fiable por coordenadas: se usa la tecla de busqueda
+# planos pesados y pagina girada: dibujo nativo
+for f in plano girado; do
+  adb push android/prueba/$f.pdf /sdcard/Download/$f.pdf
+done
+adb shell content call --uri content://media --method scan_volume --arg external_primary || true
+sleep 3
+for f in plano girado; do
+  IDF=$(adb shell content query --uri content://media/external/file --projection _id --where "_display_name=\'$f.pdf\'" | grep -oE "_id=[0-9]+" | head -1 | cut -d= -f2)
+  adb shell am start -W -a android.intent.action.VIEW -d "content://media/external/file/$IDF" -t application/pdf --grant-read-uri-permission -n com.meneses999.pdfol/.MainActivity
+  sleep 12
+  adb exec-out screencap -p > "$OUT/6_$f.png"
+  adb shell input swipe 300 900 300 300 120
+  sleep 4
+  adb exec-out screencap -p > "$OUT/6_${f}_b.png"
+done
 # pagina escaneada: reconocer texto (OCR)
 adb push android/prueba/escaneado.pdf /sdcard/Download/escaneado.pdf
 adb shell content call --uri content://media --method scan_volume --arg external_primary || true

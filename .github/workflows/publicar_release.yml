@@ -69,6 +69,7 @@ jobs:
             --collect-all pymupdf --collect-all pikepdf --collect-all customtkinter --collect-all tkinterdnd2 `
             --hidden-import PIL._tkinter_finder --hidden-import PIL.ImageTk --hidden-import PIL.JpegImagePlugin `
             --hidden-import PIL.PngImagePlugin --hidden-import PIL.IcoImagePlugin --hidden-import PIL.BmpImagePlugin `
+            --exclude-module PIL._avif --exclude-module PIL.AvifImagePlugin `
             --add-data "fuentes;fuentes" "${{ steps.ver.outputs.archivo }}"
 
       - name: Comprimir y calcular SHA256
@@ -76,6 +77,11 @@ jobs:
         shell: pwsh
         run: |
           Move-Item dist/PdFOL PdFOL_portable
+          # v2.6: fuera lo que no se usa (arrastrar de Mac y Linux, zonas horarias de Tcl)
+          $i = "PdFOL_portable/_internal"
+          Get-ChildItem "$i/tkinterdnd2/tkdnd" -Directory | Where-Object { $_.Name -ne "win-x64" } | Remove-Item -Recurse -Force
+          Remove-Item -Recurse -Force "$i/_tcl_data/tzdata", "$i/_tcl_data/msgs" -ErrorAction SilentlyContinue
+          "{0:N1} MB" -f ((Get-ChildItem PdFOL_portable -Recurse | Measure-Object Length -Sum).Sum / 1MB)
           Copy-Item PdFOL_documento.ico PdFOL_portable\
           # prueba del .exe ya armado (si le falta una libreria, aca se nota)
           $env:PDFOL_AUTOPRUEBA = (Resolve-Path prueba.pdf).Path

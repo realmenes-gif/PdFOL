@@ -65,6 +65,7 @@
     <button data-m="texto" class="sel">Resaltar texto</button>
     <button data-m="libre">Marcador</button>
     <button data-m="lapiz">Lápiz</button>
+    <button data-m="escribir">Texto</button>
   </div>
   <div class="fila-herr" id="fila-res">
     <div id="colores" class="colores"></div>
@@ -84,7 +85,9 @@
 <div id="herr-firma" class="hoja-abajo" hidden>
   <p class="ayuda-marcar">Arrastrá la firma a su lugar. La esquina la agranda o achica.</p>
   <div class="fila-herr">
-    <button class="suave" id="f-otra"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Otra firma</button>
+    <button class="suave" id="f-mas-firma"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Firma</button>
+    <button class="suave" id="f-mas-sello"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Sello</button>
+    <button class="suave" id="f-otra">Cambiar…</button>
     <button class="suave" id="f-quitar"><svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>Quitar</button>
     <button class="primario" id="f-listo">Listo</button>
   </div>
@@ -98,7 +101,6 @@
 <input id="archivo" type="file" accept="application/pdf,.pdf" multiple hidden>
 <input id="imagen" type="file" accept="image/*" hidden>
 
-<script src="lib/pdf-lib.min.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

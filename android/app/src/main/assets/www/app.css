@@ -352,3 +352,9 @@ body.eligiendo .visor .textLayer, body.eligiendo .visor .textLayer span { -webki
 .sel-tirador.fin::after { left: 8px; top: 0; border-radius: 0 50% 50% 50%; }
 .sel-tirador.ini { margin-left: -12px; }
 .sel-tirador.fin { margin-left: -8px; }
+
+/* hojas dibujadas por el motor de Android: imagen plana debajo del texto */
+.visor .canvasWrapper img.nativa { position: absolute; left: 0; top: 0; width: 100%; height: 100%; display: block; }
+.visor .canvasWrapper img.detalle { position: absolute; display: block; }
+.visor .canvasWrapper canvas { position: relative; }
+.firma-g.ult { border: 2px solid var(--acento); }
