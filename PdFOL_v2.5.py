@@ -352,12 +352,16 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v2.4"
-VERSION_INTERNA = "2.4"
+VERSION = "v2.5"
+VERSION_INTERNA = "2.5"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v2.5", [
+        "PdFOL abre más rápido: la ventana aparece antes y lo que no se ve se arma después.",
+        "Al abrir otro documento (también con doble clic en el Explorador) ya no queda la hoja del anterior.",
+    ]),
     ("v2.4", [
         "Arreglado el aviso de error (tema_guardado) que salía al abrir PdFOL.",
         "Arrastrá PDF a la ventana: se abren en el visor; en Organizar salen las opciones de «Unir».",
@@ -614,8 +618,30 @@ if __name__ == "__main__":
 
 
 import pymupdf as fitz
-import pikepdf
-from pikepdf import Name
+
+
+class _Perezoso:
+    """v2.5: importa la libreria recien la primera vez que se usa (el arranque es mas rapido)."""
+
+    def __init__(self, modulo, attr=None):
+        self._modulo, self._attr, self._obj = modulo, attr, None
+
+    def _cargar(self):
+        if self._obj is None:
+            import importlib
+            m = importlib.import_module(self._modulo)
+            self._obj = getattr(m, self._attr) if self._attr else m
+        return self._obj
+
+    def __getattr__(self, a):
+        return getattr(self._cargar(), a)
+
+    def __call__(self, *a, **k):
+        return self._cargar()(*a, **k)
+
+
+pikepdf = _Perezoso("pikepdf")
+Name = _Perezoso("pikepdf", "Name")
 from PIL import Image, ImageChops, ImageDraw
 
 Image.MAX_IMAGE_PIXELS = None
@@ -1183,7 +1209,7 @@ CALIDAD_MOSAICO = {None: CALIDAD_JPEG, "sin-perdida": CALIDAD_JPEG, "equilibrada
 
 def _componentes(cs):
     try:
-        if isinstance(cs, Name):
+        if isinstance(cs, pikepdf.Name):
             return {"/DeviceRGB": 3, "/DeviceGray": 1, "/CalRGB": 3, "/CalGray": 1}.get(str(cs))
         if isinstance(cs, pikepdf.Array) and len(cs) >= 2:
             tipo = str(cs[0])
@@ -2813,6 +2839,16 @@ def iniciar_interfaz():
     if instancia is None:  # PdFOL ya estaba abierto: los PDF se abrieron alli como pestanas
         cerrar_pantalla_de_inicio()
         return
+    # v2.5: los procesos que dibujan las paginas arrancan ya, mientras se arma la ventana (usan otros nucleos)
+    q_pag, q_min, q_bus, q_sal = mp.Queue(), mp.Queue(), mp.Queue(), mp.Queue()
+    procs_inicio = []
+    for q_, f_ in ((q_pag, _proceso_render), (q_min, _proceso_render), (q_bus, _proceso_buscar)):
+        try:
+            pr_ = mp.Process(target=f_, args=(q_, q_sal), daemon=True)
+            pr_.start()
+            procs_inicio.append(pr_)
+        except Exception:
+            pass
     almacen = AlmacenPerfiles()
     aplicar_tema(almacen.datos.get("tema", "Azul gris"))
     modo_ini = almacen.datos.get("apariencia", "Automático")
@@ -3329,271 +3365,330 @@ def iniciar_interfaz():
             if kw:
                 super().configure(**kw)
 
+    # v2.5: las paginas que no se ven al abrir se arman despues (la ventana aparece antes)
+    por_armar = {}
+    b_buscar = sw_apl = sw_comp = b_pdf_def = b_buscar_act = b_reiniciar_tema = None
+    ctrl_apl, ctrl_comp, filas_perfil = [], [], []
+    botones_tema, botones_color_tema = {}, {}
+    v_ayuda_niv = tk.StringVar(value=AYUDA_NIVEL[V["nivel"].get()])
+    tema_actual = almacen.datos.get("tema", "Azul gris")
+    v_aviso_tema = tk.StringVar(value="Cada color tiene su versión clara y oscura (según el Modo de arriba).")
+
+    def asegurar_pagina(clave):
+        f_ = por_armar.pop(clave, None)
+        if f_ is not None:
+            f_()
+            try:
+                refrescar()
+            except Exception:
+                pass
+
+    def armar_lo_que_falta():
+        """Despues de mostrar la ventana: una pagina por vez, sin trabar."""
+        if por_armar:
+            asegurar_pagina(next(iter(por_armar)))
+            raiz.after(120, armar_lo_que_falta)
+
     # ================================================== PAGINA: DOCUMENTO
-    p = pagina_nueva("documento")
-    seccion(p, "Archivo PDF", 0, pady=(6, 8))
-    t = Tarjeta(p, 1)
-    fila_archivo = ctk.CTkFrame(t, fg_color="transparent")
-    fila_archivo.grid(row=0, column=0, columnspan=2, sticky="ew", padx=16, pady=14)
-    fila_archivo.grid_columnconfigure(0, weight=1)
-    e_ruta = entrada(fila_archivo, V["ruta"], ancho=400, state="readonly")
-    e_ruta.grid(row=0, column=0, sticky="ew", padx=(0, 10))
-    b_buscar = boton(fila_archivo, "Buscar…", primario=True, ancho=110)
-    b_buscar.grid(row=0, column=1)
-    ctk.CTkLabel(t, textvariable=v_info_doc, font=F(12), text_color=C["texto2"], anchor="w").grid(
-        row=1, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 4))
-    ctk.CTkLabel(t, text="Es el documento de la pestaña activa. «Buscar…» lo abre en una pestaña nueva.",
-                 font=F(11), text_color=C["texto2"], anchor="w").grid(
-        row=2, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 14))
-    seccion(p, "Qué hacer", 2)
-    t = Tarjeta(p, 3)
-    t.fila("Aplanar planos pesados", switch(t, V["apl"]),
-           "Convierte en imagen de alta resolución solo los planos lentos.")
-    t.fila("Foliar páginas", switch(t, V["fol"]), "Agrega el número de folio con el estilo que elijas.")
-    t.fila("Comprimir", switch(t, V["comp"]), "Reduce el tamaño sin bajar la resolución.")
-    ctk.CTkLabel(p, text="Orden de proceso: aplanar → foliar → comprimir.  El original nunca se modifica.",
-                 font=F(11), text_color=C["texto2"], anchor="w").grid(row=4, column=0, sticky="ew", padx=40, pady=(4, 20))
+    def _armar_documento():
+        nonlocal b_buscar
+        p = pagina_nueva("documento")
+        seccion(p, "Archivo PDF", 0, pady=(6, 8))
+        t = Tarjeta(p, 1)
+        fila_archivo = ctk.CTkFrame(t, fg_color="transparent")
+        fila_archivo.grid(row=0, column=0, columnspan=2, sticky="ew", padx=16, pady=14)
+        fila_archivo.grid_columnconfigure(0, weight=1)
+        e_ruta = entrada(fila_archivo, V["ruta"], ancho=400, state="readonly")
+        e_ruta.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        b_buscar = boton(fila_archivo, "Buscar…", primario=True, ancho=110)
+        b_buscar.grid(row=0, column=1)
+        ctk.CTkLabel(t, textvariable=v_info_doc, font=F(12), text_color=C["texto2"], anchor="w").grid(
+            row=1, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 4))
+        ctk.CTkLabel(t, text="Es el documento de la pestaña activa. «Buscar…» lo abre en una pestaña nueva.",
+                     font=F(11), text_color=C["texto2"], anchor="w").grid(
+            row=2, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 14))
+        seccion(p, "Qué hacer", 2)
+        t = Tarjeta(p, 3)
+        t.fila("Aplanar planos pesados", switch(t, V["apl"]),
+               "Convierte en imagen de alta resolución solo los planos lentos.")
+        t.fila("Foliar páginas", switch(t, V["fol"]), "Agrega el número de folio con el estilo que elijas.")
+        t.fila("Comprimir", switch(t, V["comp"]), "Reduce el tamaño sin bajar la resolución.")
+        ctk.CTkLabel(p, text="Orden de proceso: aplanar → foliar → comprimir.  El original nunca se modifica.",
+                     font=F(11), text_color=C["texto2"], anchor="w").grid(row=4, column=0, sticky="ew", padx=40, pady=(4, 20))
+        b_buscar.configure(command=buscar)
+    por_armar["documento"] = _armar_documento
 
     # ================================================== PAGINA: APLANAR
-    p = pagina_nueva("aplanar")
-    t = Tarjeta(p, 0)
-    sw_apl = switch(t, V["apl"])
-    t.fila("Aplanar planos pesados", sw_apl, "Los planos con muchos vectores se convierten en imagen para que carguen rápido.")
-    seccion(p, "Calidad", 1)
-    t = Tarjeta(p, 2)
-    seg_dpi = segmentado(t, ["200", "300", "400", "500"], V["dpi"], ancho=260)
-    t.fila("Resolución (dpi)", seg_dpi, "400 es el punto ideal entre nitidez y peso.")
-    sw_txt = switch(t, V["texto"])
-    t.fila("Conservar texto buscable", sw_txt, "Permite seguir buscando en los planos con Ctrl+F.")
-    m_nuc = menu(t, ["Automático"] + [str(k) for k in range(1, (os.cpu_count() or 2) + 1)], V["nucleos"], 150)
-    t.fila("Núcleos del procesador", m_nuc, f"Esta PC tiene {os.cpu_count() or 1}. Automático deja uno libre.")
-    seccion(p, "Páginas", 3)
-    t = Tarjeta(p, 4)
-    e_extra = entrada(t, V["extra"], 200)
-    t.fila("Agregar páginas", e_extra, "Además de las detectadas. Ej.: 15, 20-35")
-    e_excl = entrada(t, V["excluir"], 200)
-    t.fila("Excluir páginas", e_excl, "Nunca se aplanan. Ej.: 1-3")
-    ctk.CTkLabel(p, textvariable=v_info_apl, font=F(12), text_color=C["texto2"], anchor="w", justify="left",
-                 wraplength=440).grid(row=5, column=0, sticky="ew", padx=18, pady=(8, 20))
-    ctrl_apl = [seg_dpi, sw_txt, m_nuc, e_extra, e_excl]
+    def _armar_aplanar():
+        nonlocal sw_apl, ctrl_apl
+        p = pagina_nueva("aplanar")
+        t = Tarjeta(p, 0)
+        sw_apl = switch(t, V["apl"])
+        t.fila("Aplanar planos pesados", sw_apl, "Los planos con muchos vectores se convierten en imagen para que carguen rápido.")
+        seccion(p, "Calidad", 1)
+        t = Tarjeta(p, 2)
+        seg_dpi = segmentado(t, ["200", "300", "400", "500"], V["dpi"], ancho=260)
+        t.fila("Resolución (dpi)", seg_dpi, "400 es el punto ideal entre nitidez y peso.")
+        sw_txt = switch(t, V["texto"])
+        t.fila("Conservar texto buscable", sw_txt, "Permite seguir buscando en los planos con Ctrl+F.")
+        m_nuc = menu(t, ["Automático"] + [str(k) for k in range(1, (os.cpu_count() or 2) + 1)], V["nucleos"], 150)
+        t.fila("Núcleos del procesador", m_nuc, f"Esta PC tiene {os.cpu_count() or 1}. Automático deja uno libre.")
+        seccion(p, "Páginas", 3)
+        t = Tarjeta(p, 4)
+        e_extra = entrada(t, V["extra"], 200)
+        t.fila("Agregar páginas", e_extra, "Además de las detectadas. Ej.: 15, 20-35")
+        e_excl = entrada(t, V["excluir"], 200)
+        t.fila("Excluir páginas", e_excl, "Nunca se aplanan. Ej.: 1-3")
+        ctk.CTkLabel(p, textvariable=v_info_apl, font=F(12), text_color=C["texto2"], anchor="w", justify="left",
+                     wraplength=440).grid(row=5, column=0, sticky="ew", padx=18, pady=(8, 20))
+        ctrl_apl = [seg_dpi, sw_txt, m_nuc, e_extra, e_excl]
+    por_armar["aplanar"] = _armar_aplanar
 
     # ================================================== PAGINA: FOLIAR
-    p = pagina_nueva("foliar")
-    p.grid_columnconfigure(0, weight=1)
-    p.grid_columnconfigure(1, weight=0)
-    t = Tarjeta(p, 0, padx=(36, 12))
-    sw_fol = switch(t, V["fol"])
-    t.fila("Foliar páginas", sw_fol, "Número de folio como texto nítido (también en planos aplanados).")
-    seccion(p, "Numeración", 1)
-    t = Tarjeta(p, 2, padx=(36, 12))
-    c_inicio = Contador(t, V["inicio"], 0, 99999999, ancho=90)
-    t.fila("Iniciar en", c_inicio, "Desde 0 en adelante.")
-    c_dig = Contador(t, V["digitos"], 1, 10, ancho=50)
-    t.fila("Dígitos", c_dig, "Total de dígitos: con 4, el 1 sale como 0001.")
-    c_desde = Contador(t, V["desde"], 1, 999999, ancho=70)
-    t.fila("Desde la página", c_desde)
-    c_hasta = Contador(t, V["hasta"], 1, 999999, ancho=70, vacio=True)
-    t.fila("Hasta la página", c_hasta, "Vacío = hasta el final.")
-    seg_fmt = segmentado(t, ["Solo número", "Número / total"], V["formato"], ancho=250)
-    t.fila("Formato", seg_fmt)
-    caja_pref = ctk.CTkFrame(t, fg_color="transparent")
-    seg_pref = segmentado(caja_pref, ["Sin texto", "Pág.", "Folio", "Escribir"], V["prefijo"], ancho=280)
-    seg_pref.pack(anchor="e")
-    e_pref = entrada(caja_pref, V["prefijo_txt"], 280)
-    e_pref.pack(anchor="e", pady=(6, 0))
-    t.fila("Texto antes del número", caja_pref)
-
-    seccion(p, "Estilo", 3)
-    t = Tarjeta(p, 4, padx=(36, 12))
-    m_fuente = menu(t, fuentes, V["fuente"], 230)
-    t.fila("Fuente", m_fuente, "Las primeras 8 son estilo foliador / sello y vienen incluidas.")
-    c_tam = Contador(t, V["tam"], 4, 96, ancho=50, decimales=True)
-    t.fila("Tamaño en papel (pt)", c_tam, "Mide lo mismo en todas las hojas impresas (carta, o A3 los planos).")
-    sw_neg = switch(t, V["negrita"])
-    t.fila("Negrita", sw_neg)
-    caja_col = ctk.CTkFrame(t, fg_color="transparent")
-    puntos_color = []
-    for nombre_c, rgb in COLORES_FOLIO:
-        hx = "#%02x%02x%02x" % rgb
-        b = ctk.CTkButton(caja_col, text="", width=22, height=22, corner_radius=11, fg_color=hx, hover_color=hx,
-                          border_width=0, border_color=C["acento"])
-        b.pack(side="left", padx=3)
-        puntos_color.append((b, rgb))
-    b_otro = ctk.CTkButton(caja_col, text="Otro…", width=58, height=24, corner_radius=12, font=F(11),
-                           fg_color=C["suave"], hover_color=C["suave_h"], text_color=C["texto"])
-    b_otro.pack(side="left", padx=(8, 0))
-    t.fila("Color", caja_col, abajo=True)
-
-    seccion(p, "Posición", 5)
-    t = Tarjeta(p, 6, padx=(36, 12))
-    # selector visual de posicion (hoja con 6 puntos)
-    caja_hoja = ctk.CTkFrame(t, fg_color="transparent")
-    hoja = ctk.CTkFrame(caja_hoja, width=104, height=134, fg_color=C["campo"], corner_radius=8,
-                        border_width=1, border_color=C["borde"])
-    hoja.grid_propagate(False)
-    botones_pos = {}
-    lugares = {"Arriba izquierda": (0.17, 0.12), "Arriba centro": (0.5, 0.12), "Arriba derecha": (0.83, 0.12),
-               "Abajo izquierda": (0.17, 0.88), "Abajo centro": (0.5, 0.88), "Abajo derecha": (0.83, 0.88)}
-    for nombre_p, (rx, ry) in lugares.items():
-        b = ctk.CTkButton(hoja, text="", width=18, height=18, corner_radius=9, fg_color=C["suave_h"],
-                          hover_color=C["acento_h"], border_width=0,
-                          command=lambda n_=nombre_p: V["pos"].set(n_))
-        b.place(relx=rx, rely=ry, anchor="center")
-        botones_pos[nombre_p] = b
-    for k in range(4):  # lineas de "texto" decorativas
-        ctk.CTkFrame(hoja, width=60 - (k % 2) * 16, height=4, fg_color=C["suave"], corner_radius=2).place(
-            relx=0.5, rely=0.32 + k * 0.1, anchor="center")
-    hoja.pack(side="right")
-    ctk.CTkLabel(caja_hoja, textvariable=V["pos"], font=F(12, "bold"), text_color=C["acento"]).pack(
-        side="right", padx=(0, 14))
-    t.fila("Ubicación en la página", caja_hoja, "Tocá uno de los puntos de la hoja.")
-    c_mh = Contador(t, V["mh"], -300, 300, ancho=56, decimales=True)
-    t.fila("Margen horizontal (mm)", c_mh, "En el papel, con la hoja parada. Centrado: + derecha / − izquierda.")
-    c_mv = Contador(t, V["mv"], 0, 300, ancho=56, decimales=True)
-    t.fila("Margen vertical (mm)", c_mv, "En el papel, con la hoja parada.")
-    ctk.CTkLabel(p, text="La vista previa está abajo. El folio también se ve en vivo sobre el documento.",
-                 font=F(11), text_color=C["texto2"], anchor="w", justify="left", wraplength=440).grid(
-        row=7, column=0, sticky="ew", padx=18, pady=(10, 0))
-
-    # vista previa (columna derecha)
-    prev_card = ctk.CTkFrame(p, fg_color=C["tarjeta"], corner_radius=12, border_width=1, border_color=C["borde"])
-    prev_card.grid(row=8, column=0, sticky="new", padx=(12, 12), pady=(14, 16))
-    ctk.CTkLabel(prev_card, text="Vista previa", font=F(14, "bold"), text_color=C["texto"], anchor="w").pack(
-        anchor="w", padx=16, pady=(14, 2))
-    ctk.CTkLabel(prev_card, textvariable=v_ejemplo, font=F(13, "bold"), text_color=C["acento"], anchor="w").pack(
-        anchor="w", padx=16, pady=(0, 10))
     V["girar_prev"] = tk.BooleanVar(value=False)
-    ctk.CTkCheckBox(prev_card, text="Ver como hoja impresa (horizontales paradas)", variable=V["girar_prev"],
-                    font=F(11), text_color=C["texto"], fg_color=C["acento"], hover_color=C["acento_h"],
-                    border_color=C["texto2"], checkbox_width=18, checkbox_height=18, border_width=2,
-                    ).pack(anchor="w", padx=16, pady=(0, 8))
-    lbl_mini = ctk.CTkLabel(prev_card, text="", width=250, height=330, fg_color=C["campo"], corner_radius=8)
-    lbl_mini.pack(padx=16)
-    ctk.CTkLabel(prev_card, text="Acercamiento", font=F(11), text_color=C["texto2"], anchor="w").pack(
-        anchor="w", padx=16, pady=(10, 2))
-    lbl_zoom = ctk.CTkLabel(prev_card, text="", width=250, height=110, fg_color=C["campo"], corner_radius=8)
-    lbl_zoom.pack(padx=16)
-    ctk.CTkLabel(prev_card, textvariable=v_prev_info, font=F(11), text_color=C["texto2"], anchor="w",
-                 justify="left", wraplength=250).pack(anchor="w", padx=16, pady=(8, 14))
-    ctrl_fol = [c_inicio, c_dig, c_desde, c_hasta, seg_fmt, seg_pref, m_fuente, c_tam, sw_neg, b_otro,
-                c_mh, c_mv] + [b for b, _ in puntos_color] + list(botones_pos.values())
+    sw_fol = e_pref = b_otro = lbl_mini = lbl_zoom = None
+    puntos_color, botones_pos, ctrl_fol = [], {}, []
+
+    def _armar_foliar():
+        nonlocal sw_fol, e_pref, b_otro, lbl_mini, lbl_zoom, puntos_color, botones_pos, ctrl_fol
+        p = pagina_nueva("foliar")
+        p.grid_columnconfigure(0, weight=1)
+        p.grid_columnconfigure(1, weight=0)
+        t = Tarjeta(p, 0, padx=(36, 12))
+        sw_fol = switch(t, V["fol"])
+        t.fila("Foliar páginas", sw_fol, "Número de folio como texto nítido (también en planos aplanados).")
+        seccion(p, "Numeración", 1)
+        t = Tarjeta(p, 2, padx=(36, 12))
+        c_inicio = Contador(t, V["inicio"], 0, 99999999, ancho=90)
+        t.fila("Iniciar en", c_inicio, "Desde 0 en adelante.")
+        c_dig = Contador(t, V["digitos"], 1, 10, ancho=50)
+        t.fila("Dígitos", c_dig, "Total de dígitos: con 4, el 1 sale como 0001.")
+        c_desde = Contador(t, V["desde"], 1, 999999, ancho=70)
+        t.fila("Desde la página", c_desde)
+        c_hasta = Contador(t, V["hasta"], 1, 999999, ancho=70, vacio=True)
+        t.fila("Hasta la página", c_hasta, "Vacío = hasta el final.")
+        seg_fmt = segmentado(t, ["Solo número", "Número / total"], V["formato"], ancho=250)
+        t.fila("Formato", seg_fmt)
+        caja_pref = ctk.CTkFrame(t, fg_color="transparent")
+        seg_pref = segmentado(caja_pref, ["Sin texto", "Pág.", "Folio", "Escribir"], V["prefijo"], ancho=280)
+        seg_pref.pack(anchor="e")
+        e_pref = entrada(caja_pref, V["prefijo_txt"], 280)
+        e_pref.pack(anchor="e", pady=(6, 0))
+        t.fila("Texto antes del número", caja_pref)
+
+        seccion(p, "Estilo", 3)
+        t = Tarjeta(p, 4, padx=(36, 12))
+        m_fuente = menu(t, fuentes, V["fuente"], 230)
+        t.fila("Fuente", m_fuente, "Las primeras 8 son estilo foliador / sello y vienen incluidas.")
+        c_tam = Contador(t, V["tam"], 4, 96, ancho=50, decimales=True)
+        t.fila("Tamaño en papel (pt)", c_tam, "Mide lo mismo en todas las hojas impresas (carta, o A3 los planos).")
+        sw_neg = switch(t, V["negrita"])
+        t.fila("Negrita", sw_neg)
+        caja_col = ctk.CTkFrame(t, fg_color="transparent")
+        puntos_color = []
+        for nombre_c, rgb in COLORES_FOLIO:
+            hx = "#%02x%02x%02x" % rgb
+            b = ctk.CTkButton(caja_col, text="", width=22, height=22, corner_radius=11, fg_color=hx, hover_color=hx,
+                              border_width=0, border_color=C["acento"])
+            b.pack(side="left", padx=3)
+            puntos_color.append((b, rgb))
+        b_otro = ctk.CTkButton(caja_col, text="Otro…", width=58, height=24, corner_radius=12, font=F(11),
+                               fg_color=C["suave"], hover_color=C["suave_h"], text_color=C["texto"])
+        b_otro.pack(side="left", padx=(8, 0))
+        t.fila("Color", caja_col, abajo=True)
+
+        seccion(p, "Posición", 5)
+        t = Tarjeta(p, 6, padx=(36, 12))
+        # selector visual de posicion (hoja con 6 puntos)
+        caja_hoja = ctk.CTkFrame(t, fg_color="transparent")
+        hoja = ctk.CTkFrame(caja_hoja, width=104, height=134, fg_color=C["campo"], corner_radius=8,
+                            border_width=1, border_color=C["borde"])
+        hoja.grid_propagate(False)
+        botones_pos = {}
+        lugares = {"Arriba izquierda": (0.17, 0.12), "Arriba centro": (0.5, 0.12), "Arriba derecha": (0.83, 0.12),
+                   "Abajo izquierda": (0.17, 0.88), "Abajo centro": (0.5, 0.88), "Abajo derecha": (0.83, 0.88)}
+        for nombre_p, (rx, ry) in lugares.items():
+            b = ctk.CTkButton(hoja, text="", width=18, height=18, corner_radius=9, fg_color=C["suave_h"],
+                              hover_color=C["acento_h"], border_width=0,
+                              command=lambda n_=nombre_p: V["pos"].set(n_))
+            b.place(relx=rx, rely=ry, anchor="center")
+            botones_pos[nombre_p] = b
+        for k in range(4):  # lineas de "texto" decorativas
+            ctk.CTkFrame(hoja, width=60 - (k % 2) * 16, height=4, fg_color=C["suave"], corner_radius=2).place(
+                relx=0.5, rely=0.32 + k * 0.1, anchor="center")
+        hoja.pack(side="right")
+        ctk.CTkLabel(caja_hoja, textvariable=V["pos"], font=F(12, "bold"), text_color=C["acento"]).pack(
+            side="right", padx=(0, 14))
+        t.fila("Ubicación en la página", caja_hoja, "Tocá uno de los puntos de la hoja.")
+        c_mh = Contador(t, V["mh"], -300, 300, ancho=56, decimales=True)
+        t.fila("Margen horizontal (mm)", c_mh, "En el papel, con la hoja parada. Centrado: + derecha / − izquierda.")
+        c_mv = Contador(t, V["mv"], 0, 300, ancho=56, decimales=True)
+        t.fila("Margen vertical (mm)", c_mv, "En el papel, con la hoja parada.")
+        ctk.CTkLabel(p, text="La vista previa está abajo. El folio también se ve en vivo sobre el documento.",
+                     font=F(11), text_color=C["texto2"], anchor="w", justify="left", wraplength=440).grid(
+            row=7, column=0, sticky="ew", padx=18, pady=(10, 0))
+
+        # vista previa (columna derecha)
+        prev_card = ctk.CTkFrame(p, fg_color=C["tarjeta"], corner_radius=12, border_width=1, border_color=C["borde"])
+        prev_card.grid(row=8, column=0, sticky="new", padx=(12, 12), pady=(14, 16))
+        ctk.CTkLabel(prev_card, text="Vista previa", font=F(14, "bold"), text_color=C["texto"], anchor="w").pack(
+            anchor="w", padx=16, pady=(14, 2))
+        ctk.CTkLabel(prev_card, textvariable=v_ejemplo, font=F(13, "bold"), text_color=C["acento"], anchor="w").pack(
+            anchor="w", padx=16, pady=(0, 10))
+        ctk.CTkCheckBox(prev_card, text="Ver como hoja impresa (horizontales paradas)", variable=V["girar_prev"],
+                        font=F(11), text_color=C["texto"], fg_color=C["acento"], hover_color=C["acento_h"],
+                        border_color=C["texto2"], checkbox_width=18, checkbox_height=18, border_width=2,
+                        ).pack(anchor="w", padx=16, pady=(0, 8))
+        lbl_mini = ctk.CTkLabel(prev_card, text="", width=250, height=330, fg_color=C["campo"], corner_radius=8)
+        lbl_mini.pack(padx=16)
+        ctk.CTkLabel(prev_card, text="Acercamiento", font=F(11), text_color=C["texto2"], anchor="w").pack(
+            anchor="w", padx=16, pady=(10, 2))
+        lbl_zoom = ctk.CTkLabel(prev_card, text="", width=250, height=110, fg_color=C["campo"], corner_radius=8)
+        lbl_zoom.pack(padx=16)
+        ctk.CTkLabel(prev_card, textvariable=v_prev_info, font=F(11), text_color=C["texto2"], anchor="w",
+                     justify="left", wraplength=250).pack(anchor="w", padx=16, pady=(8, 14))
+        ctrl_fol = [c_inicio, c_dig, c_desde, c_hasta, seg_fmt, seg_pref, m_fuente, c_tam, sw_neg, b_otro,
+                    c_mh, c_mv] + [b for b, _ in puntos_color] + list(botones_pos.values())
+        b_otro.configure(command=color_otro)
+        for b, rgb in puntos_color:
+            b.configure(command=lambda c_=rgb: poner_color(c_))
+        poner_color(app.get("color") or (0, 0, 0), refrescar_prev=False)
+        marcar_posicion()
+    por_armar["foliar"] = _armar_foliar
 
     # ================================================== PAGINA: COMPRIMIR
-    p = pagina_nueva("comprimir")
-    t = Tarjeta(p, 0)
-    sw_comp = switch(t, V["comp"])
-    t.fila("Comprimir", sw_comp, "Nunca baja la resolución de las imágenes.")
-    seccion(p, "Nivel", 1)
-    t = Tarjeta(p, 2)
-    seg_nivel = segmentado(t, list(NIVELES_UI), V["nivel"], ancho=290)
-    caja_niv = t.fila("Nivel de compresión", seg_nivel)
-    v_ayuda_niv = tk.StringVar(value=AYUDA_NIVEL[V["nivel"].get()])
-    ctk.CTkLabel(t, textvariable=v_ayuda_niv, font=F(12), text_color=C["texto2"], anchor="w", justify="left",
-                 wraplength=440).grid(row=1, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 14))
-    ctk.CTkLabel(p, text="Los planos aplanados se guardan con compresión exacta cuando es más liviana,\n"
-                         "así las líneas quedan perfectas.", font=F(11), text_color=C["texto2"], anchor="w",
-                 justify="left").grid(row=3, column=0, sticky="ew", padx=18, pady=(10, 20))
-    ctrl_comp = [seg_nivel]
+    def _armar_comprimir():
+        nonlocal sw_comp, ctrl_comp
+        p = pagina_nueva("comprimir")
+        t = Tarjeta(p, 0)
+        sw_comp = switch(t, V["comp"])
+        t.fila("Comprimir", sw_comp, "Nunca baja la resolución de las imágenes.")
+        seccion(p, "Nivel", 1)
+        t = Tarjeta(p, 2)
+        seg_nivel = segmentado(t, list(NIVELES_UI), V["nivel"], ancho=290)
+        caja_niv = t.fila("Nivel de compresión", seg_nivel)
+        ctk.CTkLabel(t, textvariable=v_ayuda_niv, font=F(12), text_color=C["texto2"], anchor="w", justify="left",
+                     wraplength=440).grid(row=1, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 14))
+        ctk.CTkLabel(p, text="Los planos aplanados se guardan con compresión exacta cuando es más liviana,\n"
+                             "así las líneas quedan perfectas.", font=F(11), text_color=C["texto2"], anchor="w",
+                     justify="left").grid(row=3, column=0, sticky="ew", padx=18, pady=(10, 20))
+        ctrl_comp = [seg_nivel]
+    por_armar["comprimir"] = _armar_comprimir
 
     # ================================================== PAGINA: PERFILES
-    p = pagina_nueva("perfiles")
-    ctk.CTkLabel(p, text="Guardá hasta 10 configuraciones completas (aplanar, foliar y comprimir). "
-                         "Al abrir el programa se carga el último perfil usado.",
-                 font=F(12), text_color=C["texto2"], anchor="w", justify="left", wraplength=700).grid(
-        row=0, column=0, sticky="ew", padx=38, pady=(0, 10))
-    t_perf = Tarjeta(p, 1)
-    t_perf.grid_columnconfigure(0, weight=1)
-    filas_perfil = []
-    for k in range(MAX_PERFILES):
-        if k:
-            ctk.CTkFrame(t_perf, height=1, fg_color=C["linea"], corner_radius=0).grid(
-                row=k * 2 - 1, column=0, columnspan=2, sticky="ew", padx=16)
-        izq_ = ctk.CTkFrame(t_perf, fg_color="transparent")
-        izq_.grid(row=k * 2, column=0, sticky="w", padx=(16, 8), pady=8)
-        num = ctk.CTkLabel(izq_, text=str(k + 1), width=28, height=28, corner_radius=14, font=F(12, "bold"),
-                           fg_color=C["suave"], text_color=C["texto2"])
-        num.pack(side="left")
-        nom = ctk.CTkLabel(izq_, text="", font=F(13), text_color=C["texto"], anchor="w")
-        nom.pack(side="left", padx=(12, 0))
-        uso = ctk.CTkLabel(izq_, text="", font=F(11, "bold"), text_color=C["acento"])
-        uso.pack(side="left", padx=(10, 0))
-        der_ = ctk.CTkFrame(t_perf, fg_color="transparent")
-        der_.grid(row=k * 2, column=1, sticky="e", padx=(8, 14), pady=8)
-        bc = boton(der_, "Cargar", ancho=74)
-        bg = boton(der_, "Guardar aquí", primario=True, ancho=104)
-        br = boton(der_, "Renombrar", ancho=92)
-        be = boton(der_, "Eliminar", ancho=78)
-        for b in (bc, bg, br, be):
-            b.configure(height=28, font=F(12))
-            b.pack(side="left", padx=3)
-        filas_perfil.append((num, nom, uso, bc, bg, br, be))
-    ctk.CTkLabel(p, text=f"Los perfiles se guardan en: {almacen.ruta}", font=F(10), text_color=C["texto2"],
-                 anchor="w", wraplength=700, justify="left").grid(row=2, column=0, sticky="ew", padx=40, pady=(8, 20))
+    def _armar_perfiles():
+        nonlocal filas_perfil
+        p = pagina_nueva("perfiles")
+        ctk.CTkLabel(p, text="Guardá hasta 10 configuraciones completas (aplanar, foliar y comprimir). "
+                             "Al abrir el programa se carga el último perfil usado.",
+                     font=F(12), text_color=C["texto2"], anchor="w", justify="left", wraplength=700).grid(
+            row=0, column=0, sticky="ew", padx=38, pady=(0, 10))
+        t_perf = Tarjeta(p, 1)
+        t_perf.grid_columnconfigure(0, weight=1)
+        filas_perfil = []
+        for k in range(MAX_PERFILES):
+            if k:
+                ctk.CTkFrame(t_perf, height=1, fg_color=C["linea"], corner_radius=0).grid(
+                    row=k * 2 - 1, column=0, columnspan=2, sticky="ew", padx=16)
+            izq_ = ctk.CTkFrame(t_perf, fg_color="transparent")
+            izq_.grid(row=k * 2, column=0, sticky="w", padx=(16, 8), pady=8)
+            num = ctk.CTkLabel(izq_, text=str(k + 1), width=28, height=28, corner_radius=14, font=F(12, "bold"),
+                               fg_color=C["suave"], text_color=C["texto2"])
+            num.pack(side="left")
+            nom = ctk.CTkLabel(izq_, text="", font=F(13), text_color=C["texto"], anchor="w")
+            nom.pack(side="left", padx=(12, 0))
+            uso = ctk.CTkLabel(izq_, text="", font=F(11, "bold"), text_color=C["acento"])
+            uso.pack(side="left", padx=(10, 0))
+            der_ = ctk.CTkFrame(t_perf, fg_color="transparent")
+            der_.grid(row=k * 2, column=1, sticky="e", padx=(8, 14), pady=8)
+            bc = boton(der_, "Cargar", ancho=74)
+            bg = boton(der_, "Guardar aquí", primario=True, ancho=104)
+            br = boton(der_, "Renombrar", ancho=92)
+            be = boton(der_, "Eliminar", ancho=78)
+            for b in (bc, bg, br, be):
+                b.configure(height=28, font=F(12))
+                b.pack(side="left", padx=3)
+            filas_perfil.append((num, nom, uso, bc, bg, br, be))
+        ctk.CTkLabel(p, text=f"Los perfiles se guardan en: {almacen.ruta}", font=F(10), text_color=C["texto2"],
+                     anchor="w", wraplength=700, justify="left").grid(row=2, column=0, sticky="ew", padx=40, pady=(8, 20))
+        for i, (_, _, _, bc, bg, br, be) in enumerate(filas_perfil):
+            bc.configure(command=lambda i=i: perfil_cargar(i))
+            bg.configure(command=lambda i=i: perfil_guardar(i))
+            br.configure(command=lambda i=i: perfil_renombrar(i))
+            be.configure(command=lambda i=i: perfil_eliminar(i))
+        refrescar_perfiles()
+    por_armar["perfiles"] = _armar_perfiles
 
     # ================================================== PAGINA: APARIENCIA
-    p = pagina_nueva("apariencia")
-    seccion(p, "Modo", 0, pady=(6, 8))
-    t = Tarjeta(p, 1)
-    caja_temas = ctk.CTkFrame(t, fg_color="transparent")
-    caja_temas.grid(row=0, column=0, columnspan=2, sticky="w", padx=18, pady=16)
-    botones_tema = {}
-    for k, modo in enumerate(("Claro", "Oscuro", "Automático")):
-        img = ctk.CTkImage(_miniatura_tema(modo), size=(96, 64))
-        b = ctk.CTkButton(caja_temas, text="", image=img, width=108, height=74, corner_radius=10,
-                          fg_color="transparent", hover_color=C["suave"], border_width=2,
-                          border_color=C["tarjeta"], command=lambda m=modo: V["apariencia"].set(m))
-        b.grid(row=0, column=k, padx=10)
-        ctk.CTkLabel(caja_temas, text=modo, font=F(12), text_color=C["texto"]).grid(row=1, column=k, pady=(4, 0))
-        botones_tema[modo] = b
-    ctk.CTkLabel(t, text="Automático sigue el modo de Windows (claro u oscuro).", font=F(11),
-                 text_color=C["texto2"], anchor="w").grid(row=1, column=0, columnspan=2, sticky="w", padx=20, pady=(0, 14))
-    seccion(p, "Color del tema", 2)
-    t = Tarjeta(p, 3)
-    caja_col_tema = ctk.CTkFrame(t, fg_color="transparent")
-    caja_col_tema.grid(row=0, column=0, columnspan=2, sticky="w", padx=18, pady=16)
-    tema_actual = almacen.datos.get("tema", "Azul gris")
-    v_tema = tk.StringVar(value=tema_actual)
-    botones_color_tema = {}
+    def _armar_apariencia():
+        nonlocal b_pdf_def, botones_tema, b_buscar_act, botones_color_tema, b_reiniciar_tema
+        p = pagina_nueva("apariencia")
+        seccion(p, "Modo", 0, pady=(6, 8))
+        t = Tarjeta(p, 1)
+        caja_temas = ctk.CTkFrame(t, fg_color="transparent")
+        caja_temas.grid(row=0, column=0, columnspan=2, sticky="w", padx=18, pady=16)
+        botones_tema = {}
+        for k, modo in enumerate(("Claro", "Oscuro", "Automático")):
+            img = ctk.CTkImage(_miniatura_tema(modo), size=(96, 64))
+            b = ctk.CTkButton(caja_temas, text="", image=img, width=108, height=74, corner_radius=10,
+                              fg_color="transparent", hover_color=C["suave"], border_width=2,
+                              border_color=C["tarjeta"], command=lambda m=modo: V["apariencia"].set(m))
+            b.grid(row=0, column=k, padx=10)
+            ctk.CTkLabel(caja_temas, text=modo, font=F(12), text_color=C["texto"]).grid(row=1, column=k, pady=(4, 0))
+            botones_tema[modo] = b
+        ctk.CTkLabel(t, text="Automático sigue el modo de Windows (claro u oscuro).", font=F(11),
+                     text_color=C["texto2"], anchor="w").grid(row=1, column=0, columnspan=2, sticky="w", padx=20, pady=(0, 14))
+        seccion(p, "Color del tema", 2)
+        t = Tarjeta(p, 3)
+        caja_col_tema = ctk.CTkFrame(t, fg_color="transparent")
+        caja_col_tema.grid(row=0, column=0, columnspan=2, sticky="w", padx=18, pady=16)
+        v_tema = tk.StringVar(value=tema_actual)
+        botones_color_tema = {}
 
-    def muestra_tema(nombre, oscuro_):
-        pal = TEMAS[nombre]
-        k_ = 1 if oscuro_ else 0
-        W_, H_, E_ = 96, 64, 3
-        im_ = Image.new("RGB", (W_ * E_, H_ * E_), _hex(pal["fondo"][k_]))
-        d_ = ImageDraw.Draw(im_)
-        d_.rectangle([0, 0, W_ * E_, 14 * E_], fill=_hex(pal["lat_fin"][k_]))
-        d_.rounded_rectangle([6 * E_, 20 * E_, 30 * E_, 58 * E_], radius=4 * E_, fill=_hex(pal["tarjeta"][k_]))
-        d_.rounded_rectangle([36 * E_, 20 * E_, 90 * E_, 58 * E_], radius=4 * E_, fill=_hex(pal["tarjeta"][k_]))
-        d_.rounded_rectangle([42 * E_, 44 * E_, 70 * E_, 52 * E_], radius=3 * E_, fill=_hex(pal["acento"][k_]))
-        d_.rounded_rectangle([42 * E_, 28 * E_, 84 * E_, 32 * E_], radius=2 * E_, fill=_hex(pal["suave"][k_]))
-        d_.rounded_rectangle([0, 0, W_ * E_ - 1, H_ * E_ - 1], radius=6 * E_, outline=_hex(pal["borde"][k_]), width=E_)
-        return im_.resize((W_, H_), Image.LANCZOS)
+        def muestra_tema(nombre, oscuro_):
+            pal = TEMAS[nombre]
+            k_ = 1 if oscuro_ else 0
+            W_, H_, E_ = 96, 64, 3
+            im_ = Image.new("RGB", (W_ * E_, H_ * E_), _hex(pal["fondo"][k_]))
+            d_ = ImageDraw.Draw(im_)
+            d_.rectangle([0, 0, W_ * E_, 14 * E_], fill=_hex(pal["lat_fin"][k_]))
+            d_.rounded_rectangle([6 * E_, 20 * E_, 30 * E_, 58 * E_], radius=4 * E_, fill=_hex(pal["tarjeta"][k_]))
+            d_.rounded_rectangle([36 * E_, 20 * E_, 90 * E_, 58 * E_], radius=4 * E_, fill=_hex(pal["tarjeta"][k_]))
+            d_.rounded_rectangle([42 * E_, 44 * E_, 70 * E_, 52 * E_], radius=3 * E_, fill=_hex(pal["acento"][k_]))
+            d_.rounded_rectangle([42 * E_, 28 * E_, 84 * E_, 32 * E_], radius=2 * E_, fill=_hex(pal["suave"][k_]))
+            d_.rounded_rectangle([0, 0, W_ * E_ - 1, H_ * E_ - 1], radius=6 * E_, outline=_hex(pal["borde"][k_]), width=E_)
+            return im_.resize((W_, H_), Image.LANCZOS)
 
-    for k, nombre in enumerate(TEMAS):
-        img = ctk.CTkImage(light_image=muestra_tema(nombre, False), dark_image=muestra_tema(nombre, True),
-                           size=(96, 64))
-        b = ctk.CTkButton(caja_col_tema, text="", image=img, width=108, height=74, corner_radius=10,
-                          fg_color="transparent", hover_color=C["suave"], border_width=2,
-                          border_color=C["acento"] if nombre == tema_actual else C["tarjeta"],
-                          command=lambda n_=nombre: elegir_tema(n_))
-        b.grid(row=0, column=k, padx=10)
-        ctk.CTkLabel(caja_col_tema, text=nombre, font=F(12), text_color=C["texto"]).grid(row=1, column=k, pady=(4, 0))
-        botones_color_tema[nombre] = b
-    v_aviso_tema = tk.StringVar(value="Cada color tiene su versión clara y oscura (según el Modo de arriba).")
-    ctk.CTkLabel(t, textvariable=v_aviso_tema, font=F(11), text_color=C["texto2"], anchor="w").grid(
-        row=1, column=0, sticky="w", padx=20, pady=(0, 14))
-    b_reiniciar_tema = boton(t, "Reiniciar ahora", primario=True, ancho=140)
+        for k, nombre in enumerate(TEMAS):
+            img = ctk.CTkImage(light_image=muestra_tema(nombre, False), dark_image=muestra_tema(nombre, True),
+                               size=(96, 64))
+            b = ctk.CTkButton(caja_col_tema, text="", image=img, width=108, height=74, corner_radius=10,
+                              fg_color="transparent", hover_color=C["suave"], border_width=2,
+                              border_color=C["acento"] if nombre == tema_actual else C["tarjeta"],
+                              command=lambda n_=nombre: elegir_tema(n_))
+            b.grid(row=0, column=k, padx=10)
+            ctk.CTkLabel(caja_col_tema, text=nombre, font=F(12), text_color=C["texto"]).grid(row=1, column=k, pady=(4, 0))
+            botones_color_tema[nombre] = b
+        ctk.CTkLabel(t, textvariable=v_aviso_tema, font=F(11), text_color=C["texto2"], anchor="w").grid(
+            row=1, column=0, sticky="w", padx=20, pady=(0, 14))
+        b_reiniciar_tema = boton(t, "Reiniciar ahora", primario=True, ancho=140)
 
-    seccion(p, "Actualizaciones", 4)
-    t = Tarjeta(p, 5)
-    b_buscar_act = boton(t, "Buscar actualizaciones", ancho=190)
-    b_pdf_def = boton(t, "Abrir los PDF con PdFOL", ancho=190)
-    t.fila(f"Versión: {VERSION}  ·  by {AUTOR}", b_buscar_act,
-           "Al abrir, PdFOL revisa si hay una versión nueva (si no hay internet, no molesta). "
-           "Actualizar nunca es obligatorio y conserva tus perfiles.")
-    t.fila("Programa para los PDF", b_pdf_def,
-           "Que Windows abra los PDF con PdFOL (doble clic en un PDF). Disponible en la versión instalada."
-           if not es_instalado() else "Que Windows abra los PDF con PdFOL al hacer doble clic en un PDF.")
+        seccion(p, "Actualizaciones", 4)
+        t = Tarjeta(p, 5)
+        b_buscar_act = boton(t, "Buscar actualizaciones", ancho=190)
+        b_pdf_def = boton(t, "Abrir los PDF con PdFOL", ancho=190)
+        t.fila(f"Versión: {VERSION}  ·  by {AUTOR}", b_buscar_act,
+               "Al abrir, PdFOL revisa si hay una versión nueva (si no hay internet, no molesta). "
+               "Actualizar nunca es obligatorio y conserva tus perfiles.")
+        t.fila("Programa para los PDF", b_pdf_def,
+               "Que Windows abra los PDF con PdFOL (doble clic en un PDF). Disponible en la versión instalada."
+               if not es_instalado() else "Que Windows abra los PDF con PdFOL al hacer doble clic en un PDF.")
+        b_buscar_act.configure(command=lambda: buscar_actualizacion(manual=True))
+        b_reiniciar_tema.configure(command=reiniciar_pdfol)
+        b_pdf_def.configure(command=abrir_siempre_con_pdfol)
+        for n_, b_ in botones_tema.items():
+            b_.configure(border_color=C["acento"] if n_ == V["apariencia"].get() else C["tarjeta"])
+    por_armar["apariencia"] = _armar_apariencia
 
     # ================================================== PAGINA: ORGANIZAR
     # Miniaturas livianas: se dibujan solo las que se ven (y algunas mas), en un hilo aparte,
@@ -4851,13 +4946,9 @@ def iniciar_interfaz():
            "mjob": None, "procs": [], "med": {}, "pedida": set(), "ver_arch": {}, "comp": False, "orgver": 0,
            "busq": None, "nbusq": 0, "res": {}, "res_pila": [], "modo_res": False, "capas": {},
            "pest_w": {}, "arr_mini": None, "arr_pest": None, "npal": 0}
-    q_pag, q_min, q_bus, q_sal = mp.Queue(), mp.Queue(), mp.Queue(), mp.Queue()
 
     def iniciar_dibujantes():
-        for q_, f_ in ((q_pag, _proceso_render), (q_min, _proceso_render), (q_bus, _proceso_buscar)):
-            pr = mp.Process(target=f_, args=(q_, q_sal), daemon=True)
-            pr.start()
-            vis["procs"].append(pr)
+        vis["procs"].extend(procs_inicio)  # ya arrancaron al principio
 
     def detener_dibujantes():
         for q_ in (q_pag, q_min, q_bus):
@@ -5768,6 +5859,12 @@ def iniciar_interfaz():
     def visor_dibujar(*_):
         for v_ in vistas:
             v_.dibujar()
+
+    def redibujar_todo(*_):
+        """v2.5: vuelve a dibujar el visor y las miniaturas (al volver a mostrarse la ventana)."""
+        vis["ult"] = vis["ult_mini"] = None
+        visor_dibujar()
+        mini_dibujar()
 
     def enviar_pedidos():
         lista = list(vistas[0].ult) + (list(vistas[1].ult) if vis["comp"] else [])
@@ -6903,6 +7000,7 @@ def iniciar_interfaz():
         cvm.yview_moveto(0)
         visor_dibujar()
         mini_dibujar()
+        raiz.after(250, redibujar_todo)  # v2.5: que nunca quede la hoja del documento anterior
         return True
 
     def tiene_organizado(t_):
@@ -7188,6 +7286,7 @@ def iniciar_interfaz():
     iconos_panel = {c_: ctk.CTkImage(_icono(c_, col_, 26), size=(26, 26)) for c_, _t, col_, *_r in ICONOS}
 
     def abrir_panel(clave):
+        asegurar_pagina(clave)
         if app["pagina"] != "visor":
             mostrar_pagina("visor")
         for k_, p_ in paneles.items():
@@ -7539,7 +7638,6 @@ def iniciar_interfaz():
             return
         salir_del_todo()
 
-    b_buscar_act.configure(command=lambda: buscar_actualizacion(manual=True))
 
     # ================= color del tema (se aplica al volver a abrir)
     def elegir_tema(nombre):
@@ -7572,7 +7670,6 @@ def iniciar_interfaz():
             return
         salir_del_todo()
 
-    b_reiniciar_tema.configure(command=reiniciar_pdfol)
 
     # ================= menu del husky (arriba a la izquierda)
     def menu_husky():
@@ -7750,7 +7847,6 @@ def iniciar_interfaz():
                    f"+{raiz.winfo_rooty() + (raiz.winfo_height() - w.winfo_reqheight()) // 3}")
         w.after(80, lambda: (_tenir_barra_titulo(w, modo_oscuro()), w.focus_force()))
 
-    b_pdf_def.configure(command=abrir_siempre_con_pdfol)
 
     # ================= instancia unica: los PDF abiertos con doble clic entran como pestanas
     def escuchar_instancias(srv):
@@ -7824,6 +7920,7 @@ def iniciar_interfaz():
     TITULOS = {c: tt for c, tt, *_ in ICONOS}
 
     def mostrar_pagina(clave):
+        asegurar_pagina(clave)
         if clave in EN_PANEL:  # Aplanar, Foliar y Comprimir van en el panel derecho del visor
             abrir_panel(clave)
             return
@@ -8008,11 +8105,6 @@ def iniciar_interfaz():
             almacen.guardar()
             refrescar_perfiles()
 
-    for i, (_, _, _, bc, bg, br, be) in enumerate(filas_perfil):
-        bc.configure(command=lambda i=i: perfil_cargar(i))
-        bg.configure(command=lambda i=i: perfil_guardar(i))
-        br.configure(command=lambda i=i: perfil_renombrar(i))
-        be.configure(command=lambda i=i: perfil_eliminar(i))
 
     # ---------------- color / posicion / ejemplo / vista previa
     def poner_color(rgb, refrescar_prev=True):
@@ -8053,6 +8145,8 @@ def iniciar_interfaz():
 
     def pedir_preview():
         app["prev_job"] = None
+        if lbl_mini is None:  # v2.5: el panel Foliar todavia no esta armado (nadie la ve)
+            return
         c, txt = textos_ejemplo()
         ruta = V["ruta"].get().strip().strip('"')
         ruta = ruta if os.path.isfile(ruta) else None
@@ -8305,8 +8399,9 @@ def iniciar_interfaz():
                         v_prev_info.set(v_prev_info.get().split("\n")[0] + f"\nHoja {'horizontal' if acostada_ else 'vertical'}, "
                                         f"se imprime en {papel_}. Folio en papel: {decimal(V['tam'], 12.0, 2, 200):g} pt (≈{mm_:.1f} mm), "
                                         "igual en todas las hojas.")
-                    lbl_mini.configure(image=ctk.CTkImage(mini, size=mini.size), width=mini.width, height=mini.height)
-                    lbl_zoom.configure(image=ctk.CTkImage(zoom, size=zoom.size), width=zoom.width, height=zoom.height)
+                    if lbl_mini is not None:
+                        lbl_mini.configure(image=ctk.CTkImage(mini, size=mini.size), width=mini.width, height=mini.height)
+                        lbl_zoom.configure(image=ctk.CTkImage(zoom, size=zoom.size), width=zoom.width, height=zoom.height)
                 elif tipo == "abrir_externo":
                     for r_ in ev[1]:
                         abrir_pestana(r_)
@@ -8318,6 +8413,7 @@ def iniciar_interfaz():
                         raiz.focus_force()
                     except Exception:
                         pass
+                    raiz.after(120, redibujar_todo)  # v2.5: si estaba minimizado, que no quede la hoja anterior
                 elif tipo == "version":
                     _, info_, manual_ = ev
                     if hay_version_nueva(info_):
@@ -8459,14 +8555,10 @@ def iniciar_interfaz():
     # ---------------- conexiones
     prev = Previsualizador(eventos.put)
     prev.start()
-    b_buscar.configure(command=buscar)
     b_analizar.configure(command=analizar_click)
     b_procesar.configure(command=procesar_click)
     b_cancelar.configure(command=cancelar_click)
     b_carpeta.configure(command=abrir_carpeta)
-    b_otro.configure(command=color_otro)
-    for b, rgb in puntos_color:
-        b.configure(command=lambda c_=rgb: poner_color(c_))
     for k in ("apl", "fol", "comp", "nivel", "ruta", "prefijo"):
         V[k].trace_add("write", refrescar)
     for k in ("inicio", "digitos", "desde", "hasta", "formato", "prefijo", "prefijo_txt", "fuente", "tam",
@@ -8500,7 +8592,9 @@ def iniciar_interfaz():
             raiz.lift()
             raiz.focus_force()
         raiz.after(350, cerrar_pantalla_de_inicio)
+        raiz.after(700, armar_lo_que_falta)  # v2.5: las paginas que no se ven, despues
     raiz.after(150, iniciar_dibujantes)  # primero se muestra la ventana
+    raiz.bind("<Map>", lambda e: raiz.after(60, redibujar_todo) if e.widget is raiz else None, add="+")
     # ---- v2.4: arrastrar PDF a la ventana (visor: se abren; Organizar: las opciones de «Unir»)
     def soltar_pdf(datos):
         try:

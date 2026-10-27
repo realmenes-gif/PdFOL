@@ -6,11 +6,11 @@ if not "%~1"=="_abierto" (
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
-title Creando PdFOL v2.4 portable
+title Creando PdFOL v2.5 portable
 
 echo.
 echo  ==========================================================
-echo    Creando la version PORTABLE de PdFOL v2.4
+echo    Creando la version PORTABLE de PdFOL v2.5
 echo    (solo se hace una vez; tarda unos minutos)
 echo  ==========================================================
 echo.
@@ -36,8 +36,8 @@ if errorlevel 1 (
     goto :fin
 )
 
-if not exist "PdFOL_v2.4.py" (
-    echo  No encuentro PdFOL_v2.4.py en esta carpeta.
+if not exist "PdFOL_v2.5.py" (
+    echo  No encuentro PdFOL_v2.5.py en esta carpeta.
     echo  Descomprimi el .zip completo y ejecuta este .bat desde esa carpeta.
     goto :fin
 )
@@ -81,7 +81,7 @@ python -m PyInstaller --noconfirm --clean --windowed --onedir ^
     --hidden-import PIL.BmpImagePlugin ^
     --add-data "%~dp0fuentes;fuentes" ^
     --distpath "%~dp0_dist" --workpath "%~dp0_build" --specpath "%~dp0_build" ^
-    PdFOL_v2.4.py
+    PdFOL_v2.5.py
 if errorlevel 1 (
     echo.
     echo  Hubo un error armando el programa. Copia el texto de arriba y envialo.
@@ -130,7 +130,7 @@ goto :sin_inno
 :armar_instalador
 "%ISCC%" /Q "%~dp0PdFOL.iss"
 if errorlevel 1 goto :sin_instalador
-set "INSTALADOR=PdFOL_v2.4_instalador.exe"
+set "INSTALADOR=PdFOL_v2.5_instalador.exe"
 goto :listo
 
 :sin_inno_descarga
