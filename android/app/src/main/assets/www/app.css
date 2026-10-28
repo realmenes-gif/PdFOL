@@ -103,9 +103,10 @@ body.con-docs #fila-pest { display: block; }
 #docs { flex: 1; position: relative; min-width: 0; background: var(--hoja-fondo); }
 .visor {
   position: absolute; inset: 0; overflow: auto; -webkit-overflow-scrolling: touch;
-  touch-action: pan-x pan-y; overscroll-behavior: contain;
+  /* v1.5.2: el deslizar y el zoom los maneja PdFOL (mas suave que el del sistema) */
+  touch-action: none; overscroll-behavior: contain;
 }
-.visor .pdfViewer { padding: 8px 0 72px; }
+.visor .pdfViewer { padding: 8px 0 72px; will-change: auto; }
 .visor .pdfViewer .page {
   margin: 0 auto 10px; border: 0; box-shadow: 0 1px 4px rgba(0, 0, 0, .18); background-clip: content-box;
   --page-border: none;

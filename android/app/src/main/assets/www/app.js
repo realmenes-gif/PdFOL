@@ -2,9 +2,14 @@
 // Usa pdf.js (dibujo, texto, busqueda y marcas), pdf-lib (para estampar la firma al guardar)
 // y MuPDF (para cambiar el texto del PDF; se carga solo al usarlo).
 
-const VERSION = "1.5.1";
+const VERSION = "1.5.2";
 const REPO = "realmenes-gif/PdFOL";
 const CAMBIOS = [
+  ["1.5.2", [
+    "Zoom nuevo: mientras pellizcás la hoja solo se agranda (sin redibujar) y al soltar queda justo en el punto que enfocaste.",
+    "Zoom máximo limitado a lo que el celular puede dibujar: ya no se pone en blanco al acercar mucho.",
+    "Deslizar más suave: velocidad máxima más baja y una frenada corta y pareja. Tocar la hoja la frena.",
+  ]],
   ["1.5.1", [
     "Zoom con dos dedos: ahora se queda en el punto que estás enfocando (antes se corría hacia abajo).",
     "Planos: el control de «hoja en blanco» ya no confunde las líneas finas con una hoja vacía (no vuelve al dibujo lento).",
@@ -447,7 +452,7 @@ function ponerImagenNativa(t, pv) {
 // zoom alto: la parte que se ve, a resolucion completa
 function programarDetalle(t) {
   clearTimeout(t.tDetalle);
-  t.tDetalle = setTimeout(() => ponerDetalles(t), 220);
+  t.tDetalle = setTimeout(() => ponerDetalles(t), 140);
 }
 function ponerDetalles(t) {
   if (!t.nativo) return;
@@ -644,8 +649,13 @@ function actualizarZoomTxt() {
   const t = tabAct();
   if (t) $("z-val").textContent = Math.round(t.viewer.currentScale * 100) + " %";
 }
-$("z-mas").onclick = () => tabAct()?.viewer.increaseScale();
-$("z-menos").onclick = () => tabAct()?.viewer.decreaseScale();
+function zoomBoton(f) {
+  const t = tabAct(); if (!t) return;
+  const r = t.cont.getBoundingClientRect();
+  zoomEn(t, t.viewer.currentScale * f, r.left + r.width / 2, r.top + r.height / 2);
+}
+$("z-mas").onclick = () => zoomBoton(1.25);
+$("z-menos").onclick = () => zoomBoton(1 / 1.25);
 $("z-val").onclick = (e) => {
   const t = tabAct(); if (!t) return;
   menu([
@@ -674,59 +684,138 @@ async function irAPagina() {
 }
 
 // ---------------------------------------------------------------- gestos: pellizcar, doble toque y dos dedos
-// pdf.js resta al punto del zoom la posicion de la hoja dentro de su contenedor (offsetTop/Left), no la de la
-// pantalla: con la barra de arriba el zoom se corria hacia abajo. Se le pasa el punto ya convertido.
-function origenZoom(t, x, y) {
-  const r = t.cont.getBoundingClientRect();
-  return [x - r.left + t.cont.offsetLeft, y - r.top + t.cont.offsetTop];
+const LADO_MAX = 12000;
+function escalaMax(t) {
+  let mayor = 0;
+  for (const pv of t.viewer._pages || []) {
+    const vp = pv.viewport;
+    if (vp) mayor = Math.max(mayor, Math.max(vp.width, vp.height) / vp.scale);
+    if (mayor && pv.id > 3) break;
+  }
+  return Math.max(1, Math.min(10, LADO_MAX / ((mayor || 842) * (96 / 72))));
 }
+const ESCALA_MIN = 0.25;
+// zoom a una escala dejando quieto el punto de la pantalla (x, y): se mide en que lugar de la hoja esta
+// y despues de cambiar la escala se mueve la vista para que ese mismo lugar vuelva a quedar bajo el dedo
+function anclaEn(t, x, y) {
+  const p = paginaEnPunto(t, x, y);
+  if (p) return { n: p.n, fx: p.fx, fy: p.fy };
+  const pv = t.viewer.getPageView(t.viewer.currentPageNumber - 1);
+  if (!pv) return null;
+  const r = pv.div.getBoundingClientRect();
+  return { n: pv.id, fx: (x - r.left) / r.width, fy: (y - r.top) / r.height };
+}
+function zoomEn(t, escala, x, y, ancla = anclaEn(t, x, y)) {
+  const v = t.viewer;
+  escala = Math.min(escalaMax(t), Math.max(ESCALA_MIN, escala));
+  if (Math.abs(escala - v.currentScale) < 0.001) return;
+  v.currentScale = escala;
+  const pv = ancla && v.getPageView(ancla.n - 1);
+  if (!pv) return;
+  const r = pv.div.getBoundingClientRect();
+  t.cont.scrollLeft += r.left + ancla.fx * r.width - x;
+  t.cont.scrollTop += r.top + ancla.fy * r.height - y;
+}
+
 function armarGestos(t) {
   const c = t.cont;
-  let pinza = null, toque = null, previo = null, ultScroll = 0, ultTipo = "touch";
+  const hoja = c.firstElementChild; // .pdfViewer
+  let pinza = null, toque = null, previo = null, ultTipo = "touch";
+  let arrastre = null, inercia = 0;
   const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
   const centro = (a, b) => [(a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2];
-  c.addEventListener("scroll", () => { ultScroll = Date.now(); }, { passive: true });
+  // el desplazamiento lo hace PdFOL (no el del sistema, que es muy brusco): suave y con una inercia corta
+  const VEL_MAX = 2.6;   // px por ms
+  const FRENO = 330;     // ms (cuanto dura el deslizamiento)
+  function pararInercia() { if (inercia) { cancelAnimationFrame(inercia); inercia = 0; return true; } return false; }
+  function lanzar(vx, vy) {
+    let t0 = performance.now();
+    const paso = (ahora) => {
+      const dt = Math.min(48, ahora - t0); t0 = ahora;
+      const f = Math.exp(-dt / FRENO);
+      c.scrollLeft -= vx * dt; c.scrollTop -= vy * dt;
+      vx *= f; vy *= f;
+      inercia = Math.hypot(vx, vy) > 0.02 ? requestAnimationFrame(paso) : 0;
+    };
+    inercia = requestAnimationFrame(paso);
+  }
+  const propio = (e) => c.classList.contains("dibujando") ||
+    e.target.closest?.(".sel-tirador, .firma-en-pag, .selectedEditor, .barra-sel, textarea, [contenteditable=true]");
   c.addEventListener("pointerdown", (e) => { ultTipo = e.pointerType; }, { passive: true });
   c.addEventListener("touchstart", (e) => {
+    const frenada = pararInercia(); // un toque mientras la hoja se desliza solo la frena: no cuenta como toque
     if (e.touches.length === 2) {
       const [a, b] = e.touches;
-      pinza = { d0: dist(a, b), esc0: t.viewer.currentScale, c0: centro(a, b), activa: false };
-      toque = previo = null;
+      arrastre = null; toque = previo = null;
+      const c0 = centro(a, b), hr = hoja.getBoundingClientRect();
+      pinza = { d0: dist(a, b), esc0: t.viewer.currentScale, c0, cen: c0, s: 1, activa: false,
+        ancla: anclaEn(t, c0[0], c0[1]), org: [c0[0] - hr.left, c0[1] - hr.top] };
       e.preventDefault();
     } else if (e.touches.length === 1) {
       const p = e.touches[0];
-      // un toque mientras la hoja todavia se desliza solo la frena: no cuenta como toque
-      toque = { t: Date.now(), x: p.clientX, y: p.clientY, sy: c.scrollTop, sx: c.scrollLeft,
-        movio: Date.now() - ultScroll < 150 };
+      toque = { t: Date.now(), x: p.clientX, y: p.clientY, movio: frenada };
+      arrastre = propio(e) ? null : { x: p.clientX, y: p.clientY, activo: false, muestras: [[performance.now(), p.clientX, p.clientY]] };
     } else {
-      toque = previo = null;
+      toque = previo = null; arrastre = null;
     }
   }, { passive: false });
   c.addEventListener("touchmove", (e) => {
-    if (toque && e.touches.length === 1) {
+    if (e.touches.length === 1 && toque) {
       const p = e.touches[0];
       if (Math.hypot(p.clientX - toque.x, p.clientY - toque.y) > 10) toque.movio = true;
     }
+    if (e.touches.length === 1 && arrastre && !pinza) {
+      const p = e.touches[0];
+      if (!arrastre.activo && Math.hypot(p.clientX - arrastre.x, p.clientY - arrastre.y) < 6) return;
+      arrastre.activo = true;
+      e.preventDefault();
+      c.scrollLeft -= p.clientX - arrastre.x;
+      c.scrollTop -= p.clientY - arrastre.y;
+      arrastre.x = p.clientX; arrastre.y = p.clientY;
+      const m = arrastre.muestras; m.push([performance.now(), p.clientX, p.clientY]);
+      if (m.length > 6) m.shift();
+      return;
+    }
     if (!pinza || e.touches.length !== 2) return;
     e.preventDefault();
+    // mientras dura el pellizco la hoja solo se agranda en pantalla (sin redibujar): no salta ni se pone en blanco
     const [a, b] = e.touches;
-    const cen = centro(a, b);
-    // dos dedos tambien mueven la hoja (sirve mientras se marca o se dibuja)
-    c.scrollLeft -= cen[0] - pinza.c0[0];
-    c.scrollTop -= cen[1] - pinza.c0[1];
-    pinza.c0 = cen;
-    const rel = dist(a, b) / pinza.d0;
-    if (!pinza.activa && Math.abs(rel - 1) < 0.06) return; // el zoom empieza solo con un pellizco claro
-    pinza.activa = true;
-    const objetivo = Math.min(10, Math.max(0.25, pinza.esc0 * rel));
-    const f = objetivo / t.viewer.currentScale;
-    if (Math.abs(f - 1) > 0.015) t.viewer.updateScale({ scaleFactor: f, origin: origenZoom(t, cen[0], cen[1]), drawingDelay: 350 });
+    pinza.cen = centro(a, b);
+    let s = dist(a, b) / pinza.d0;
+    if (!pinza.activa && Math.abs(s - 1) < 0.05) s = 1; else pinza.activa = true;
+    s = Math.min(escalaMax(t) / pinza.esc0, Math.max(ESCALA_MIN / pinza.esc0, s));
+    pinza.s = s;
+    hoja.style.transformOrigin = `${pinza.org[0]}px ${pinza.org[1]}px`;
+    hoja.style.transform = `translate(${pinza.cen[0] - pinza.c0[0]}px, ${pinza.cen[1] - pinza.c0[1]}px) scale(${s})`;
+    sel?.t === t && capaSel(t).replaceChildren();
   }, { passive: false });
+  function terminarPinza() {
+    const pz = pinza; pinza = null;
+    hoja.style.transform = ""; hoja.style.transformOrigin = "";
+    if (!pz) return;
+    if (pz.s !== 1) zoomEn(t, pz.esc0 * pz.s, pz.cen[0], pz.cen[1], pz.ancla);
+    else { c.scrollLeft -= pz.cen[0] - pz.c0[0]; c.scrollTop -= pz.cen[1] - pz.c0[1]; }
+    if (sel?.t === t) requestAnimationFrame(dibujarSel);
+  }
   c.addEventListener("touchend", (e) => {
-    if (e.touches.length < 2) pinza = null;
+    if (pinza && e.touches.length < 2) { terminarPinza(); arrastre = null; toque = null; return; }
+    if (arrastre && !e.touches.length) {
+      if (arrastre.activo) {
+        const m = arrastre.muestras, ahora = performance.now();
+        const ult = m[m.length - 1], pri = m.find((x) => ahora - x[0] < 90) || ult;
+        const dt = ult[0] - pri[0];
+        if (dt > 0 && ahora - ult[0] < 60) {
+          let vx = (ult[1] - pri[1]) / dt, vy = (ult[2] - pri[2]) / dt;
+          const v = Math.hypot(vx, vy);
+          if (v > VEL_MAX) { vx *= VEL_MAX / v; vy *= VEL_MAX / v; }
+          if (v > 0.15) lanzar(vx, vy);
+        }
+      }
+      arrastre = null;
+    }
     if (!toque || e.touches.length) { if (e.touches.length) toque = null; return; }
     const ahora = Date.now();
-    const esToque = !toque.movio && ahora - toque.t < 260 && c.scrollTop === toque.sy && c.scrollLeft === toque.sx;
+    const esToque = !toque.movio && ahora - toque.t < 260;
     if (esToque && modo === "ver" && previo && ahora - previo.t < 320 && Math.hypot(toque.x - previo.x, toque.y - previo.y) < 30) {
       e.preventDefault();
       dobleToque(t, toque.x, toque.y);
@@ -736,12 +825,13 @@ function armarGestos(t) {
     }
     toque = null;
   }, { passive: false });
-  c.addEventListener("touchcancel", () => { pinza = null; toque = previo = null; });
+  c.addEventListener("touchcancel", () => { terminarPinza(); toque = previo = null; arrastre = null; });
   // con mouse (tablet con teclado o navegador): Ctrl + rueda y doble clic
   c.addEventListener("wheel", (e) => {
+    pararInercia();
     if (!e.ctrlKey) return;
     e.preventDefault();
-    t.viewer.updateScale({ scaleFactor: e.deltaY < 0 ? 1.1 : 1 / 1.1, origin: origenZoom(t, e.clientX, e.clientY), drawingDelay: 250 });
+    zoomEn(t, t.viewer.currentScale * (e.deltaY < 0 ? 1.1 : 1 / 1.1), e.clientX, e.clientY);
   }, { passive: false });
   c.addEventListener("dblclick", (e) => {
     if (ultTipo === "mouse" && modo === "ver" && !e.target.closest(".textLayer span")) dobleToque(t, e.clientX, e.clientY);
@@ -752,7 +842,7 @@ function dobleToque(t, x, y) {
   const pv = v.getPageView(v.currentPageNumber - 1);
   const anchoPag = pv ? pv.viewport.width / v.currentScale : 600;
   const ajuste = (t.cont.clientWidth - 16) / anchoPag;
-  if (v.currentScale < ajuste * 1.6) v.updateScale({ scaleFactor: (ajuste * 2.2) / v.currentScale, origin: origenZoom(t, x, y) });
+  if (v.currentScale < ajuste * 1.6) zoomEn(t, ajuste * 2.2, x, y);
   else v.currentScaleValue = "page-width";
 }
 

@@ -1,8 +1,8 @@
-## PdFOL para Android v1.5.1 · by Meneses999
+## PdFOL para Android v1.5.2 · by Meneses999
 
-- **Zoom con dos dedos**: ahora se queda en el punto que estás enfocando (antes se corría hacia abajo, sobre todo en planos).
-- **Planos**: el control de «hoja en blanco» ya no confunde las líneas finas con una hoja vacía, así no vuelve al dibujo lento.
-- **Escaneos**: el texto se reconoce solo en la página que ves y en las 5 de antes y de después (la más cercana primero); las demás, cuando llegues a ellas. Carga más rápido.
-- Sigue todo lo de la v1.5: **Marcar → «Cambiar»** para reemplazar texto del PDF (párrafo o línea).
+- **Zoom nuevo**: mientras pellizcás, la hoja solo se agranda en pantalla (sin redibujar, sin saltos); al soltar se dibuja nítida y queda **justo en el punto que enfocaste**.
+- **Ya no se pone en blanco** al acercar mucho: el zoom máximo llega hasta donde el celular puede dibujar la hoja (en un plano A1, unas 25 veces).
+- **Deslizar más suave**: velocidad máxima más baja y una frenada corta y pareja. Tocar la hoja mientras se desliza la frena.
+- Sigue todo lo anterior: cambiar texto del PDF, texto de escaneos solo cerca de la página que ves, planos rápidos.
 
-**Descarga:** `PdFOL_Android_v1.5.1.apk` (casi todos los teléfonos). Para teléfonos viejos de 32 bits: `PdFOL_Android_v1.5.1_32bits.apk`.
+**Descarga:** `PdFOL_Android_v1.5.2.apk` (casi todos los teléfonos). Para teléfonos viejos de 32 bits: `PdFOL_Android_v1.5.2_32bits.apk`.
