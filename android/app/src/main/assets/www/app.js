@@ -1,9 +1,14 @@
 // PdFOL para Android · visor de PDF: buscar, marcar y firmar · by Meneses999
 // Usa pdf.js (dibujo, texto, busqueda y marcas) y pdf-lib (para estampar la firma al guardar).
 
-const VERSION = "1.4";
+const VERSION = "1.4.1";
 const REPO = "realmenes-gif/PdFOL";
 const CAMBIOS = [
+  ["1.4.1", [
+    "Si una hoja sale en blanco con el dibujo rápido, PdFOL lo detecta y la dibuja de la forma anterior.",
+    "Menú ⋮ → «Dibujo rápido de planos» para prenderlo o apagarlo.",
+    "Diagnóstico en «Acerca de».",
+  ]],
   ["1.4", [
     "Planos mucho más rápidos: las hojas las dibuja el motor de PDF del teléfono, como imagen plana.",
     "Texto: escribí sobre la hoja (Marcar → Texto), con color y tamaño.",
@@ -241,6 +246,14 @@ function menuMas(boton) {
     it.push({ t: "Cerrar el documento", i: ICO.cerrar, f: () => cerrarPestana(act) });
     it.push("-");
   }
+  if (NATIVO_DISPONIBLE) it.push({ t: "Dibujo rápido de planos", i: ICO.pagina, marcado: prefs.motorRapido !== false,
+    der: prefs.motorRapido !== false ? "Sí" : "No", f: () => {
+      prefs.motorRapido = prefs.motorRapido === false;
+      guardarPrefs();
+      NATIVO = NATIVO_DISPONIBLE && prefs.motorRapido;
+      if (!NATIVO) { for (const x of pest) fallarNativo(x); aviso("Dibujo rápido apagado: las hojas las dibuja pdf.js (como antes)."); }
+      else aviso("Dibujo rápido prendido: se usa en los documentos que abras desde ahora.");
+    } });
   it.push({ t: "Modo noche (hojas oscuras)", i: ICO.luna, marcado: prefs.noche, der: prefs.noche ? "Sí" : "No",
     f: () => { prefs.noche = !prefs.noche; guardarPrefs(); aplicarTema(); } });
   if (!esAncho()) it.push({ t: "Apariencia", i: ICO.apariencia, f: dialogoApariencia });
@@ -355,7 +368,10 @@ const MAX_PIX = Math.min(16777216, Math.round(4096 * 4096 * Math.min(1, (window.
 // Los planos con miles de lineas son lentos para pdf.js. Si el telefono tiene su motor de PDF, la hoja se
 // dibuja ahi (en C++) y se muestra como imagen plana; pdf.js queda solo para el texto (buscar, copiar, marcar).
 let renderOrig = null;
-const NATIVO = (() => { try { return !!(AN && AN.renderNativo && AN.renderNativo()); } catch (e) { return false; } })();
+const NATIVO_DISPONIBLE = (() => { try { return !!(AN && AN.renderNativo && AN.renderNativo()); } catch (e) { return false; } })();
+let NATIVO = NATIVO_DISPONIBLE && prefs.motorRapido !== false;
+const diag = { ok: 0, err: 0, blancas: 0, apagado: 0, notas: [] };
+function notaDiag(t) { diag.notas.push(new Date().toLocaleTimeString() + " " + t); if (diag.notas.length > 12) diag.notas.shift(); }
 const MAX_NATIVO = 8e6; // pixeles de la imagen base de cada hoja (lo que pasa de eso va en un detalle aparte)
 function tareaVacia() { return { promise: Promise.resolve(), cancel() {}, onContinue: null, separateAnnots: false }; }
 function parchearRender(pag) {
@@ -403,10 +419,12 @@ function ponerImagenNativa(t, pv) {
     img.decoding = "async";
     img.dataset.u = url;
     img.onload = () => {
+      diag.ok++;
       const v = wrap.querySelector("img.nativa");
       if (v && v !== img) v.replaceWith(img); else if (!img.isConnected) wrap.prepend(img);
+      if (!t.revisadaBlanca) { t.revisadaBlanca = true; setTimeout(() => revisarBlanca(t, pv, img), 1500); }
     };
-    img.onerror = () => fallarNativo(t);
+    img.onerror = () => { diag.err++; notaDiag(`error al dibujar pág. ${pv.id}`); fallarNativo(t); };
     img.src = url;
     if (!viejo) wrap.prepend(img); // la primera vez va directo (asi no queda la hoja en blanco)
   }
@@ -445,10 +463,32 @@ function ponerDetalles(t) {
     img.src = url;
   }
 }
+// control: si la hoja que dibujo el telefono salio toda blanca pero la pagina tiene texto, algo fallo:
+// se vuelve a pdf.js para ese documento
+function revisarBlanca(t, pv, img) {
+  try {
+    if (!t.nativo || !img.naturalWidth) return;
+    const texto = (pv.textLayer?.div?.textContent || "").replace(/\s/g, "");
+    if (texto.length < 20) return;
+    const cv = document.createElement("canvas");
+    cv.width = 48; cv.height = 48;
+    const cx = cv.getContext("2d", { willReadFrequently: true });
+    cx.drawImage(img, 0, 0, 48, 48);
+    const px = cx.getImageData(0, 0, 48, 48).data;
+    let oscuros = 0;
+    for (let i = 0; i < px.length; i += 4) if (px[i] + px[i + 1] + px[i + 2] < 700) oscuros++;
+    if (oscuros < 3) {
+      diag.blancas++;
+      notaDiag(`hoja en blanco del motor (pág. ${pv.id}): se usa pdf.js`);
+      fallarNativo(t);
+    }
+  } catch (e) { notaDiag("control: " + e.message); }
+}
 // si el motor del telefono no puede (por ejemplo, un PDF con contraseña), vuelve pdf.js
 async function fallarNativo(t) {
   if (!t.nativo) return;
   t.nativo = false;
+  diag.apagado++;
   console.warn("PdFOL: dibujo nativo no disponible para este documento; se usa pdf.js");
   for (let n = 1; n <= t.pdf.numPages; n++) {
     try { (await t.pdf.getPage(n))._pdfolNativo = false; } catch (e) { /* nada */ }
@@ -1950,9 +1990,24 @@ function acercaDe() {
     titulo: `PdFOL v${VERSION} para Android`,
     html: `<p>Visor de PDF: buscar, marcar y firmar.<br><b>by Meneses999</b></p>
       <p>Las firmas quedan dibujadas en el PDF (firma manuscrita, no certificado digital).</p>
-      <p style="font-size:12px">Usa pdf.js (Mozilla, licencia Apache 2.0) y pdf-lib (licencia MIT).</p>${htmlCambios(CAMBIOS.slice(0, 1))}`,
+      <p style="font-size:12px">Usa pdf.js (Mozilla, licencia Apache 2.0) y pdf-lib (licencia MIT).</p>${htmlCambios(CAMBIOS.slice(0, 1))}
+      <div class="ver-tit">Diagnóstico</div><pre style="white-space:pre-wrap;font-size:11px;color:var(--texto2);margin:4px 0 0">${textoDiag()}</pre>`,
     botones: [["ok", "Cerrar", true]],
   });
+}
+function textoDiag() {
+  let java = "", tel = "";
+  try { java = AN?.ultimoError ? AN.ultimoError() : ""; tel = AN?.telefono ? AN.telefono() : ""; } catch (e) { /* nada */ }
+  const chrome = (navigator.userAgent.match(/Chrome\/([\d.]+)/) || [])[1] || "?";
+  const lineas = [
+    `Teléfono: ${tel || "?"} · WebView ${chrome}`,
+    `Dibujo rápido: ${NATIVO_DISPONIBLE ? (NATIVO ? "prendido" : "apagado") : "no disponible"}`,
+    `Hojas del motor: ${diag.ok} bien, ${diag.err} con error, ${diag.blancas} en blanco · volvió a pdf.js: ${diag.apagado}`,
+    ...pest.map((x) => `· ${x.nombre}: ${x.nativo ? "motor del teléfono" : "pdf.js"}`),
+    java ? `Último error del motor: ${java}` : "",
+    ...diag.notas,
+  ];
+  return lineas.filter(Boolean).join("\n").replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
 }
 function compararVersion(a, b) {
   const x = a.split(".").map(Number), y = b.split(".").map(Number);

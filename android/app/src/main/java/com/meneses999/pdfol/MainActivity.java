@@ -268,6 +268,7 @@ public class MainActivity extends Activity {
     }
 
     final Map<String, Motor> motores = new HashMap<>();
+    volatile String ultimoError = "";
 
     PdfRenderer motor(String id) throws IOException {
         Motor m = motores.get(id);
@@ -348,6 +349,7 @@ public class MainActivity extends Activity {
             }
         } catch (Throwable e) {
             Log.w("PdFOL", "motor nativo: " + e);
+            ultimoError = e.getClass().getSimpleName() + ": " + e.getMessage();
             return new WebResourceResponse("text/plain", "utf-8", 500, "Error", cab, null);
         }
         ByteArrayOutputStream o = new ByteArrayOutputStream();
@@ -685,6 +687,16 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public boolean renderNativo() {
             return true;
+        }
+
+        @JavascriptInterface
+        public String ultimoError() {
+            return ultimoError;
+        }
+
+        @JavascriptInterface
+        public String telefono() {
+            return android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL + " · Android " + android.os.Build.VERSION.RELEASE;
         }
 
         // reconoce el texto de una pagina (la dibuja el motor nativo, sin pasar la imagen por la pagina web)
