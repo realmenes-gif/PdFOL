@@ -18,7 +18,7 @@ echo "ID=$ID"
 adb shell am start -W -a android.intent.action.VIEW -d "content://media/external/file/$ID" -t application/pdf --grant-read-uri-permission -n com.meneses999.pdfol/.MainActivity
 sleep 14
 adb exec-out screencap -p > "$OUT/2_documento.png"
-adb logcat -d | grep -E "PdFOL EDITOR" | tail -3
+adb logcat -d | grep -E "PdFOL EDITOR" | tail -3 > "$OUT/editor.txt"; cat "$OUT/editor.txt"
 # buscar con el teclado: toca la lupa (arriba a la derecha) no es fiable por coordenadas: se usa la tecla de busqueda
 # planos pesados y pagina girada: dibujo nativo
 for f in plano girado; do
