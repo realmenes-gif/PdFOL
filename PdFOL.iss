@@ -2,7 +2,7 @@
 ; Se instala SOLO para el usuario (no pide administrador), en %LOCALAPPDATA%\Programs\PdFOL,
 ; con acceso en el menu Inicio, desinstalador y PdFOL en «Abrir con» para los PDF.
 #ifndef MiVersion
-  #define MiVersion "2.6"
+  #define MiVersion "2.7"
 #endif
 
 [Setup]

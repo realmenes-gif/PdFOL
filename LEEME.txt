@@ -1,4 +1,4 @@
-PdFOL v2.6  -  Visor de PDF · Organizar · Unir · Aplanar · Foliar · Comprimir
+PdFOL v2.7  -  Visor de PDF · Organizar · Unir · Aplanar · Foliar · Comprimir
 =============================================================================
 by Meneses999
 
@@ -7,7 +7,7 @@ CREAR EL PORTABLE Y EL INSTALADOR (una sola vez)
 2. Doble clic en "crear_portable.bat" y esperá a que diga LISTO (3 a 6 minutos).
 3. Se crean:
    - la carpeta "PdFOL_portable" con "PdFOL.exe" (portable: se copia y se usa, sin instalar);
-   - "PdFOL_v2.6_instalador.exe" (instalable).
+   - "PdFOL_v2.7_instalador.exe" (instalable).
    (Desde la v2.0 el programa se llama PdFOL.exe, sin número: así se puede actualizar solo.)
    Para el instalador el .bat usa Inno Setup (gratis): si no lo tenés, lo baja e instala
    solo para tu usuario la primera vez. Si no hay internet, el portable igual queda listo.
@@ -40,6 +40,9 @@ VISOR (nuevo en la v2.0)
   o arrastrando uno o varios PDF sobre PdFOL.exe). Si PdFOL ya está abierto, el PDF
   entra como pestaña nueva en la misma ventana. Ctrl+W cierra la pestaña, Ctrl+Tab
   pasa a la siguiente, clic con la rueda sobre la pestaña también la cierra.
+- v2.7: TEXTO › Cambiar toma el PÁRRAFO entero (o el renglón) y usa la misma fuente del original si
+  está instalada. Más de 25 fuentes comunes de Windows, con negrita y cursiva. Arreglado el salto a la
+  página 1 al hacer clic en un texto.
 - v2.6: FIRMAR Y SELLAR (barra de arriba): hasta 5 firmas y 5 sellos desde imagen, con el fondo
   blanco quitado solo. Clic en la hoja para ponerla; arrastrar la mueve; la esquina cambia el tamaño;
   clic derecho o Supr la quita. Es una firma en imagen, no un certificado digital.

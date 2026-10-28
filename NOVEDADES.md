@@ -1,9 +1,9 @@
-## PdFOL v2.6 · by Meneses999
+## PdFOL v2.7 · by Meneses999
 
-- **Firmar y sellar**: hasta **5 firmas y 5 sellos** guardados, desde imagen. El **fondo blanco se quita solo** y queda transparente.
-- Se usa **por defecto la última** firma y el último sello. Clic en la hoja para ponerla, arrastrar para moverla, la esquina para el tamaño.
-- **Texto**: escribí texto nuevo sobre la hoja o **cambiá un texto que ya está en el PDF**.
-- Todo se guarda con «Guardar cambios» (en el mismo PDF o como copia).
-- **Más liviano y rápido al abrir**: fuera librerías que no se usaban.
+- **Cambiar texto por párrafo**: Texto → Cambiar → «Párrafo» (o «Renglón») y hacé clic en el texto. El texto nuevo se acomoda al ancho del párrafo.
+- **Fuentes**: las más comunes de Windows (Arial, Calibri, Times New Roman, Cambria, Verdana, Georgia, Segoe UI, Tahoma, Garamond, Century Gothic, Consolas y más), con **negrita** y **cursiva**. Solo aparecen las instaladas en tu PC.
+- «Cambiar» usa **la misma fuente** del texto original si está instalada; si no, la más parecida. Podés elegir otra en «Fuente».
+- El PDF guardado lleva solo las letras usadas de cada fuente: sigue liviano.
+- **Arreglado**: al hacer clic en un texto para cambiarlo, la hoja ya no salta a la página 1.
 
-**Descargas:** `PdFOL_instalador.exe` o `PdFOL_portable.zip`. Si ya tenés PdFOL, abrilo: te ofrece actualizar.
+**Descarga:** `PdFOL_v2.7_portable.zip` (sin instalar) o `PdFOL_v2.7_instalador.exe`.

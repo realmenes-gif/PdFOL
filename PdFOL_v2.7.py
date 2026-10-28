@@ -352,12 +352,19 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v2.6"
-VERSION_INTERNA = "2.6"
+VERSION = "v2.7"
+VERSION_INTERNA = "2.7"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v2.7", [
+        "Cambiar texto por párrafo entero (o por renglón, a elección): el texto nuevo se acomoda al ancho del párrafo.",
+        "Fuentes: las más comunes de Windows (Arial, Calibri, Times New Roman, Cambria, Verdana, Georgia, Segoe UI y más).",
+        "«Cambiar» usa la misma fuente del texto original si está instalada; negrita y cursiva incluidas.",
+        "Del PDF guardado solo quedan las letras usadas de cada fuente: el archivo sigue liviano.",
+        "Arreglado: al hacer clic en un texto para cambiarlo, la hoja ya no salta a la página 1.",
+    ]),
     ("v2.6", [
         "Firmar y sellar: hasta 5 firmas y 5 sellos desde imagen; el fondo blanco se quita solo y queda transparente.",
         "Se usa por defecto la última firma y el último sello que usaste. Se mueven y se cambia el tamaño con el mouse.",
@@ -2666,7 +2673,6 @@ def icono_husky(tam=64):
 
 # ---------------------------------------------------------------- v2.6: firmas, sellos y texto
 MAX_FIRMAS = 5
-FUENTES_TEXTO = {"Helvetica": ("helv", "hebo"), "Times": ("tiro", "tibo"), "Courier": ("cour", "cobo")}
 
 
 def carpeta_firmas():
@@ -2717,6 +2723,152 @@ def fuente_parecida(flags, nombre):
     if flags & 4 or "times" in n_ or "serif" in n_ and "sans" not in n_ or "roman" in n_ or "georgia" in n_:
         return {(0, 0): "tiro", (1, 0): "tibo", (0, 1): "tiit", (1, 1): "tibi"}[(int(negrita), int(cursiva))]
     return {(0, 0): "helv", (1, 0): "hebo", (0, 1): "heit", (1, 1): "hebi"}[(int(negrita), int(cursiva))]
+
+
+# ---------------------------------------------------------------- v2.7: fuentes para escribir y cambiar texto
+# familia: ((normal, negrita, cursiva, negrita cursiva), interna parecida). Solo se ofrecen las que estan
+# instaladas en Windows (o en la carpeta de fuentes del usuario); las «(PDF)» siempre estan.
+FUENTES_ED = {
+    "Arial": (("arial.ttf", "arialbd.ttf", "ariali.ttf", "arialbi.ttf"), "helv"),
+    "Arial Narrow": (("ARIALN.TTF", "ARIALNB.TTF", "ARIALNI.TTF", "ARIALNBI.TTF"), "helv"),
+    "Arial Black": (("ariblk.ttf", None, None, None), "helv"),
+    "Calibri": (("calibri.ttf", "calibrib.ttf", "calibrii.ttf", "calibriz.ttf"), "helv"),
+    "Calibri Light": (("calibril.ttf", None, "calibrili.ttf", None), "helv"),
+    "Aptos": (("Aptos.ttf", "Aptos-Bold.ttf", "Aptos-Italic.ttf", "Aptos-Bold-Italic.ttf"), "helv"),
+    "Segoe UI": (("segoeui.ttf", "segoeuib.ttf", "segoeuii.ttf", "segoeuiz.ttf"), "helv"),
+    "Verdana": (("verdana.ttf", "verdanab.ttf", "verdanai.ttf", "verdanaz.ttf"), "helv"),
+    "Tahoma": (("tahoma.ttf", "tahomabd.ttf", None, None), "helv"),
+    "Trebuchet MS": (("trebuc.ttf", "trebucbd.ttf", "trebucit.ttf", "trebucbi.ttf"), "helv"),
+    "Century Gothic": (("GOTHIC.TTF", "GOTHICB.TTF", "GOTHICI.TTF", "GOTHICBI.TTF"), "helv"),
+    "Gill Sans MT": (("GIL_____.TTF", "GILB____.TTF", "GILI____.TTF", "GILBI___.TTF"), "helv"),
+    "Franklin Gothic": (("framd.ttf", "FRADM.TTF", "framdit.ttf", "FRADMIT.TTF"), "helv"),
+    "Candara": (("Candara.ttf", "Candarab.ttf", "Candarai.ttf", "Candaraz.ttf"), "helv"),
+    "Corbel": (("corbel.ttf", "corbelb.ttf", "corbeli.ttf", "corbelz.ttf"), "helv"),
+    "Times New Roman": (("times.ttf", "timesbd.ttf", "timesi.ttf", "timesbi.ttf"), "tiro"),
+    "Cambria": (("cambria.ttc", "cambriab.ttf", "cambriai.ttf", "cambriaz.ttf"), "tiro"),
+    "Georgia": (("georgia.ttf", "georgiab.ttf", "georgiai.ttf", "georgiaz.ttf"), "tiro"),
+    "Garamond": (("GARA.TTF", "GARABD.TTF", "GARAIT.TTF", None), "tiro"),
+    "Book Antiqua": (("BKANT.TTF", "ANTQUAB.TTF", "ANTQUAI.TTF", "ANTQUABI.TTF"), "tiro"),
+    "Bookman Old Style": (("BOOKOS.TTF", "BOOKOSB.TTF", "BOOKOSI.TTF", "BOOKOSBI.TTF"), "tiro"),
+    "Palatino Linotype": (("pala.ttf", "palab.ttf", "palai.ttf", "palabi.ttf"), "tiro"),
+    "Constantia": (("constan.ttf", "constanb.ttf", "constani.ttf", "constanz.ttf"), "tiro"),
+    "Century Schoolbook": (("SCHLBK.TTF", "SCHLBKB.TTF", "SCHLBKI.TTF", "SCHLBKBI.TTF"), "tiro"),
+    "Courier New": (("cour.ttf", "courbd.ttf", "couri.ttf", "courbi.ttf"), "cour"),
+    "Consolas": (("consola.ttf", "consolab.ttf", "consolai.ttf", "consolaz.ttf"), "cour"),
+    "Lucida Console": (("lucon.ttf", None, None, None), "cour"),
+    "Comic Sans MS": (("comic.ttf", "comicbd.ttf", "comici.ttf", "comicz.ttf"), "helv"),
+    "Impact": (("impact.ttf", None, None, None), "helv"),
+    "Helvetica (PDF)": (None, "helv"),
+    "Times (PDF)": (None, "tiro"),
+    "Courier (PDF)": (None, "cour"),
+}
+# nombres que usan los PDF para fuentes que en Windows se llaman distinto
+ALIAS_FUENTE = {"helvetica": "Arial", "arialmt": "Arial", "timesroman": "Times New Roman", "times": "Times New Roman",
+                "timesnewromanpsmt": "Times New Roman", "courier": "Courier New", "couriernewpsmt": "Courier New",
+                "segoe": "Segoe UI", "gillsans": "Gill Sans MT", "franklingothic": "Franklin Gothic",
+                "bookantiqua": "Book Antiqua", "palatino": "Palatino Linotype", "centuryschoolbook": "Century Schoolbook",
+                "comicsans": "Comic Sans MS"}
+_INTERNAS = {"helv": ("helv", "hebo", "heit", "hebi"), "tiro": ("tiro", "tibo", "tiit", "tibi"),
+             "cour": ("cour", "cobo", "coit", "cobi")}
+_LISTA_FUENTES = {}
+_CACHE_FUENTE_ED = {}
+
+
+def _archivo_fuente_ed(nombre):
+    """Busca un archivo de fuente en las carpetas de Windows (sin distinguir mayusculas; la lista se lee una vez)."""
+    if not nombre:
+        return None
+    for c in (_carpeta_fuentes(), os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Windows", "Fonts")):
+        if c not in _LISTA_FUENTES:
+            try:
+                _LISTA_FUENTES[c] = {f.lower(): os.path.join(c, f) for f in os.listdir(c)}
+            except Exception:
+                _LISTA_FUENTES[c] = {}
+        p = _LISTA_FUENTES[c].get(nombre.lower())
+        if p:
+            return p
+    return None
+
+
+def fuentes_ed_disponibles():
+    return [f for f, (arch, _b) in FUENTES_ED.items() if arch is None or _archivo_fuente_ed(arch[0])]
+
+
+def fuente_ed(fam, neg=False, cur=False):
+    """(archivo o None, nombre interno, fitz.Font) de la familia con negrita / cursiva (o lo mas parecido)."""
+    clave = (fam, bool(neg), bool(cur))
+    if clave in _CACHE_FUENTE_ED:
+        return _CACHE_FUENTE_ED[clave]
+    arch, base = FUENTES_ED.get(fam, FUENTES_ED["Helvetica (PDF)"])
+    idx = (1 if neg else 0) + (2 if cur else 0)
+    interna = _INTERNAS[base][idx]
+    archivo = None
+    if arch:
+        for k_ in dict.fromkeys((idx, idx & 1, idx & 2, 0)):
+            archivo = _archivo_fuente_ed(arch[k_])
+            if archivo:
+                break
+    try:
+        font = fitz.Font(fontfile=archivo) if archivo else fitz.Font(interna)
+    except Exception:
+        archivo, font = None, fitz.Font(interna)
+    _CACHE_FUENTE_ED[clave] = (archivo, interna, font)
+    return _CACHE_FUENTE_ED[clave]
+
+
+def kw_fuente(it_):
+    """Argumentos de fuente para insert_text / insert_textbox de PyMuPDF."""
+    archivo, interna, _f = fuente_ed(it_.get("fam", "Helvetica (PDF)"), it_.get("neg"), it_.get("cur"))
+    if not archivo:
+        return {"fontname": interna}
+    import zlib
+    return {"fontname": "PdF%X" % (zlib.crc32(archivo.lower().encode()) & 0xFFFFFF), "fontfile": archivo}
+
+
+def ancho_texto(txt, it_, tam=None):
+    return fuente_ed(it_.get("fam", "Helvetica (PDF)"), it_.get("neg"), it_.get("cur"))[2].text_length(
+        txt, fontsize=tam or it_["tam"])
+
+
+def familia_de(nombre_pdf, flags=0):
+    """La familia de la lista mas parecida a la fuente del texto original (la misma, si esta instalada)."""
+    n_ = (nombre_pdf or "").split("+")[-1].lower()
+    limpio = "".join(ch for ch in n_.split("-")[0].split(",")[0] if ch.isalpha())
+    for sufijo in ("psmt", "mt", "ps", "regular", "bold", "italic", "oblique"):
+        if limpio.endswith(sufijo) and len(limpio) > len(sufijo) + 2:
+            limpio = limpio[: -len(sufijo)]
+    disp = fuentes_ed_disponibles()
+    mejor = None
+    for fam in disp:
+        k_ = "".join(ch for ch in fam.lower() if ch.isalpha())
+        if limpio.startswith(k_) and (not mejor or len(k_) > len(mejor[1])):
+            mejor = (fam, k_)
+    if mejor:
+        return mejor[0]
+    for k_, fam in ALIAS_FUENTE.items():
+        if limpio.startswith(k_) and fam in disp:
+            return fam
+    base = fuente_parecida(flags, nombre_pdf)
+    return {"c": "Courier (PDF)", "t": "Times (PDF)"}.get(base[0], "Helvetica (PDF)")
+
+
+def partir_renglones(txt, it_, ancho=None):
+    """Renglones del texto (ajustados al ancho, si hay)."""
+    out = []
+    for parr in txt.split("\n"):
+        if not ancho:
+            out.append(parr)
+            continue
+        lin = ""
+        for pal in parr.split(" "):
+            prueba = f"{lin} {pal}" if lin else pal
+            if lin and ancho_texto(prueba, it_) > ancho:
+                out.append(lin)
+                lin = pal
+            else:
+                lin = prueba
+        out.append(lin)
+    return out
 
 
 def ruta_icono_ico():
@@ -3795,8 +3947,12 @@ def iniciar_interfaz():
 
     # ================================================== v2.6: PANEL TEXTO
     v_tmodo = tk.StringVar(value="Agregar")
-    v_tfuente = tk.StringVar(value=almacen.datos.get("texto_fuente", "Helvetica"))
+    _f0 = almacen.datos.get("texto_fuente", "Arial")
+    _f0 = {"Helvetica": "Arial", "Times": "Times New Roman", "Courier": "Courier New"}.get(_f0, _f0)
+    v_tfuente = tk.StringVar(value=_f0)  # se revisa que este instalada al armar el panel
     v_tneg = tk.BooleanVar(value=bool(almacen.datos.get("texto_negrita", False)))
+    v_tcur = tk.BooleanVar(value=bool(almacen.datos.get("texto_cursiva", False)))
+    v_talc = tk.StringVar(value=almacen.datos.get("texto_alcance", "Párrafo"))
     v_ttam = tk.StringVar(value=str(almacen.datos.get("texto_tam", 12)))
     texto_col = {"rgb": tuple(almacen.datos.get("texto_color", (0, 0, 0))), "puntos": []}
     v_texto_ayuda = tk.StringVar(value="")
@@ -3805,12 +3961,19 @@ def iniciar_interfaz():
         p = pagina_nueva("texto")
         t = Tarjeta(p, 0)
         t.fila("Qué hacer", segmentado(t, ["Agregar", "Cambiar"], v_tmodo, ancho=200, cmd=lambda _v: ayuda_texto()))
+        t.fila("Al cambiar, tomar", segmentado(t, ["Párrafo", "Renglón"], v_talc, ancho=200,
+                                               cmd=lambda _v: (almacen.datos.update(texto_alcance=v_talc.get()),
+                                                               ayuda_texto())))
         ctk.CTkLabel(p, textvariable=v_texto_ayuda, font=F(11), text_color=C["texto2"], anchor="w", justify="left",
                      wraplength=440).grid(row=1, column=0, sticky="ew", padx=18, pady=(4, 6))
         seccion(p, "Letra", 2)
         t = Tarjeta(p, 3)
-        t.fila("Fuente", menu(t, list(FUENTES_TEXTO), v_tfuente, 150, cmd=lambda _v: estilo_texto_cambio()))
+        disp_ = fuentes_ed_disponibles()
+        if v_tfuente.get() not in disp_:
+            v_tfuente.set("Arial" if "Arial" in disp_ else "Helvetica (PDF)")
+        t.fila("Fuente", menu(t, disp_, v_tfuente, 200, cmd=lambda _v: estilo_texto_cambio()))
         t.fila("Negrita", switch(t, v_tneg))
+        t.fila("Cursiva", switch(t, v_tcur))
         t.fila("Tamaño (pt)", Contador(t, v_ttam, 4, 144, ancho=50, decimales=True))
         caja_c = ctk.CTkFrame(t, fg_color="transparent")
         texto_col["puntos"] = []
@@ -3821,15 +3984,15 @@ def iniciar_interfaz():
             b_.pack(side="left", padx=3)
             texto_col["puntos"].append((b_, rgb))
         t.fila("Color", caja_c, abajo=True)
-        ctk.CTkLabel(p, text="«Cambiar» usa la letra estándar más parecida a la original (las fuentes de adentro del "
-                             "PDF no siempre se pueden reutilizar). Nada se escribe en el PDF hasta «Guardar cambios».",
+        ctk.CTkLabel(p, text="«Cambiar» usa la misma fuente del texto original si está instalada en Windows; si no, la "
+                             "más parecida. Podés elegir otra en «Fuente». Nada se escribe en el PDF hasta «Guardar cambios».",
                      font=F(11), text_color=C["texto2"], anchor="w", justify="left", wraplength=440).grid(
             row=4, column=0, sticky="ew", padx=18, pady=(10, 20))
         color_texto(texto_col["rgb"], aplicar=False)
         ayuda_texto()
 
     por_armar["texto"] = _armar_texto
-    for v_ in (v_tneg, v_ttam):
+    for v_ in (v_tneg, v_tcur, v_ttam):
         v_.trace_add("write", lambda *_: estilo_texto_cambio())
 
     # ================================================== PAGINA: ORGANIZAR
@@ -5727,6 +5890,9 @@ def iniciar_interfaz():
             self._ed = None
             if app["pagina"] == "visor" and app.get("panel") in ("firmar", "texto") and not vis["modo_res"]:
                 if edicion_press(self, ev):  # v2.6: firmar, sellar y texto
+                    if not getattr(self, "_ed", None):
+                        # v2.7: el arrastre que sigue al clic (o a la ventanita) no mueve la hoja: antes volvia a la pag. 1
+                        self._ed = {"modo": "nada"}
                     return
             if not vis["modo_res"]:
                 self._arrastre_mano = False
@@ -6908,6 +7074,8 @@ def iniciar_interfaz():
                     fuente = orig if (copia or k_ == 0) else ruta
                     soltar_archivo(fuente)
                     d = fitz.open(fuente)
+                    con_fuentes = any(it_["tipo"] in ("texto_n", "reemplazo") and "fontfile" in kw_fuente(it_)
+                                      for items_ in pags.values() for it_ in items_)
                     for pag, items_ in pags.items():
                         pg = d[pag]
                         dm = pg.derotation_matrix
@@ -6935,9 +7103,14 @@ def iniciar_interfaz():
                             except Exception:
                                 pass
                             a_.update()
+                    if con_fuentes:  # v2.7: de las fuentes de Windows solo quedan las letras usadas (PDF liviano)
+                        try:
+                            d.subset_fonts()
+                        except Exception:
+                            pass
                     if copia:
                         d.save(dest, garbage=3, deflate=True)
-                    elif d.can_save_incrementally():
+                    elif d.can_save_incrementally() and not con_fuentes:
                         d.saveIncr()
                     else:
                         tmp = fuente + ".pdfol_tmp"
@@ -7138,11 +7311,25 @@ def iniciar_interfaz():
     def ayuda_texto():
         v_texto_ayuda.set("Hacé clic en la hoja donde querés escribir. Después lo podés arrastrar; doble clic "
                           "lo edita. Clic derecho o Supr lo quita." if v_tmodo.get() == "Agregar" else
-                          "Hacé clic sobre un texto del PDF para cambiarlo. Se reemplaza el renglón (o el trozo) "
-                          "que tocaste. En planos escaneados no hay texto para cambiar.")
+                          ("Hacé clic sobre un texto del PDF para cambiarlo. Se toma el párrafo entero" if v_talc.get() == "Párrafo"
+                           else "Hacé clic sobre un texto del PDF para cambiarlo. Se toma el renglón") +
+                          " y se escribe con la misma fuente (o la más parecida). Después podés cambiarle la fuente, el "
+                          "tamaño o el color desde aquí; doble clic para corregir el texto. En escaneos no hay texto.")
 
-    def fuente_texto():
-        return FUENTES_TEXTO.get(v_tfuente.get(), FUENTES_TEXTO["Helvetica"])[1 if v_tneg.get() else 0]
+    def estilo_panel():
+        return {"fam": v_tfuente.get(), "neg": bool(v_tneg.get()), "cur": bool(v_tcur.get())}
+
+    def sincronizar_panel(it_):
+        """Al elegir un texto en la hoja, el panel muestra su fuente, tamaño y color."""
+        texto_col["sincro"] = True
+        try:
+            v_tfuente.set(it_.get("fam", "Helvetica (PDF)"))
+            v_tneg.set(bool(it_.get("neg")))
+            v_tcur.set(bool(it_.get("cur")))
+            v_ttam.set(("%g" % round(it_["tam"], 1)).replace(".", ","))
+            color_texto(it_["color"], aplicar=False)
+        finally:
+            texto_col["sincro"] = False
 
     def tam_texto():
         try:
@@ -7158,23 +7345,39 @@ def iniciar_interfaz():
             estilo_texto_cambio()
 
     def estilo_texto_cambio():
-        almacen.datos.update(texto_fuente=v_tfuente.get(), texto_negrita=bool(v_tneg.get()), texto_tam=tam_texto(),
-                             texto_color=list(texto_col["rgb"]))
+        if texto_col.get("sincro"):
+            return
         e_ = vis.get("edit_item")
         if e_ and e_[2]["tipo"] in ("texto_n", "reemplazo"):  # cambia el texto elegido
             it_ = e_[2]
-            it_.update(fuente=fuente_texto(), tam=tam_texto(), color=texto_col["rgb"])
+            it_.update(estilo_panel(), tam=tam_texto(), color=texto_col["rgb"])
             if it_["tipo"] == "texto_n":
-                it_["rect"] = rect_texto(it_["rect"][:2], it_["txt"], it_["fuente"], it_["tam"])
+                it_["rect"] = rect_texto(it_["rect"][:2], it_["txt"], it_)
+            else:
+                ajustar_reemplazo(it_)
             it_["ver"] = it_.get("ver", 0) + 1
             visor_pedir_dibujo()
+            if it_["tipo"] == "reemplazo":
+                return  # el estilo de un texto del PDF no cambia lo que se usa para escribir texto nuevo
+        almacen.datos.update(texto_fuente=v_tfuente.get(), texto_negrita=bool(v_tneg.get()),
+                             texto_cursiva=bool(v_tcur.get()), texto_tam=tam_texto(), texto_color=list(texto_col["rgb"]))
 
-    def rect_texto(esq, txt, fuente, tam):
+    def rect_texto(esq, txt, it_):
         lineas = txt.split("\n") or [""]
-        ancho = max(fitz.get_text_length(l_, fontname=fuente, fontsize=tam) for l_ in lineas)
+        tam = it_["tam"]
+        ancho = max(ancho_texto(l_, it_) for l_ in lineas)
         return (esq[0], esq[1], esq[0] + ancho + tam * 0.6, esq[1] + len(lineas) * tam * 1.25 + tam * 0.45)
 
-    def pedir_texto(titulo, inicial=""):
+    def ajustar_reemplazo(it_):
+        """Renglones del texto nuevo y la caja que ocupa (crece si el texto nuevo es mas largo)."""
+        it_["lineas"] = partir_renglones(it_["txt"], it_, it_.get("ancho"))
+        o_ = it_["origen"]
+        r0 = fitz.Rect(it_["rect_orig"])
+        ancho = max([ancho_texto(l_, it_) for l_ in it_["lineas"]] + [0])
+        alto_ = o_[1] + (len(it_["lineas"]) - 1) * it_["inter"] + it_["tam"] * 0.3
+        it_["rect"] = tuple(r0 | fitz.Rect(o_[0], o_[1] - it_["tam"], o_[0] + ancho + 1, alto_))
+
+    def pedir_texto(titulo, inicial="", info=""):
         """Ventanita para escribir (varios renglones). Devuelve el texto o None."""
         w = ctk.CTkToplevel(raiz)
         w.title(f"{NOMBRE} · {titulo.lower()}")
@@ -7183,8 +7386,13 @@ def iniciar_interfaz():
         w.transient(raiz)
         ctk.CTkLabel(w, text=titulo, font=F(14, "bold"), text_color=C["texto"], anchor="w").pack(
             fill="x", padx=20, pady=(16, 6))
-        caja_ = ctk.CTkTextbox(w, width=420, height=110, font=F(13), fg_color=C["campo"], text_color=C["texto"],
-                               border_color=C["borde"], border_width=1, corner_radius=8)
+        if info:
+            ctk.CTkLabel(w, text=info, font=F(11), text_color=C["texto2"], anchor="w").pack(fill="x", padx=20,
+                                                                                            pady=(0, 6))
+        largo = len(inicial) > 90 or inicial.count("\n") > 1
+        caja_ = ctk.CTkTextbox(w, width=520 if largo else 420, height=190 if largo else 110, font=F(13),
+                               fg_color=C["campo"], text_color=C["texto"], border_color=C["borde"], border_width=1,
+                               corner_radius=8, wrap="word")
         caja_.pack(padx=20)
         caja_.insert("1.0", inicial)
         ctk.CTkLabel(w, text="Enter: nuevo renglón · Ctrl+Enter: listo", font=F(11), text_color=C["texto2"],
@@ -7210,23 +7418,49 @@ def iniciar_interfaz():
         t_ = res["t"]
         return t_ if t_ is not None and t_.strip() else None
 
-    def span_en(ruta, pag, p_):
-        """El trozo de texto del PDF bajo el punto (coordenadas de la pagina como se ve)."""
+    def texto_en(ruta, pag, p_, parrafo=True):
+        """El parrafo (o el renglon) del PDF bajo el punto (coordenadas de la pagina como se ve)."""
         try:
             d_ = fitz.open(ruta)
             pg = d_[pag]
             m_ = pg.rotation_matrix
+            pt_ = fitz.Point(p_)
             for bl in pg.get_text("dict")["blocks"]:
-                for ln in bl.get("lines", []):
-                    for sp in ln["spans"]:
-                        r_ = fitz.Rect(sp["bbox"]) * m_
-                        if r_.contains(fitz.Point(p_)) and sp["text"].strip():
-                            if abs(ln["dir"][1]) > 0.01:
-                                return "girado"
-                            return {"rect": tuple(r_), "txt": sp["text"], "tam": round(sp["size"], 2),
-                                    "fuente": fuente_parecida(sp["flags"], sp["font"]),
-                                    "color": ((sp["color"] >> 16) & 255, (sp["color"] >> 8) & 255, sp["color"] & 255),
-                                    "origen": tuple(fitz.Point(sp["origin"]) * m_)}
+                lineas = [ln for ln in bl.get("lines", []) if "".join(sp["text"] for sp in ln["spans"]).strip()]
+                if not lineas:
+                    continue
+                cajas = [fitz.Rect(ln["bbox"]) * m_ for ln in lineas]
+                dentro = [k_ for k_, r_ in enumerate(cajas) if r_.contains(pt_)]
+                if not dentro:
+                    continue
+                elegidas = list(range(len(lineas))) if parrafo else dentro[:1]
+                lineas = [lineas[k_] for k_ in elegidas]
+                cajas = [cajas[k_] for k_ in elegidas]
+                d0 = fitz.Point(lineas[0]["dir"]) * m_ - fitz.Point(0, 0) * m_
+                if abs(d0.y) > 0.01 or d0.x <= 0:
+                    return "girado"
+                spans = [sp for ln in lineas for sp in ln["spans"] if sp["text"].strip()]
+                sp0 = max(spans, key=lambda sp: len(sp["text"].strip()))  # el estilo que mas se usa
+                caja = fitz.Rect(cajas[0])
+                for r_ in cajas[1:]:
+                    caja |= r_
+                textos = ["".join(sp["text"] for sp in ln["spans"]).strip() for ln in lineas]
+                txt = ""
+                for k_, t_ in enumerate(textos):  # se unen los renglones cortados por el ancho del parrafo
+                    txt += t_
+                    if k_ < len(textos) - 1:
+                        lleno = cajas[k_].x1 >= caja.x0 + caja.width * 0.8 and not t_.endswith((".", ":", ";"))
+                        txt += " " if lleno else "\n"
+                bases = [(fitz.Point(ln["spans"][0]["origin"]) * m_) for ln in lineas]
+                inter = ((bases[-1].y - bases[0].y) / (len(bases) - 1)) if len(bases) > 1 else sp0["size"] * 1.2
+                n_ = sp0["font"]
+                return {"rect": tuple(caja), "rects_borrar": [tuple(r_) for r_ in cajas], "txt": txt,
+                        "tam": round(sp0["size"], 2), "fam": familia_de(n_, sp0["flags"]),
+                        "neg": bool(sp0["flags"] & 16) or any(w_ in n_.lower() for w_ in ("bold", "black", "heavy")),
+                        "cur": bool(sp0["flags"] & 2) or "italic" in n_.lower() or "oblique" in n_.lower(),
+                        "color": ((sp0["color"] >> 16) & 255, (sp0["color"] >> 8) & 255, sp0["color"] & 255),
+                        "origen": (min(b_.x for b_ in bases), bases[0].y), "inter": max(1.0, inter),
+                        "ancho": caja.width + 1 if len(lineas) > 1 else None, "fuente_pdf": n_}
         except Exception:
             pass
         return None
@@ -7257,6 +7491,8 @@ def iniciar_interfaz():
         for it_ in reversed(vis["res"].get(ruta, {}).get(pag, [])):
             if it_["tipo"] in EDITABLES and fitz.Rect(it_["rect"]).contains(fitz.Point(p_)):
                 vis["edit_item"] = (ruta, pag, it_)
+                if it_["tipo"] in ("texto_n", "reemplazo"):
+                    sincronizar_panel(it_)
                 vista._ed = {"it": it_, "base": base, "p0": p_, "r0": tuple(it_["rect"]),
                              "modo": "mover" if it_["tipo"] != "reemplazo" else "nada"}
                 visor_pedir_dibujo()
@@ -7285,23 +7521,25 @@ def iniciar_interfaz():
             if v_tmodo.get() == "Agregar":
                 txt = pedir_texto("Escribí el texto")
                 if txt:
-                    f_, t_ = fuente_texto(), tam_texto()
-                    agregar_item(ruta, pag, {"tipo": "texto_n", "txt": txt, "fuente": f_, "tam": t_,
-                                             "color": texto_col["rgb"],
-                                             "rect": rect_texto((p_[0], p_[1] - t_ * 0.6), txt, f_, t_)})
+                    it_ = dict(estilo_panel(), tipo="texto_n", txt=txt, tam=tam_texto(), color=texto_col["rgb"])
+                    it_["rect"] = rect_texto((p_[0], p_[1] - it_["tam"] * 0.6), txt, it_)
+                    agregar_item(ruta, pag, it_)
                 return True
-            sp_ = span_en(ruta, pag, p_)
+            sp_ = texto_en(ruta, pag, p_, v_talc.get() == "Párrafo")
             if sp_ == "girado":
                 v_estado.set("Ese texto está inclinado o vertical: por ahora solo se cambia texto horizontal.")
                 return True
             if not sp_:
                 v_estado.set("Ahí no hay texto del PDF para cambiar (si es un escaneo, usá «Agregar»).")
                 return True
-            txt = pedir_texto("Cambiar el texto", sp_["txt"])
+            txt = pedir_texto("Cambiar el párrafo" if sp_["ancho"] else "Cambiar el texto", sp_["txt"],
+                              f"Fuente: {sp_['fam']} {('%g' % sp_['tam']).replace('.', ',')} pt"
+                              + (f"  (en el PDF: {sp_['fuente_pdf'].split('+')[-1]})" if sp_["fuente_pdf"] else ""))
             if txt is not None and txt != sp_["txt"]:
-                agregar_item(ruta, pag, {"tipo": "reemplazo", "rect": sp_["rect"], "txt": txt.replace("\n", " "),
-                                         "orig": sp_["txt"], "fuente": sp_["fuente"], "tam": sp_["tam"],
-                                         "color": sp_["color"], "origen": sp_["origen"]})
+                it_ = dict(sp_, tipo="reemplazo", txt=txt, orig=sp_["txt"], rect_orig=sp_["rect"])
+                ajustar_reemplazo(it_)
+                agregar_item(ruta, pag, it_)
+                sincronizar_panel(it_)
             return True
         return False
 
@@ -7331,9 +7569,11 @@ def iniciar_interfaz():
         it_ = e_[2]
         txt = pedir_texto("Editar el texto", it_["txt"])
         if txt:
-            it_["txt"] = txt if it_["tipo"] == "texto_n" else txt.replace("\n", " ")
+            it_["txt"] = txt
             if it_["tipo"] == "texto_n":
-                it_["rect"] = rect_texto(it_["rect"][:2], it_["txt"], it_["fuente"], it_["tam"])
+                it_["rect"] = rect_texto(it_["rect"][:2], it_["txt"], it_)
+            else:
+                ajustar_reemplazo(it_)
             it_["ver"] = it_.get("ver", 0) + 1
             visor_pedir_dibujo()
         return True
@@ -7370,14 +7610,16 @@ def iniciar_interfaz():
             pg = d_.new_page(width=max(1.0, r_.width), height=max(1.0, r_.height))
             c_ = tuple(v_ / 255 for v_ in item["color"])
             if item["tipo"] == "reemplazo":
-                pg.draw_rect(pg.rect, color=None, fill=(1, 1, 1))  # tapa el texto original en la vista
+                for rb_ in item.get("rects_borrar") or [item["rect_orig"]]:  # tapa el texto original en la vista
+                    pg.draw_rect(fitz.Rect(rb_) - (r_.x0, r_.y0, r_.x0, r_.y0), color=None, fill=(1, 1, 1))
                 o_ = fitz.Point(item["origen"]) - r_.tl
-                pg.insert_text(o_, item["txt"], fontsize=item["tam"], fontname=item["fuente"], color=c_)
+                for k_, l_ in enumerate(item["lineas"]):
+                    pg.insert_text(o_ + (0, k_ * item["inter"]), l_, fontsize=item["tam"], color=c_, **kw_fuente(item))
             else:
                 pg.insert_textbox(fitz.Rect(0, 0, r_.width, r_.height) + (item["tam"] * 0.3, 0, 0, 0), item["txt"],
-                                  fontsize=item["tam"], fontname=item["fuente"], color=c_, lineheight=1.25)
+                                  fontsize=item["tam"], color=c_, lineheight=1.25, **kw_fuente(item))
             pix = pg.get_pixmap(matrix=fitz.Matrix(z, z), alpha=True)
-            img = Image.frombytes("RGBA", (pix.width, pix.height), pix.samples)
+            img = Image.frombytes("RGBa", (pix.width, pix.height), pix.samples).convert("RGBA")  # MuPDF da alfa premultiplicado
             d_.close()
         if ang:
             img = img.rotate(-ang, expand=True)
@@ -7389,15 +7631,16 @@ def iniciar_interfaz():
         reemplazos = [it_ for it_ in items_ if it_["tipo"] == "reemplazo"]
         if reemplazos:  # se borra el texto original (sin tocar dibujos ni imagenes) y se escribe el nuevo
             for it_ in reemplazos:
-                r_ = fitz.Rect(it_["rect"])
-                corto = r_.height * 0.18
-                pg.add_redact_annot(fitz.Rect(r_.x0, r_.y0 + corto, r_.x1, r_.y1 - corto) * dm)
+                for rb_ in it_.get("rects_borrar") or [it_["rect_orig"]]:  # renglon por renglon
+                    r_ = fitz.Rect(rb_)
+                    corto = r_.height * 0.18
+                    pg.add_redact_annot(fitz.Rect(r_.x0, r_.y0 + corto, r_.x1, r_.y1 - corto) * dm)
             pg.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=fitz.PDF_REDACT_LINE_ART_NONE,
                                 text=fitz.PDF_REDACT_TEXT_REMOVE)
             for it_ in reemplazos:
-                pg.insert_text(fitz.Point(it_["origen"]) * dm, it_["txt"], fontsize=it_["tam"],
-                               fontname=it_["fuente"], color=tuple(v_ / 255 for v_ in it_["color"]),
-                               rotate=pg.rotation)
+                for k_, l_ in enumerate(it_["lineas"]):
+                    pg.insert_text((fitz.Point(it_["origen"]) + (0, k_ * it_["inter"])) * dm, l_, fontsize=it_["tam"],
+                                   color=tuple(v_ / 255 for v_ in it_["color"]), rotate=pg.rotation, **kw_fuente(it_))
         for it_ in items_:
             if it_["tipo"] == "firma":
                 pg.insert_image(fitz.Rect(it_["rect"]) * dm, filename=it_["archivo"], rotate=pg.rotation,
@@ -7406,12 +7649,12 @@ def iniciar_interfaz():
                 r_ = fitz.Rect(it_["rect"])
                 c_ = tuple(v_ / 255 for v_ in it_["color"])
                 rr = (fitz.Rect(r_.x0 + it_["tam"] * 0.3, r_.y0, r_.x1 + it_["tam"], r_.y1 + it_["tam"])) * dm
-                if pg.insert_textbox(rr, it_["txt"], fontsize=it_["tam"], fontname=it_["fuente"], color=c_,
-                                     lineheight=1.25, rotate=pg.rotation) < 0:
+                if pg.insert_textbox(rr, it_["txt"], fontsize=it_["tam"], color=c_,
+                                     lineheight=1.25, rotate=pg.rotation, **kw_fuente(it_)) < 0:
                     y_ = r_.y0 + it_["tam"]  # no entro en la caja: renglon por renglon
                     for l_ in it_["txt"].split("\n"):
                         pg.insert_text(fitz.Point(r_.x0 + it_["tam"] * 0.3, y_) * dm, l_, fontsize=it_["tam"],
-                                       fontname=it_["fuente"], color=c_, rotate=pg.rotation)
+                                       color=c_, rotate=pg.rotation, **kw_fuente(it_))
                         y_ += it_["tam"] * 1.25
 
     def preguntar_resaltes(rutas, que):
