@@ -27,6 +27,7 @@ Orden de proceso: aplanar -> foliar -> comprimir. El original nunca se modifica.
 - Consola: PdFOL.exe doc.pdf --aplanar --foliar --comprimir equilibrada ...
 """
 
+import copy
 import csv
 import hashlib
 import io
@@ -352,12 +353,19 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v2.7"
-VERSION_INTERNA = "2.7"
+VERSION = "v2.8"
+VERSION_INTERNA = "2.8"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v2.8", [
+        "Texto: alineación (izquierda, centro, derecha y justificado), subrayado, tachado e interlineado.",
+        "Deshacer y rehacer de verdad (Ctrl+Z / Ctrl+Y): agregar, mover, estilo, quitar y cambiar texto, paso a paso.",
+        "Duplicar textos, firmas y sellos; las flechas los mueven (Shift: más rápido).",
+        "Fondo blanco opcional para tapar lo que hay debajo, y «Otro…» para elegir cualquier color.",
+        "Al elegir un texto en la hoja, el panel muestra su fuente, tamaño, color y estilo.",
+    ]),
     ("v2.7", [
         "Cambiar texto por párrafo entero (o por renglón, a elección): el texto nuevo se acomoda al ancho del párrafo.",
         "Fuentes: las más comunes de Windows (Arial, Calibri, Times New Roman, Cambria, Verdana, Georgia, Segoe UI y más).",
@@ -2852,23 +2860,85 @@ def familia_de(nombre_pdf, flags=0):
     return {"c": "Courier (PDF)", "t": "Times (PDF)"}.get(base[0], "Helvetica (PDF)")
 
 
-def partir_renglones(txt, it_, ancho=None):
-    """Renglones del texto (ajustados al ancho, si hay)."""
+def partir_renglones(txt, it_, ancho=None, con_fin=False):
+    """Renglones del texto (ajustados al ancho, si hay). con_fin: (renglon, es_el_ultimo_del_parrafo)."""
     out = []
     for parr in txt.split("\n"):
         if not ancho:
-            out.append(parr)
+            out.append((parr, True))
             continue
         lin = ""
         for pal in parr.split(" "):
             prueba = f"{lin} {pal}" if lin else pal
             if lin and ancho_texto(prueba, it_) > ancho:
-                out.append(lin)
+                out.append((lin, False))
                 lin = pal
             else:
                 lin = prueba
-        out.append(lin)
+        out.append((lin, True))
+    return out if con_fin else [l_ for l_, _f in out]
+
+
+INTERLINEADOS = {"Original": None, "1": 1.0, "1,15": 1.15, "1,5": 1.5, "2": 2.0}
+
+
+def paso_renglon(it_):
+    k_ = it_.get("interlin")
+    if it_["tipo"] == "reemplazo":
+        return it_["tam"] * k_ if k_ else it_["inter"]
+    return it_["tam"] * (k_ or 1.25)
+
+
+def diseno_texto(it_):
+    """Donde va cada renglon (coordenadas de la pagina como se ve): [(x, base, texto, palabras_x o None)]."""
+    tam, alin = it_["tam"], it_.get("alin", "izq")
+    paso = paso_renglon(it_)
+    if it_["tipo"] == "reemplazo":
+        lineas = partir_renglones(it_["txt"], it_, it_.get("ancho"), con_fin=True)
+        x0, base0 = it_["origen"]
+        anchos = [ancho_texto(l_, it_) for l_, _f in lineas]
+        caja = it_.get("ancho") or max(fitz.Rect(it_["rect_orig"]).x1 - x0, max(anchos + [0]))
+    else:
+        lineas = [(l_, True) for l_ in it_["txt"].split("\n")]
+        r_ = fitz.Rect(it_["rect"])
+        x0, base0 = r_.x0 + tam * 0.3, r_.y0 + tam * 0.95
+        anchos = [ancho_texto(l_, it_) for l_, _f in lineas]
+        caja = max(anchos + [0])
+    out = []
+    for k_, ((l_, fin), w_) in enumerate(zip(lineas, anchos)):
+        base = base0 + k_ * paso
+        palabras = l_.split(" ")
+        if alin == "just" and not fin and len(palabras) > 1:
+            libre = caja - sum(ancho_texto(p_, it_) for p_ in palabras)
+            hueco = libre / (len(palabras) - 1)
+            xs, x_ = [], x0
+            for p_ in palabras:
+                xs.append((x_, p_))
+                x_ += ancho_texto(p_, it_) + hueco
+            out.append((x0, base, l_, xs, caja))
+            continue
+        dx = {"centro": (caja - w_) / 2, "der": caja - w_}.get(alin, 0)
+        out.append((x0 + dx, base, l_, None, w_))
     return out
+
+
+def dibujar_texto(pg, it_, conv, rot=0):
+    """Escribe el texto de un item en la pagina. conv: punto de la vista -> punto de esta pagina."""
+    c_ = tuple(v_ / 255 for v_ in it_["color"])
+    tam, kw = it_["tam"], kw_fuente(it_)
+    for x_, base, l_, palabras, w_ in diseno_texto(it_):
+        if palabras:
+            for xp, p_ in palabras:
+                if p_:
+                    pg.insert_text(conv((xp, base)), p_, fontsize=tam, color=c_, rotate=rot, **kw)
+        elif l_:
+            pg.insert_text(conv((x_, base)), l_, fontsize=tam, color=c_, rotate=rot, **kw)
+        if not l_.strip():
+            continue
+        for marca, dy in (("sub", tam * 0.14), ("tach", -tam * 0.27)):
+            if it_.get(marca):
+                pg.draw_line(conv((x_, base + dy)), conv((x_ + w_, base + dy)), color=c_,
+                             width=max(0.5, tam * 0.065))
 
 
 def ruta_icono_ico():
@@ -3953,6 +4023,13 @@ def iniciar_interfaz():
     v_tneg = tk.BooleanVar(value=bool(almacen.datos.get("texto_negrita", False)))
     v_tcur = tk.BooleanVar(value=bool(almacen.datos.get("texto_cursiva", False)))
     v_talc = tk.StringVar(value=almacen.datos.get("texto_alcance", "Párrafo"))
+    # v2.7: mas herramientas de texto
+    v_tsub = tk.BooleanVar(value=False)
+    v_ttach = tk.BooleanVar(value=False)
+    v_tfondo = tk.BooleanVar(value=False)
+    ALINEAS = {"Izq.": "izq", "Centro": "centro", "Der.": "der", "Justif.": "just"}
+    v_talin = tk.StringVar(value="Izq.")
+    v_tinter = tk.StringVar(value="Original")
     v_ttam = tk.StringVar(value=str(almacen.datos.get("texto_tam", 12)))
     texto_col = {"rgb": tuple(almacen.datos.get("texto_color", (0, 0, 0))), "puntos": []}
     v_texto_ayuda = tk.StringVar(value="")
@@ -3972,9 +4049,27 @@ def iniciar_interfaz():
         if v_tfuente.get() not in disp_:
             v_tfuente.set("Arial" if "Arial" in disp_ else "Helvetica (PDF)")
         t.fila("Fuente", menu(t, disp_, v_tfuente, 200, cmd=lambda _v: estilo_texto_cambio()))
-        t.fila("Negrita", switch(t, v_tneg))
-        t.fila("Cursiva", switch(t, v_tcur))
+        caja_e = ctk.CTkFrame(t, fg_color="transparent")
+        for txt_, var_, fnt_, tip_ in (("N", v_tneg, F(13, "bold"), "Negrita"),
+                                       ("C", v_tcur, ctk.CTkFont(family=FAM, size=13, slant="italic"), "Cursiva"),
+                                       ("S", v_tsub, ctk.CTkFont(family=FAM, size=13, underline=True), "Subrayado"),
+                                       ("T", v_ttach, ctk.CTkFont(family=FAM, size=13, overstrike=True), "Tachado")):
+            b_ = ctk.CTkButton(caja_e, text=txt_, width=34, height=30, corner_radius=7, font=fnt_,
+                               fg_color=C["suave"], hover_color=C["suave_h"], text_color=C["texto"],
+                               command=lambda v__=var_: v__.set(not v__.get()))
+            b_.pack(side="left", padx=2)
+
+            def pintar_(*_a, b__=b_, v__=var_):
+                b__.configure(fg_color=C["acento"] if v__.get() else C["suave"],
+                              text_color="#FFFFFF" if v__.get() else C["texto"])
+            var_.trace_add("write", pintar_)
+            pintar_()
+        t.fila("Estilo", caja_e)
         t.fila("Tamaño (pt)", Contador(t, v_ttam, 4, 144, ancho=50, decimales=True))
+        t.fila("Alineación", segmentado(t, list(ALINEAS), v_talin, ancho=200, cmd=lambda _v: estilo_texto_cambio()))
+        t.fila("Interlineado", menu(t, list(INTERLINEADOS), v_tinter, 110, cmd=lambda _v: estilo_texto_cambio()),
+               ayuda="«Original»: el del PDF (o 1,25 en texto nuevo)")
+        t.fila("Fondo blanco", switch(t, v_tfondo), ayuda="Tapa lo que hay debajo (texto nuevo)")
         caja_c = ctk.CTkFrame(t, fg_color="transparent")
         texto_col["puntos"] = []
         for _n, rgb in COLORES_FOLIO:
@@ -3983,7 +4078,26 @@ def iniciar_interfaz():
                                border_width=0, border_color=C["acento"], command=lambda c_=rgb: color_texto(c_))
             b_.pack(side="left", padx=3)
             texto_col["puntos"].append((b_, rgb))
+
+        def otro_color():
+            from tkinter import colorchooser
+            r_ = colorchooser.askcolor(color="#%02x%02x%02x" % texto_col["rgb"], parent=raiz, title="Color del texto")
+            if r_ and r_[0]:
+                color_texto(tuple(int(v_) for v_ in r_[0]))
+        boton(caja_c, "Otro…", ancho=60, command=otro_color).configure(height=24, font=F(11))
+        caja_c.winfo_children()[-1].pack(side="left", padx=(8, 0))
         t.fila("Color", caja_c, abajo=True)
+        seccion(p, "Editar", 5)
+        t = Tarjeta(p, 6)
+        caja_b = ctk.CTkFrame(t, fg_color="transparent")
+        for txt_, cmd_ in (("Deshacer", lambda: deshacer_edicion()), ("Rehacer", lambda: rehacer_edicion()),
+                           ("Duplicar", lambda: duplicar_editado()), ("Quitar", lambda: quitar_editado())):
+            boton(caja_b, txt_, ancho=84, command=cmd_).pack(side="left", padx=2)
+        t.fila("", caja_b, abajo=True)
+        ctk.CTkLabel(p, text="Atajos: Ctrl+Z deshace · Ctrl+Y rehace · Supr quita · flechas mueven el texto elegido "
+                             "(Shift: más rápido) · doble clic corrige el texto.",
+                     font=F(11), text_color=C["texto2"], anchor="w", justify="left", wraplength=440).grid(
+            row=7, column=0, sticky="ew", padx=18, pady=(4, 0))
         ctk.CTkLabel(p, text="«Cambiar» usa la misma fuente del texto original si está instalada en Windows; si no, la "
                              "más parecida. Podés elegir otra en «Fuente». Nada se escribe en el PDF hasta «Guardar cambios».",
                      font=F(11), text_color=C["texto2"], anchor="w", justify="left", wraplength=440).grid(
@@ -3992,7 +4106,7 @@ def iniciar_interfaz():
         ayuda_texto()
 
     por_armar["texto"] = _armar_texto
-    for v_ in (v_tneg, v_tcur, v_ttam):
+    for v_ in (v_tneg, v_tcur, v_ttam, v_tsub, v_ttach, v_tfondo):
         v_.trace_add("write", lambda *_: estilo_texto_cambio())
 
     # ================================================== PAGINA: ORGANIZAR
@@ -6159,11 +6273,19 @@ def iniciar_interfaz():
                 self.zoom_paso(-1)
             elif ctrl and k_ in ("0", "KP_0"):
                 self.poner_zoom("Ajustar ancho")
+            elif ctrl and (k_.lower() == "y" or (k_ == "Z" and ev.state & 0x1)):
+                rehacer_edicion()
             elif ctrl and k_.lower() == "z":
-                if vis["res_pila"]:
+                if hist["atras"]:
+                    deshacer_edicion()
+                elif vis["res_pila"]:
                     deshacer_resaltado()
                 else:
                     org_deshacer()
+            elif (k_ in ("Left", "Right", "Up", "Down") and not ctrl and vis.get("edit_item")
+                  and app.get("panel") in ("texto", "firmar")):
+                d_ = 10 if ev.state & 0x1 else 1  # Shift: mas rapido
+                mover_editado(*{"Left": (-d_, 0), "Right": (d_, 0), "Up": (0, -d_), "Down": (0, d_)}[k_])
             elif ctrl and k_.lower() == "c" and vis.get("seleccion"):
                 copiar_seleccion()
             elif ctrl and k_.lower() == "a" and v_herr.get() == "Seleccionar":
@@ -6908,6 +7030,7 @@ def iniciar_interfaz():
         return min(xs_) - m_ <= p_.x <= max(xs_) + m_ and min(ys_) - m_ <= p_.y <= max(ys_) + m_
 
     def nuevo_resaltado(ruta, pag, tipo, rects=None, pts=None, ancho=None, refrescar_=True):
+        guardar_historia()
         vis["nres"] += 1
         item = {"id": vis["nres"], "tipo": tipo, "color": tuple(vis["res_color"]), "op": round(float(v_res_op.get()), 2)}
         if rects is not None:
@@ -6928,9 +7051,90 @@ def iniciar_interfaz():
     def quitar_resaltado(ruta, pag, item):
         lista = vis["res"].get(ruta, {}).get(pag, [])
         if item in lista:
+            guardar_historia()
             lista.remove(item)
         vis["res_pila"] = [x for x in vis["res_pila"] if x[2] is not item]
         actualizar_resaltes()
+
+    # ---- v2.7: deshacer / rehacer todo (resaltados, firmas y textos: agregar, mover, estilo, quitar)
+    hist = {"atras": [], "adelante": [], "ult": None, "t": 0.0}
+
+    def tocar(it_):
+        vis["nver"] = vis.get("nver", 0) + 1
+        it_["ver"] = vis["nver"]
+
+    def guardar_historia(tipo=None, ident=None):
+        ahora = time.time()
+        if tipo and hist["ult"] == (tipo, ident) and ahora - hist["t"] < 1.2:
+            hist["t"] = ahora  # varios cambios seguidos del mismo texto: un solo paso
+            return
+        hist["ult"], hist["t"] = (tipo, ident), ahora
+        hist["atras"].append(copy.deepcopy(vis["res"]))
+        del hist["atras"][:-80]
+        hist["adelante"].clear()
+
+    def limpiar_historia():
+        hist["atras"].clear()
+        hist["adelante"].clear()
+        hist["ult"] = None
+
+    def _poner_foto(foto):
+        e_ = vis.get("edit_item")
+        vis["res"] = foto
+        vis["res_pila"] = sorted(((r_, p_, it_) for r_, ps_ in foto.items() for p_, l_ in ps_.items() for it_ in l_),
+                                 key=lambda x: x[2]["id"])
+        vis["edit_item"] = None
+        if e_:
+            for x in vis["res_pila"]:
+                if x[2]["id"] == e_[2]["id"]:
+                    vis["edit_item"] = x
+                    break
+        hist["ult"] = None
+        vis["ult"] = vis["ult_mini"] = None
+        actualizar_resaltes()
+        e_ = vis.get("edit_item")
+        if e_ and e_[2]["tipo"] in ("texto_n", "reemplazo"):
+            sincronizar_panel(e_[2])
+        n_ = n_resaltes()
+        v_estado.set(f"{n_} cambio(s) sin guardar · Ctrl+Z deshace · Ctrl+Y rehace." if n_ else "Sin cambios pendientes.")
+
+    def deshacer_edicion():
+        if not hist["atras"]:
+            v_estado.set("No hay nada para deshacer.")
+            return False
+        hist["adelante"].append(copy.deepcopy(vis["res"]))
+        _poner_foto(hist["atras"].pop())
+        return True
+
+    def rehacer_edicion():
+        if not hist["adelante"]:
+            v_estado.set("No hay nada para rehacer.")
+            return False
+        hist["atras"].append(copy.deepcopy(vis["res"]))
+        _poner_foto(hist["adelante"].pop())
+        return True
+
+    def duplicar_editado():
+        e_ = vis.get("edit_item")
+        if not e_ or e_[2]["tipo"] not in ("firma", "texto_n"):
+            v_estado.set("Elegí un texto agregado, una firma o un sello para duplicarlo.")
+            return
+        it_ = copy.deepcopy(e_[2])
+        it_.pop("id", None)
+        r_ = fitz.Rect(it_["rect"]) + (14, 14, 14, 14)
+        it_["rect"] = tuple(r_)
+        agregar_item(e_[0], e_[1], it_)
+
+    def mover_editado(dx, dy):
+        e_ = vis.get("edit_item")
+        if not e_ or e_[2]["tipo"] not in ("firma", "texto_n"):
+            return False
+        guardar_historia("mover", e_[2]["id"])
+        e_[2]["rect"] = tuple(fitz.Rect(e_[2]["rect"]) + (dx, dy, dx, dy))
+        tocar(e_[2])
+        visor_pedir_dibujo()
+        mini_pedir_dibujo()
+        return True
 
     def deshacer_resaltado():
         if vis["res_pila"]:
@@ -7128,7 +7332,9 @@ def iniciar_interfaz():
             if copia or not errores:
                 vis["res"].pop(ruta, None)
         vis["res_pila"] = [x for x in vis["res_pila"] if x[0] in vis["res"]]
+        limpiar_historia()
         vis["ult"] = vis["ult_mini"] = None
+        limpiar_historia()
         actualizar_resaltes()
         if errores:
             messagebox.showerror(NOMBRE, "No se pudieron guardar algunos resaltados:\n\n" + "\n".join(errores))
@@ -7317,7 +7523,9 @@ def iniciar_interfaz():
                           "tamaño o el color desde aquí; doble clic para corregir el texto. En escaneos no hay texto.")
 
     def estilo_panel():
-        return {"fam": v_tfuente.get(), "neg": bool(v_tneg.get()), "cur": bool(v_tcur.get())}
+        return {"fam": v_tfuente.get(), "neg": bool(v_tneg.get()), "cur": bool(v_tcur.get()),
+                "sub": bool(v_tsub.get()), "tach": bool(v_ttach.get()), "alin": ALINEAS.get(v_talin.get(), "izq"),
+                "interlin": INTERLINEADOS.get(v_tinter.get()), "fondo": bool(v_tfondo.get())}
 
     def sincronizar_panel(it_):
         """Al elegir un texto en la hoja, el panel muestra su fuente, tamaño y color."""
@@ -7326,6 +7534,11 @@ def iniciar_interfaz():
             v_tfuente.set(it_.get("fam", "Helvetica (PDF)"))
             v_tneg.set(bool(it_.get("neg")))
             v_tcur.set(bool(it_.get("cur")))
+            v_tsub.set(bool(it_.get("sub")))
+            v_ttach.set(bool(it_.get("tach")))
+            v_tfondo.set(bool(it_.get("fondo")))
+            v_talin.set({v__: k__ for k__, v__ in ALINEAS.items()}.get(it_.get("alin", "izq"), "Izq."))
+            v_tinter.set({v__: k__ for k__, v__ in INTERLINEADOS.items()}.get(it_.get("interlin"), "Original"))
             v_ttam.set(("%g" % round(it_["tam"], 1)).replace(".", ","))
             color_texto(it_["color"], aplicar=False)
         finally:
@@ -7350,32 +7563,40 @@ def iniciar_interfaz():
         e_ = vis.get("edit_item")
         if e_ and e_[2]["tipo"] in ("texto_n", "reemplazo"):  # cambia el texto elegido
             it_ = e_[2]
-            it_.update(estilo_panel(), tam=tam_texto(), color=texto_col["rgb"])
+            nuevo_ = dict(estilo_panel(), tam=tam_texto(), color=texto_col["rgb"])
+            if all(it_.get(k__) == v__ for k__, v__ in nuevo_.items()):
+                return
+            guardar_historia("estilo", it_["id"])
+            it_.update(nuevo_)
             if it_["tipo"] == "texto_n":
                 it_["rect"] = rect_texto(it_["rect"][:2], it_["txt"], it_)
             else:
                 ajustar_reemplazo(it_)
-            it_["ver"] = it_.get("ver", 0) + 1
+            tocar(it_)
             visor_pedir_dibujo()
             if it_["tipo"] == "reemplazo":
                 return  # el estilo de un texto del PDF no cambia lo que se usa para escribir texto nuevo
         almacen.datos.update(texto_fuente=v_tfuente.get(), texto_negrita=bool(v_tneg.get()),
                              texto_cursiva=bool(v_tcur.get()), texto_tam=tam_texto(), texto_color=list(texto_col["rgb"]))
+        if not e_:
+            return
+        visor_pedir_dibujo()
 
     def rect_texto(esq, txt, it_):
         lineas = txt.split("\n") or [""]
         tam = it_["tam"]
         ancho = max(ancho_texto(l_, it_) for l_ in lineas)
-        return (esq[0], esq[1], esq[0] + ancho + tam * 0.6, esq[1] + len(lineas) * tam * 1.25 + tam * 0.45)
+        it_ = dict(it_, tipo="texto_n")
+        return (esq[0], esq[1], esq[0] + ancho + tam * 0.6,
+                esq[1] + tam * 0.95 + (len(lineas) - 1) * paso_renglon(it_) + tam * 0.4)
 
     def ajustar_reemplazo(it_):
         """Renglones del texto nuevo y la caja que ocupa (crece si el texto nuevo es mas largo)."""
         it_["lineas"] = partir_renglones(it_["txt"], it_, it_.get("ancho"))
-        o_ = it_["origen"]
-        r0 = fitz.Rect(it_["rect_orig"])
-        ancho = max([ancho_texto(l_, it_) for l_ in it_["lineas"]] + [0])
-        alto_ = o_[1] + (len(it_["lineas"]) - 1) * it_["inter"] + it_["tam"] * 0.3
-        it_["rect"] = tuple(r0 | fitz.Rect(o_[0], o_[1] - it_["tam"], o_[0] + ancho + 1, alto_))
+        r_ = fitz.Rect(it_["rect_orig"])
+        for x_, base, _l, _p, w_ in diseno_texto(it_):
+            r_ |= fitz.Rect(x_, base - it_["tam"], x_ + w_ + 1, base + it_["tam"] * 0.3)
+        it_["rect"] = tuple(r_)
 
     def pedir_texto(titulo, inicial="", info=""):
         """Ventanita para escribir (varios renglones). Devuelve el texto o None."""
@@ -7468,12 +7689,16 @@ def iniciar_interfaz():
     # ---- en la hoja: poner, mover, cambiar tamaño
     def agregar_item(ruta, pag, item):
         vis["nres"] += 1
+        guardar_historia()
         item.update(id=vis["nres"], ver=0, op=item.get("op", 1.0), color=tuple(item.get("color", (0, 0, 0))))
+        tocar(item)
         vis["res"].setdefault(ruta, {}).setdefault(pag, []).append(item)
         vis["res_pila"].append((ruta, pag, item))
         vis["edit_item"] = (ruta, pag, item)
+        if item["tipo"] in ("texto_n", "reemplazo"):
+            sincronizar_panel(item)  # el panel muestra el estilo del texto elegido
         actualizar_resaltes()
-        v_estado.set(f"{n_resaltes()} cambio(s) sin guardar · Ctrl+Z deshace · Ctrl+S los guarda en el PDF.")
+        v_estado.set(f"{n_resaltes()} cambio(s) sin guardar · Ctrl+Z deshace · Ctrl+Y rehace · Ctrl+S guarda en el PDF.")
 
     def edicion_press(vista, ev):
         cx_, cy_ = vista.cv.canvasx(ev.x), vista.cv.canvasy(ev.y)
@@ -7539,7 +7764,6 @@ def iniciar_interfaz():
                 it_ = dict(sp_, tipo="reemplazo", txt=txt, orig=sp_["txt"], rect_orig=sp_["rect"])
                 ajustar_reemplazo(it_)
                 agregar_item(ruta, pag, it_)
-                sincronizar_panel(it_)
             return True
         return False
 
@@ -7555,7 +7779,10 @@ def iniciar_interfaz():
             ed["it"]["rect"] = (x0, y0, x0 + ancho, y0 + ancho * (y1 - y0) / max(0.01, x1 - x0))
         else:
             ed["it"]["rect"] = (x0 + dx, y0 + dy, x1 + dx, y1 + dy)
-        ed["it"]["ver"] = ed["it"].get("ver", 0) + 1
+        if not ed.get("hist"):
+            ed["hist"] = True
+            guardar_historia()
+        tocar(ed["it"])
         vista.dibujar()
 
     def edicion_release(vista, ev):
@@ -7568,13 +7795,14 @@ def iniciar_interfaz():
             return False
         it_ = e_[2]
         txt = pedir_texto("Editar el texto", it_["txt"])
-        if txt:
+        if txt and txt != it_["txt"]:
+            guardar_historia()
             it_["txt"] = txt
             if it_["tipo"] == "texto_n":
                 it_["rect"] = rect_texto(it_["rect"][:2], it_["txt"], it_)
             else:
                 ajustar_reemplazo(it_)
-            it_["ver"] = it_.get("ver", 0) + 1
+            tocar(it_)
             visor_pedir_dibujo()
         return True
 
@@ -7612,12 +7840,9 @@ def iniciar_interfaz():
             if item["tipo"] == "reemplazo":
                 for rb_ in item.get("rects_borrar") or [item["rect_orig"]]:  # tapa el texto original en la vista
                     pg.draw_rect(fitz.Rect(rb_) - (r_.x0, r_.y0, r_.x0, r_.y0), color=None, fill=(1, 1, 1))
-                o_ = fitz.Point(item["origen"]) - r_.tl
-                for k_, l_ in enumerate(item["lineas"]):
-                    pg.insert_text(o_ + (0, k_ * item["inter"]), l_, fontsize=item["tam"], color=c_, **kw_fuente(item))
-            else:
-                pg.insert_textbox(fitz.Rect(0, 0, r_.width, r_.height) + (item["tam"] * 0.3, 0, 0, 0), item["txt"],
-                                  fontsize=item["tam"], color=c_, lineheight=1.25, **kw_fuente(item))
+            elif item.get("fondo"):
+                pg.draw_rect(pg.rect, color=None, fill=(1, 1, 1))
+            dibujar_texto(pg, item, lambda q_: fitz.Point(q_) - r_.tl)
             pix = pg.get_pixmap(matrix=fitz.Matrix(z, z), alpha=True)
             img = Image.frombytes("RGBa", (pix.width, pix.height), pix.samples).convert("RGBA")  # MuPDF da alfa premultiplicado
             d_.close()
@@ -7638,24 +7863,15 @@ def iniciar_interfaz():
             pg.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=fitz.PDF_REDACT_LINE_ART_NONE,
                                 text=fitz.PDF_REDACT_TEXT_REMOVE)
             for it_ in reemplazos:
-                for k_, l_ in enumerate(it_["lineas"]):
-                    pg.insert_text((fitz.Point(it_["origen"]) + (0, k_ * it_["inter"])) * dm, l_, fontsize=it_["tam"],
-                                   color=tuple(v_ / 255 for v_ in it_["color"]), rotate=pg.rotation, **kw_fuente(it_))
+                dibujar_texto(pg, it_, lambda q_: fitz.Point(q_) * dm, pg.rotation)
         for it_ in items_:
             if it_["tipo"] == "firma":
                 pg.insert_image(fitz.Rect(it_["rect"]) * dm, filename=it_["archivo"], rotate=pg.rotation,
                                 overlay=True)
             elif it_["tipo"] == "texto_n":
-                r_ = fitz.Rect(it_["rect"])
-                c_ = tuple(v_ / 255 for v_ in it_["color"])
-                rr = (fitz.Rect(r_.x0 + it_["tam"] * 0.3, r_.y0, r_.x1 + it_["tam"], r_.y1 + it_["tam"])) * dm
-                if pg.insert_textbox(rr, it_["txt"], fontsize=it_["tam"], color=c_,
-                                     lineheight=1.25, rotate=pg.rotation, **kw_fuente(it_)) < 0:
-                    y_ = r_.y0 + it_["tam"]  # no entro en la caja: renglon por renglon
-                    for l_ in it_["txt"].split("\n"):
-                        pg.insert_text(fitz.Point(r_.x0 + it_["tam"] * 0.3, y_) * dm, l_, fontsize=it_["tam"],
-                                       color=c_, rotate=pg.rotation, **kw_fuente(it_))
-                        y_ += it_["tam"] * 1.25
+                if it_.get("fondo"):
+                    pg.draw_rect(fitz.Rect(it_["rect"]) * dm, color=None, fill=(1, 1, 1), overlay=True)
+                dibujar_texto(pg, it_, lambda q_: fitz.Point(q_) * dm, pg.rotation)
 
     def preguntar_resaltes(rutas, que):
         """Antes de cerrar / procesar: ofrece guardar los resaltados pendientes. False = cancelar."""
@@ -7672,6 +7888,7 @@ def iniciar_interfaz():
             for x in list(rutas if rutas is not None else vis["res"]):
                 vis["res"].pop(x, None)
             vis["res_pila"] = [x for x in vis["res_pila"] if x[0] in vis["res"]]
+            limpiar_historia()
             actualizar_resaltes()
         return True
 
@@ -7991,6 +8208,7 @@ def iniciar_interfaz():
         for x in rutas_t:
             vis["res"].pop(x, None)
         vis["res_pila"] = [x for x in vis["res_pila"] if x[0] in vis["res"]]
+        limpiar_historia()
         actualizar_resaltes()
 
     def confirmar_cierre(t_):
