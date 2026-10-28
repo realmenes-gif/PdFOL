@@ -5,5 +5,6 @@
 - Tamaño y negrita ajustables; Deshacer / Rehacer / Quitar; tocá un cambio para corregirlo o «Dejar el original».
 - El editor (MuPDF) se carga solo cuando lo usás: abrir y mirar PDFs sigue igual de rápido.
 - Al actualizar la app se limpia lo guardado de la versión anterior (evita las hojas en blanco tras actualizar).
+- Probado en el emulador: el editor carga y reemplaza el texto en menos de 1 segundo.
 
 **Descarga:** `PdFOL_Android_v1.5.apk` (casi todos los teléfonos). Para teléfonos viejos de 32 bits: `PdFOL_Android_v1.5_32bits.apk`.
