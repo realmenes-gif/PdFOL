@@ -1,9 +1,15 @@
 // PdFOL para Android · visor de PDF: buscar, marcar y firmar · by Meneses999
-// Usa pdf.js (dibujo, texto, busqueda y marcas) y pdf-lib (para estampar la firma al guardar).
+// Usa pdf.js (dibujo, texto, busqueda y marcas), pdf-lib (para estampar la firma al guardar)
+// y MuPDF (para cambiar el texto del PDF; se carga solo al usarlo).
 
-const VERSION = "1.4.1";
+const VERSION = "1.5";
 const REPO = "realmenes-gif/PdFOL";
 const CAMBIOS = [
+  ["1.5", [
+    "Cambiar texto del PDF: Marcar → «Cambiar» y tocá un texto. Se reemplaza de verdad (el viejo se borra), por párrafo entero o solo la línea.",
+    "Mantiene la letra, el tamaño y el color parecidos al original; los dibujos e imágenes de atrás no se tocan.",
+    "Al actualizar la app se limpia lo guardado de la versión anterior (adiós hojas en blanco tras actualizar).",
+  ]],
   ["1.4.1", [
     "Si una hoja sale en blanco con el dibujo rápido, PdFOL lo detecta y la dibuja de la forma anterior.",
     "Menú ⋮ → «Dibujo rápido de planos» para prenderlo o apagarlo.",
@@ -324,6 +330,7 @@ async function cerrarPestana(i, { preguntar = true } = {}) {
   }
   if (modo !== "ver" && i === act) salirDeModo();
   try { t.viewer.setDocument(null); } catch (e) { /* nada */ }
+  soltarEditor(t);
   t.pdf?.destroy();
   t.cont.remove();
   pest.splice(i, 1);
@@ -522,7 +529,7 @@ async function abrirDoc(f, { reemplazar = null } = {}) {
   const t = {
     id: ++uidPest, nombre: f.nombre || "documento.pdf", idNativo: f.idNativo || null, uri: f.uri || null,
     escribible: f.escribible !== false, cont, eventBus, linkService, findController, viewer, pdf: null,
-    firmas: [], modificado: false, editado: false, uiManager: null, pagIni: f.pagina || 1, escala: f.escala || null,
+    firmas: [], cambios: [], modificado: false, editado: false, uiManager: null, pagIni: f.pagina || 1, escala: f.escala || null,
   };
   const src = {
     cMapUrl: "lib/cmaps/", cMapPacked: true, standardFontDataUrl: "lib/standard_fonts/", wasmUrl: "lib/wasm/",
@@ -560,7 +567,7 @@ async function abrirDoc(f, { reemplazar = null } = {}) {
   if (reemplazar) {
     const i = pest.indexOf(reemplazar);
     try { reemplazar.viewer.setDocument(null); } catch (e) { /* nada */ }
-    reemplazar.pdf?.destroy(); reemplazar.cont.remove();
+    soltarEditor(reemplazar); reemplazar.pdf?.destroy(); reemplazar.cont.remove();
     pest[i] = t; act = -1; activar(i);
   } else {
     pest.push(t);
@@ -570,6 +577,8 @@ async function abrirDoc(f, { reemplazar = null } = {}) {
   if (f.persistente && f.uri) anotarReciente(t.nombre, f.uri);
   armarGestos(t);
   armarSeleccion(t);
+  armarCambios(t);
+  try { if (AN?.autoprueba?.() && !window._autoEd) { window._autoEd = 1; setTimeout(() => autopruebaEditor(t), 3000); } } catch (e) { /* nada */ }
   return t;
 }
 
@@ -862,7 +871,7 @@ function salirDeModo() {
   const t = tabAct();
   if (modo === "marcar" && t) {
     try { t.viewer.annotationEditorMode = { mode: pdfjsLib.AnnotationEditorType.NONE }; } catch (e) { /* nada */ }
-    t.cont.classList.remove("dibujando", "libre");
+    t.cont.classList.remove("dibujando", "libre", "cambiando");
   }
   if (modo === "firma" && t) editarFirma(t, null);
   modo = "ver";
@@ -877,6 +886,7 @@ function ponerTipoMarca(tipo) {
   for (const b of $("seg-marcar").children) b.classList.toggle("sel", b.dataset.m === tipo);
   const T = pdfjsLib.AnnotationEditorType, P = pdfjsLib.AnnotationEditorParamsType;
   const modoPdf = tipo === "lapiz" ? T.INK : tipo === "libre" ? T.HIGHLIGHT : tipo === "escribir" ? T.FREETEXT : T.NONE;
+  t.cont.classList.toggle("cambiando", tipo === "cambiar");
   try { t.viewer.annotationEditorMode = { mode: modoPdf }; } catch (e) { /* nada */ }
   t.cont.classList.toggle("dibujando", tipo === "lapiz" || tipo === "libre");
   t.cont.classList.toggle("libre", tipo === "libre");
@@ -884,15 +894,16 @@ function ponerTipoMarca(tipo) {
     ? "Mantené apretado sobre el texto, ajustá la selección y tocá «Resaltar»."
     : tipo === "libre" ? "Pasá el dedo sobre la hoja para marcar. Con dos dedos movés la hoja."
     : tipo === "escribir" ? "Tocá la hoja donde querés escribir. Tocá el texto para moverlo o cambiarlo."
+    : tipo === "cambiar" ? "Tocá un texto del PDF para cambiarlo (el párrafo entero o solo la línea)."
       : "Dibujá con el dedo. Con dos dedos movés y hacés zoom.";
   dibujarColores();
-  aplicarParams();
+  if (tipo === "cambiar") { estadoBotonesCambio(t); cargarEditor().catch(() => {}); } else aplicarParams();
 }
 for (const b of $("seg-marcar").children) b.onclick = () => ponerTipoMarca(b.dataset.m);
 function dibujarColores() {
   const lapiz = marcarTipo === "lapiz";
   $("lapiz-opc").hidden = !lapiz;
-  $("fila-res").hidden = lapiz;
+  $("fila-res").hidden = lapiz || marcarTipo === "cambiar";
   if (lapiz) {
     if (!$("lapiz-opc").firstChild) {
       $("lapiz-opc").innerHTML = htmlPlumas("pl");
@@ -942,9 +953,9 @@ function aplicarParams() {
   }, 60);
 }
 const accionEditor = (name) => tabAct()?.eventBus.dispatch("editingaction", { source: window, name });
-$("m-deshacer").onclick = () => accionEditor("undo");
-$("m-rehacer").onclick = () => accionEditor("redo");
-$("m-borrar").onclick = () => accionEditor("delete");
+$("m-deshacer").onclick = () => { if (marcarTipo === "cambiar") deshacerCambio(); else accionEditor("undo"); };
+$("m-rehacer").onclick = () => { if (marcarTipo === "cambiar") rehacerCambio(); else accionEditor("redo"); };
+$("m-borrar").onclick = () => { if (marcarTipo === "cambiar") quitarCambioSel(); else accionEditor("delete"); };
 $("m-listo").onclick = salirDeModo;
 
 // ---------------------------------------------------------------- elegir texto (propio, suave en pantallas tactiles)
@@ -1703,6 +1714,7 @@ function dibujarFirmas(t) {
   ubicarFirmas(t);
 }
 function ubicarFirmas(t) {
+  if (t.cambios?.length) ubicarCambios(t);
   if (!t.firmas.length) return;
   cancelAnimationFrame(t.rafFirmas);
   t.rafFirmas = requestAnimationFrame(() => {
@@ -1764,11 +1776,231 @@ $("f-quitar").onclick = () => {
   t.firmaEdit = null;
   dibujarFirmas(t);
   editarFirma(t, null);
-  if (!t.firmas.length && !t.editado) marcarModificado(t, false);
+  if (!t.firmas.length && !t.cambios.length && !t.editado) marcarModificado(t, false);
 };
 $("f-otra").onclick = () => { const t = tabAct(); if (t) { editarFirma(t, null); elegirFirma(); } };
 $("f-mas-firma").onclick = () => { const t = tabAct(); if (t) { editarFirma(t, null); firmarRapido("firmas"); } };
 $("f-mas-sello").onclick = () => { const t = tabAct(); if (t) { editarFirma(t, null); firmarRapido("sellos"); } };
+
+// ---------------------------------------------------------------- cambiar texto del PDF (MuPDF; se carga solo al usarlo)
+// Tocás un texto, se abre el parrafo entero (o solo la linea) para escribirlo de nuevo. Mientras tanto se ve una
+// vista previa encima; al guardar, MuPDF borra el texto viejo de verdad (deja dibujos e imagenes) y escribe el nuevo.
+let promEditor = null;
+function cargarEditor() {
+  promEditor ||= import("./editor.mjs").catch((e) => { promEditor = null; throw e; });
+  return promEditor;
+}
+async function editorDe(t) {
+  const E = await cargarEditor();
+  if (!t.mupdf) { E.abrir(t.id, await t.pdf.getData()); t.mupdf = true; }
+  return E;
+}
+function soltarEditor(t) {
+  if (t.mupdf && promEditor) promEditor.then((E) => E.cerrar(t.id)).catch(() => {});
+  t.mupdf = false;
+}
+const tamPag = (pv) => [pv.viewport.width / pv.viewport.scale, pv.viewport.height / pv.viewport.scale];
+const dentroRect = (r, x, y, m = 0) => x >= r[0] - m && x <= r[2] + m && y >= r[1] - m && y <= r[3] + m;
+const cssFam = { Helvetica: "Arial, Helvetica, 'Liberation Sans', sans-serif", Times: "'Times New Roman', Times, 'Liberation Serif', serif", Courier: "'Courier New', Courier, monospace" };
+
+function armarCambios(t) {
+  t.cont.addEventListener("click", (e) => {
+    if (modo !== "marcar" || marcarTipo !== "cambiar" || t !== tabAct()) return;
+    if (e.target.closest(".cambio-en-pag")) return;
+    tocarCambiar(t, e.clientX, e.clientY);
+  });
+}
+let ocupadoCambio = false;
+async function tocarCambiar(t, x, y) {
+  if (ocupadoCambio) return;
+  const p = paginaEnPunto(t, x, y);
+  if (!p) return;
+  const pv = t.viewer.getPageView(p.n - 1);
+  const [W, H] = tamPag(pv);
+  const px = p.fx * W, py = p.fy * H;
+  const ya = t.cambios.find((c) => c.pag === p.n && dentroRect(c.rect, px, py, 2));
+  if (ya) { editarCambio(t, ya); return; }
+  ocupadoCambio = true;
+  let E, r;
+  const tAviso = setTimeout(() => aviso("Preparando el editor de texto…", 20000), 250);
+  try {
+    E = await editorDe(t);
+    r = E.bajoPunto(t.id, p.n, px, py);
+  } catch (e) {
+    console.error(e);
+    clearTimeout(tAviso); ocupadoCambio = false;
+    aviso(/password|encrypt/i.test(String(e)) ? "Este PDF está protegido: no se puede cambiar el texto." : "No se pudo preparar el editor de texto.");
+    return;
+  }
+  clearTimeout(tAviso); $("toast").hidden = true; ocupadoCambio = false;
+  if (!r) {
+    aviso(t.ocr?.[p.n] ? "Esta página es una imagen escaneada: no tiene texto para cambiar." : "Tocá justo sobre un texto de la hoja.");
+    return;
+  }
+  try { navigator.vibrate?.(12); } catch (e) { /* nada */ }
+  editarCambio(t, { pag: p.n, W, H, bloque: r.bloque, linea: r.linea, alcance: r.bloque.lineas.length > 1 ? "parr" : "linea", txt: null });
+}
+
+// arma lo que se escribe segun el alcance (parrafo o linea)
+function baseCambio(c) {
+  const b = c.bloque, l = b.lineas[c.linea];
+  if (c.alcance === "linea") {
+    return { rect: l.bbox, orig: l.txt.trim(), tam: l.tam, color: l.color, fam: l.fam, negrita: l.negrita, cursiva: l.cursiva,
+      base: l.base, x0: l.x0, inter: b.inter, dir: b.dir, ajustar: false };
+  }
+  const l0 = b.lineas[0];
+  return { rect: b.bbox, orig: b.txt, tam: b.tam, color: b.color, fam: b.fam, negrita: b.negrita, cursiva: b.cursiva,
+    base: l0.base, x0: l0.x0, inter: b.inter, dir: b.dir, ajustar: true };
+}
+function datosCambio(c) {
+  return { pag: c.pag, rect: c.rect, txt: c.txt, tam: c.tam, color: c.color, fam: c.fam, negrita: c.negrita, cursiva: c.cursiva,
+    base: c.base, x0: c.x0, inter: c.inter, dir: c.dir, ajustar: c.ajustar };
+}
+
+async function editarCambio(t, c) {
+  const nuevo = !t.cambios.includes(c);
+  const varias = c.bloque.lineas.length > 1;
+  let alcance = c.alcance, b = baseCambio(c);
+  let txt = c.txt ?? b.orig, tam = c.tam ?? b.tam, negrita = c.negrita ?? b.negrita;
+  const r = await dialogo({
+    titulo: "Cambiar texto",
+    html: `${varias && nuevo ? '<div class="seg" id="cb-alc"><button data-a="parr">Párrafo entero</button><button data-a="linea">Solo la línea</button></div>' : ""}
+      <textarea id="cb-txt" rows="5" autocapitalize="sentences" spellcheck="true"></textarea>
+      <div class="fila-cb">
+        <span>Tamaño</span><button class="redondo" id="cb-menos" aria-label="Más chico">${svg('<path d="M5 12h14"/>')}</button>
+        <b id="cb-tam"></b><button class="redondo" id="cb-mas" aria-label="Más grande">${svg('<path d="M12 5v14M5 12h14"/>')}</button>
+        <button class="suave" id="cb-neg"><b>N</b> Negrita</button>
+      </div>
+      <p class="ayuda-cb">Letra parecida a la original (${b.fam === "Times" ? "con serifa" : b.fam === "Courier" ? "de máquina" : "sin serifa"}). Al guardar, el texto viejo se borra de verdad.</p>`,
+    botones: [...(nuevo ? [] : [["quitar", "Dejar el original"]]), ["no", "Cancelar"], ["ok", "Aplicar", true]],
+    alAbrir: (d) => {
+      const ta = d.querySelector("#cb-txt");
+      const pintar = () => {
+        d.querySelector("#cb-tam").textContent = (Math.round(tam * 10) / 10).toString().replace(".", ",");
+        d.querySelector("#cb-neg").classList.toggle("sel", negrita);
+        for (const x of d.querySelectorAll("#cb-alc button")) x.classList.toggle("sel", x.dataset.a === alcance);
+        Object.assign(ta.style, { fontFamily: cssFam[b.fam], fontWeight: negrita ? 700 : 400, fontStyle: b.cursiva ? "italic" : "normal" });
+      };
+      ta.value = txt;
+      ta.oninput = () => { txt = ta.value; };
+      d.querySelector("#cb-menos").onclick = () => { tam = Math.max(4, Math.round((tam - 0.5) * 10) / 10); pintar(); };
+      d.querySelector("#cb-mas").onclick = () => { tam = Math.min(96, Math.round((tam + 0.5) * 10) / 10); pintar(); };
+      d.querySelector("#cb-neg").onclick = () => { negrita = !negrita; pintar(); };
+      for (const x of d.querySelectorAll("#cb-alc button")) {
+        x.onclick = () => {
+          if (alcance === x.dataset.a) return;
+          const viejo = b.orig;
+          alcance = x.dataset.a; c.alcance = alcance; b = baseCambio(c);
+          if (txt === viejo) { txt = b.orig; ta.value = txt; } // si no lo habia tocado, muestra el nuevo alcance
+          tam = b.tam; negrita = b.negrita;
+          pintar();
+        };
+      }
+      pintar();
+      setTimeout(() => { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }, 60);
+    },
+  });
+  if (r === "quitar") { quitarCambio(t, c); return; }
+  if (r !== "ok") return;
+  if (nuevo && txt === b.orig && tam === b.tam && negrita === b.negrita) return; // sin cambios
+  Object.assign(c, b, { alcance, txt, tam, negrita });
+  if (nuevo) {
+    // si el nuevo pisa uno anterior en la misma pagina, el anterior se reemplaza
+    t.cambios = t.cambios.filter((o) => !(o.pag === c.pag && Math.max(o.rect[0], c.rect[0]) < Math.min(o.rect[2], c.rect[2]) && Math.max(o.rect[1], c.rect[1]) < Math.min(o.rect[3], c.rect[3])));
+    t.cambios.push(c);
+    t.rehacerCambios = [];
+  }
+  t.cambioSel = c;
+  marcarModificado(t, true);
+  dibujarCambios(t);
+}
+function quitarCambio(t, c) {
+  t.cambios = t.cambios.filter((x) => x !== c);
+  if (t.cambioSel === c) t.cambioSel = null;
+  if (!t.firmas.length && !t.cambios.length && !t.editado) marcarModificado(t, false);
+  dibujarCambios(t);
+}
+function deshacerCambio() {
+  const t = tabAct(); const c = t?.cambios.at(-1);
+  if (!c) return;
+  quitarCambio(t, c);
+  (t.rehacerCambios ||= []).push(c);
+  estadoBotonesCambio(t);
+}
+function rehacerCambio() {
+  const t = tabAct(); const c = t?.rehacerCambios?.pop();
+  if (!c) return;
+  t.cambios.push(c); t.cambioSel = c;
+  marcarModificado(t, true);
+  dibujarCambios(t);
+}
+function quitarCambioSel() {
+  const t = tabAct();
+  if (t?.cambioSel) quitarCambio(t, t.cambioSel);
+}
+function estadoBotonesCambio(t) {
+  if (!t || modo !== "marcar" || marcarTipo !== "cambiar") return;
+  $("m-deshacer").disabled = !t.cambios.length;
+  $("m-rehacer").disabled = !t.rehacerCambios?.length;
+  $("m-borrar").disabled = !t.cambioSel;
+}
+
+// vista previa: tapa el texto viejo y muestra el nuevo con una letra parecida
+function dibujarCambios(t) {
+  const capa = t.cont.querySelector(".capa-firmas");
+  capa.querySelectorAll(".cambio-en-pag").forEach((x) => x.remove());
+  for (const c of t.cambios) {
+    const el = document.createElement("div");
+    el.className = "cambio-en-pag" + (c === t.cambioSel ? " edit" : "");
+    const tapa = document.createElement("div");
+    tapa.className = "tapa";
+    const txt = document.createElement("div");
+    txt.className = "txt";
+    txt.textContent = c.txt;
+    const [r, g, bl] = (c.color || [0, 0, 0]).map((v) => Math.round(v * 255));
+    Object.assign(txt.style, { fontFamily: cssFam[c.fam], fontWeight: c.negrita ? 700 : 400, fontStyle: c.cursiva ? "italic" : "normal",
+      color: `rgb(${r},${g},${bl})`, whiteSpace: c.ajustar ? "pre-wrap" : "pre" });
+    el.append(tapa, txt);
+    el.addEventListener("click", (e) => {
+      if (modo !== "marcar" || marcarTipo !== "cambiar") return;
+      e.stopPropagation();
+      t.cambioSel = c;
+      dibujarCambios(t);
+      editarCambio(t, c);
+    });
+    c.el = el;
+    capa.append(el);
+  }
+  ubicarCambios(t, true);
+  estadoBotonesCambio(t);
+}
+function ubicarCambios(t, ya = false) {
+  const hacer = () => {
+    for (const c of t.cambios) {
+      const pv = t.viewer.getPageView(c.pag - 1);
+      if (!pv || !c.el) continue;
+      const d = pv.div;
+      const [W] = tamPag(pv);
+      const s = d.offsetWidth / W; // puntos -> pixeles en pantalla
+      const ox = d.offsetLeft, oy = d.offsetTop;
+      const [tapa, txt] = c.el.children;
+      Object.assign(tapa.style, { left: ox + (c.rect[0] - 1) * s + "px", top: oy + (c.rect[1] - 1) * s + "px",
+        width: (c.rect[2] - c.rect[0] + 2) * s + "px", height: (c.rect[3] - c.rect[1] + 2) * s + "px" });
+      const vert = Math.abs(c.dir[1]) > Math.abs(c.dir[0]);
+      const ancho = (vert ? c.rect[3] - c.rect[1] : c.rect[2] - c.rect[0]) + 1;
+      const ang = Math.atan2(c.dir[1], c.dir[0]);
+      Object.assign(txt.style, {
+        left: ox + c.x0 * s + "px", top: oy + c.base * s + "px", fontSize: c.tam * s + "px", lineHeight: c.inter * s + "px",
+        width: c.ajustar ? ancho * s + "px" : "auto",
+        // el origen es la base del primer renglon (como en el PDF)
+        transform: `rotate(${ang}rad) translateY(${-(c.inter * s) / 2 - c.tam * s * 0.32}px)`,
+      });
+    }
+  };
+  if (ya) { hacer(); return; }
+  cancelAnimationFrame(t.rafCambios);
+  t.rafCambios = requestAnimationFrame(hacer);
+}
 
 // pdf-lib (para estampar firmas y sellos) se carga recien al guardar con firma: la app abre mas rapido
 let promesaPdfLib = null;
@@ -1844,6 +2076,15 @@ async function estamparFirmas(t, datos) {
 async function bytesFinales(t) {
   if (modo === "marcar") salirDeModo();
   let datos = t.editado ? await t.pdf.saveDocument() : await t.pdf.getData();
+  if (t.cambios.length) {
+    try {
+      const E = await cargarEditor();
+      datos = E.aplicar(datos, t.cambios.map(datosCambio));
+    } catch (e) {
+      console.error(e);
+      throw new Error(/password|encrypt/i.test(String(e)) ? "Este PDF está protegido y no se puede cambiar el texto." : "No se pudo cambiar el texto del PDF.");
+    }
+  }
   if (t.firmas.length) {
     try {
       datos = await estamparFirmas(t, datos);
@@ -1990,7 +2231,7 @@ function acercaDe() {
     titulo: `PdFOL v${VERSION} para Android`,
     html: `<p>Visor de PDF: buscar, marcar y firmar.<br><b>by Meneses999</b></p>
       <p>Las firmas quedan dibujadas en el PDF (firma manuscrita, no certificado digital).</p>
-      <p style="font-size:12px">Usa pdf.js (Mozilla, licencia Apache 2.0) y pdf-lib (licencia MIT).</p>${htmlCambios(CAMBIOS.slice(0, 1))}
+      <p style="font-size:12px">Usa pdf.js (Mozilla, licencia Apache 2.0), pdf-lib (licencia MIT) y MuPDF (Artifex, licencia AGPL 3.0) para cambiar texto.</p>${htmlCambios(CAMBIOS.slice(0, 1))}
       <div class="ver-tit">Diagnóstico</div><pre style="white-space:pre-wrap;font-size:11px;color:var(--texto2);margin:4px 0 0">${textoDiag()}</pre>`,
     botones: [["ok", "Cerrar", true]],
   });
@@ -2107,4 +2348,16 @@ marcarNueva();
   setTimeout(() => buscarActualizacion(false), 4000);
 })();
 // para las pruebas automaticas
+// prueba automatica en el emulador: cambia un texto del documento abierto con MuPDF y lo cuenta en el registro
+async function autopruebaEditor(t) {
+  try {
+    const t0 = Date.now();
+    const E = await editorDe(t);
+    const bs = E.bloques(t.id, 1);
+    const b = bs[0];
+    const datos = E.aplicar(await t.pdf.getData(), [{ pag: 1, rect: b.bbox, txt: "CAMBIADO POR PDFOL", tam: b.tam, color: b.color, fam: b.fam,
+      negrita: b.negrita, cursiva: b.cursiva, base: b.lineas[0].base, x0: b.lineas[0].x0, inter: b.inter, dir: b.dir, ajustar: true }]);
+    console.log(`PdFOL EDITOR OK bloques=${bs.length} primero="${b.txt.slice(0, 40)}" bytes=${datos.length} ms=${Date.now() - t0}`);
+  } catch (e) { console.log("PdFOL EDITOR ERROR " + (e?.stack || e)); }
+}
 window._pdfol = { pest, abrirDoc, guardar, bytesFinales, ponerFirma, prefs, entrarMarcar, ponerTipoMarca, alternarBusqueda, buscar, salirDeModo };

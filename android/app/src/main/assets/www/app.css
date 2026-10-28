@@ -181,7 +181,7 @@ body.con-docs #inicio { display: none; }
   display: flex; flex-direction: column; gap: 10px; box-shadow: 0 -4px 18px rgba(0, 0, 0, .08); z-index: 6;
 }
 .seg { display: flex; background: var(--suave); border-radius: 10px; padding: 3px; }
-.seg button { flex: 1; height: 34px; border-radius: 8px; font-size: 13px; color: var(--texto2); font-weight: 600; }
+.seg button { flex: 1; height: 34px; border-radius: 8px; font-size: 13px; padding: 0 4px; white-space: nowrap; min-width: 0; color: var(--texto2); font-weight: 600; }
 .seg button.sel { background: var(--acento); color: #fff; }
 .fila-herr { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .fila-herr .primario { margin-left: auto; }
@@ -258,7 +258,7 @@ body.con-docs #inicio { display: none; }
   .accion span.et { display: block; }
   .accion .ic { width: 26px; height: 26px; }
   .hoja-abajo { flex-direction: row; flex-wrap: wrap; align-items: center; }
-  .hoja-abajo .seg { width: 360px; }
+  .hoja-abajo .seg { width: 440px; }
   .hoja-abajo .fila-herr { flex-wrap: nowrap; }
   .hoja-abajo .ayuda-marcar { width: 100%; order: 9; }
   #herr-marcar .fila-herr:first-of-type { margin-left: 8px; }
@@ -358,3 +358,20 @@ body.eligiendo .visor .textLayer, body.eligiendo .visor .textLayer span { -webki
 .visor .canvasWrapper img.detalle { position: absolute; display: block; }
 .visor .canvasWrapper canvas { position: relative; }
 .firma-g.ult { border: 2px solid var(--acento); }
+
+/* ---------- cambiar texto del PDF: vista previa sobre la hoja y dialogo */
+.cambio-en-pag .tapa { position: absolute; z-index: 1; background: #fff; border-radius: 1px; }
+.cambio-en-pag .txt { position: absolute; z-index: 1; transform-origin: 0 0; pointer-events: none; overflow-wrap: break-word; }
+.cambio-en-pag.edit .tapa { outline: 1.5px dashed var(--acento); outline-offset: 2px; }
+.visor.cambiando .textLayer span { cursor: text; }
+.visor.cambiando .cambio-en-pag .tapa { box-shadow: 0 0 0 1px rgba(76, 111, 159, .35); }
+.dialogo textarea {
+  width: 100%; min-height: 110px; max-height: 40vh; border-radius: 10px; border: 1px solid var(--borde); background: #fff; color: #1E2730;
+  font-size: 16px; line-height: 1.35; padding: 10px 12px; outline: 0; resize: vertical; margin-top: 10px; display: block; box-sizing: border-box;
+}
+.dialogo textarea:focus { border-color: var(--acento); }
+.fila-cb { display: flex; align-items: center; gap: 8px; margin-top: 10px; flex-wrap: wrap; font-size: 14px; color: var(--texto2); }
+.fila-cb b#cb-tam { min-width: 36px; text-align: center; color: var(--texto); }
+.fila-cb #cb-neg { margin-left: auto; height: 36px; padding: 0 12px; border-radius: 10px; }
+.fila-cb #cb-neg.sel { background: var(--acento); color: #fff; }
+.dialogo .ayuda-cb { font-size: 12px; margin: 10px 0 0; }

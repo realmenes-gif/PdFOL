@@ -175,6 +175,15 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
+        // al actualizar la app se borra lo guardado de la version anterior (evita hojas en blanco tras actualizar)
+        try {
+            long ver = getPackageManager().getPackageInfo(getPackageName(), 0).getLongVersionCode();
+            android.content.SharedPreferences sp = getSharedPreferences("pdfol", MODE_PRIVATE);
+            if (sp.getLong("verCache", -1) != ver) {
+                web.clearCache(true);
+                sp.edit().putLong("verCache", ver).apply();
+            }
+        } catch (Exception e) { /* nada */ }
         manejarIntent(getIntent());
         web.loadUrl(INICIO);
     }
@@ -561,6 +570,12 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ puente con la pagina
     class Puente {
+        // solo para la prueba automatica del emulador (adb ... --ez autoprueba true)
+        @JavascriptInterface
+        public boolean autoprueba() {
+            return getIntent() != null && getIntent().getBooleanExtra("autoprueba", false);
+        }
+
         @JavascriptInterface
         public String pendientes() {
             JSONArray a = new JSONArray();

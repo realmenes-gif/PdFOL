@@ -7,7 +7,7 @@ adb shell settings put global window_animation_scale 0
 adb shell settings put global transition_animation_scale 0
 adb shell settings put global animator_duration_scale 0
 adb install -r "$APK" || exit 1
-adb shell am start -W -n com.meneses999.pdfol/.MainActivity
+adb shell am start -W -n com.meneses999.pdfol/.MainActivity --ez autoprueba true
 sleep 12
 adb exec-out screencap -p > "$OUT/1_inicio.png"
 adb push android/prueba/prueba.pdf /sdcard/Download/prueba.pdf
@@ -18,6 +18,7 @@ echo "ID=$ID"
 adb shell am start -W -a android.intent.action.VIEW -d "content://media/external/file/$ID" -t application/pdf --grant-read-uri-permission -n com.meneses999.pdfol/.MainActivity
 sleep 14
 adb exec-out screencap -p > "$OUT/2_documento.png"
+adb logcat -d | grep -E "PdFOL EDITOR" | tail -3
 # buscar con el teclado: toca la lupa (arriba a la derecha) no es fiable por coordenadas: se usa la tecla de busqueda
 # planos pesados y pagina girada: dibujo nativo
 for f in plano girado; do
