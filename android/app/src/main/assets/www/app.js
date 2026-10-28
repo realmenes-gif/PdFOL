@@ -2,9 +2,14 @@
 // Usa pdf.js (dibujo, texto, busqueda y marcas), pdf-lib (para estampar la firma al guardar)
 // y MuPDF (para cambiar el texto del PDF; se carga solo al usarlo).
 
-const VERSION = "1.5";
+const VERSION = "1.5.1";
 const REPO = "realmenes-gif/PdFOL";
 const CAMBIOS = [
+  ["1.5.1", [
+    "Zoom con dos dedos: ahora se queda en el punto que estás enfocando (antes se corría hacia abajo).",
+    "Planos: el control de «hoja en blanco» ya no confunde las líneas finas con una hoja vacía (no vuelve al dibujo lento).",
+    "Reconocer texto (escaneos): solo la página que ves y las 5 de antes y de después; las demás cuando llegues.",
+  ]],
   ["1.5", [
     "Cambiar texto del PDF: Marcar → «Cambiar» y tocá un texto. Se reemplaza de verdad (el viejo se borra), por párrafo entero o solo la línea.",
     "Mantiene la letra, el tamaño y el color parecidos al original; los dibujos e imágenes de atrás no se tocan.",
@@ -478,12 +483,13 @@ function revisarBlanca(t, pv, img) {
     const texto = (pv.textLayer?.div?.textContent || "").replace(/\s/g, "");
     if (texto.length < 20) return;
     const cv = document.createElement("canvas");
-    cv.width = 48; cv.height = 48;
+    // 128 px y cualquier gris: en los planos las lineas finas quedan muy claras al achicar (no es una hoja en blanco)
+    cv.width = 128; cv.height = 128;
     const cx = cv.getContext("2d", { willReadFrequently: true });
-    cx.drawImage(img, 0, 0, 48, 48);
-    const px = cx.getImageData(0, 0, 48, 48).data;
+    cx.drawImage(img, 0, 0, 128, 128);
+    const px = cx.getImageData(0, 0, 128, 128).data;
     let oscuros = 0;
-    for (let i = 0; i < px.length; i += 4) if (px[i] + px[i + 1] + px[i + 2] < 700) oscuros++;
+    for (let i = 0; i < px.length; i += 4) if (px[i] + px[i + 1] + px[i + 2] < 750) oscuros++;
     if (oscuros < 3) {
       diag.blancas++;
       notaDiag(`hoja en blanco del motor (pág. ${pv.id}): se usa pdf.js`);
@@ -588,8 +594,11 @@ function conectarEventos(t) {
     viewer.currentScaleValue = t.escala || (esAncho() ? "auto" : "page-width");
     if (t.pagIni > 1) viewer.currentPageNumber = Math.min(t.pagIni, t.pdf.numPages);
     actualizarIndicador(); actualizarZoomTxt();
+    setTimeout(() => ocrAlMoverse(t), 900);
   });
-  eventBus.on("pagechanging", () => { if (t === tabAct()) { actualizarIndicador(true); marcarMiniAct(); } });
+  eventBus.on("pagechanging", () => {
+    if (t === tabAct()) { actualizarIndicador(true); marcarMiniAct(); clearTimeout(t.tOcrMov); t.tOcrMov = setTimeout(() => ocrAlMoverse(t), 400); }
+  });
   eventBus.on("scalechanging", () => { if (t === tabAct()) actualizarZoomTxt(); ubicarFirmas(t); if (sel?.t === t) requestAnimationFrame(dibujarSel); });
   eventBus.on("updateviewarea", () => ubicarFirmas(t));
   eventBus.on("pagerendered", (e) => { ubicarFirmas(t); ponerImagenNativa(t, e.source); });
@@ -665,6 +674,12 @@ async function irAPagina() {
 }
 
 // ---------------------------------------------------------------- gestos: pellizcar, doble toque y dos dedos
+// pdf.js resta al punto del zoom la posicion de la hoja dentro de su contenedor (offsetTop/Left), no la de la
+// pantalla: con la barra de arriba el zoom se corria hacia abajo. Se le pasa el punto ya convertido.
+function origenZoom(t, x, y) {
+  const r = t.cont.getBoundingClientRect();
+  return [x - r.left + t.cont.offsetLeft, y - r.top + t.cont.offsetTop];
+}
 function armarGestos(t) {
   const c = t.cont;
   let pinza = null, toque = null, previo = null, ultScroll = 0, ultTipo = "touch";
@@ -705,7 +720,7 @@ function armarGestos(t) {
     pinza.activa = true;
     const objetivo = Math.min(10, Math.max(0.25, pinza.esc0 * rel));
     const f = objetivo / t.viewer.currentScale;
-    if (Math.abs(f - 1) > 0.015) t.viewer.updateScale({ scaleFactor: f, origin: cen, drawingDelay: 350 });
+    if (Math.abs(f - 1) > 0.015) t.viewer.updateScale({ scaleFactor: f, origin: origenZoom(t, cen[0], cen[1]), drawingDelay: 350 });
   }, { passive: false });
   c.addEventListener("touchend", (e) => {
     if (e.touches.length < 2) pinza = null;
@@ -726,7 +741,7 @@ function armarGestos(t) {
   c.addEventListener("wheel", (e) => {
     if (!e.ctrlKey) return;
     e.preventDefault();
-    t.viewer.updateScale({ scaleFactor: e.deltaY < 0 ? 1.1 : 1 / 1.1, origin: [e.clientX, e.clientY], drawingDelay: 250 });
+    t.viewer.updateScale({ scaleFactor: e.deltaY < 0 ? 1.1 : 1 / 1.1, origin: origenZoom(t, e.clientX, e.clientY), drawingDelay: 250 });
   }, { passive: false });
   c.addEventListener("dblclick", (e) => {
     if (ultTipo === "mouse" && modo === "ver" && !e.target.closest(".textLayer span")) dobleToque(t, e.clientX, e.clientY);
@@ -737,7 +752,7 @@ function dobleToque(t, x, y) {
   const pv = v.getPageView(v.currentPageNumber - 1);
   const anchoPag = pv ? pv.viewport.width / v.currentScale : 600;
   const ajuste = (t.cont.clientWidth - 16) / anchoPag;
-  if (v.currentScale < ajuste * 1.6) v.updateScale({ scaleFactor: (ajuste * 2.2) / v.currentScale, origin: [x, y] });
+  if (v.currentScale < ajuste * 1.6) v.updateScale({ scaleFactor: (ajuste * 2.2) / v.currentScale, origin: origenZoom(t, x, y) });
   else v.currentScaleValue = "page-width";
 }
 
@@ -1227,18 +1242,44 @@ function revisarTextoPagina(t, n) {
   if (t.ocr[n]) return; // en cola, trabajando o sin resultado
   const propio = [...capa.querySelectorAll("span:not(.ocr)")].map((x) => x.textContent).join("").replace(/\s/g, "");
   if (propio.length >= 15) { t.ocr[n] = "texto"; return; }
+  if (!cercaOcr(t, n)) return; // lejos de lo que se ve: se reconoce cuando te acerques
   t.ocr[n] = "cola";
   ocrCola.push([t, n]);
   siguienteOcr();
 }
 
+// solo se reconoce la pagina que se ve y las 5 de antes y de despues (las demas, cuando llegues a ellas)
+const VENTANA_OCR = 5;
+const cercaOcr = (t, n) => t === tabAct() && Math.abs(n - t.viewer.currentPageNumber) <= VENTANA_OCR;
+function ocrAlMoverse(t) {
+  if (!ocrDisponible() || t !== tabAct()) return;
+  const c = t.viewer.currentPageNumber;
+  t.ocr ||= {};
+  for (let n = Math.max(1, c - VENTANA_OCR); n <= Math.min(t.pdf.numPages, c + VENTANA_OCR); n++) {
+    if (t.ocr[n]) continue;
+    if (t.viewer.getPageView(n - 1)?.textLayer?.div) { revisarTextoPagina(t, n); continue; }
+    // hoja todavia no dibujada: se mira si tiene texto propio; si no, se reconoce de antemano
+    t.ocr[n] = "revisando";
+    t.pdf.getPage(n).then((p) => p.getTextContent()).then((tc) => {
+      if (t.ocr[n] !== "revisando") return;
+      const largo = tc.items.map((x) => x.str || "").join("").replace(/\s/g, "").length;
+      if (largo >= 15) { t.ocr[n] = "texto"; return; }
+      if (!cercaOcr(t, n)) { t.ocr[n] = null; return; }
+      t.ocr[n] = "cola"; ocrCola.push([t, n]); siguienteOcr();
+    }).catch(() => { t.ocr[n] = null; });
+  }
+  siguienteOcr();
+}
 async function siguienteOcr() {
   if (ocrTrabajando) return;
-  // primero las paginas que se estan viendo
-  const t0 = tabAct();
-  let i = ocrCola.findIndex(([t, n]) => t === t0 && Math.abs(n - t.viewer.currentPageNumber) <= 1);
-  if (i < 0) i = ocrCola.findIndex(([t]) => pest.includes(t));
-  if (i < 0) { ocrCola.length = 0; return; }
+  // lo que quedo lejos sale de la cola; despues va la mas cercana a la pagina que se ve
+  for (let k = ocrCola.length - 1; k >= 0; k--) {
+    const [t, n] = ocrCola[k];
+    if (!pest.includes(t) || !cercaOcr(t, n)) { if (t.ocr?.[n] === "cola") t.ocr[n] = null; ocrCola.splice(k, 1); }
+  }
+  if (!ocrCola.length) return;
+  let i = 0;
+  ocrCola.forEach(([t, n], k) => { if (Math.abs(n - t.viewer.currentPageNumber) < Math.abs(ocrCola[i][1] - t.viewer.currentPageNumber)) i = k; });
   const [t, n] = ocrCola.splice(i, 1)[0];
   if (!pest.includes(t)) { siguienteOcr(); return; }
   ocrTrabajando = true;

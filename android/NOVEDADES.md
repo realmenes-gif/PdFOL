@@ -1,10 +1,8 @@
-## PdFOL para Android v1.5 · by Meneses999
+## PdFOL para Android v1.5.1 · by Meneses999
 
-- **Cambiar texto del PDF**: Marcar → **«Cambiar»** y tocá un texto. Se abre el **párrafo entero** (o elegí **«Solo la línea»**) para escribirlo de nuevo.
-- El reemplazo es **de verdad**: al guardar, el texto viejo se borra del PDF y se escribe el nuevo con letra, tamaño y color parecidos. Los dibujos, líneas e imágenes de atrás no se tocan.
-- Tamaño y negrita ajustables; Deshacer / Rehacer / Quitar; tocá un cambio para corregirlo o «Dejar el original».
-- El editor (MuPDF) se carga solo cuando lo usás: abrir y mirar PDFs sigue igual de rápido.
-- Al actualizar la app se limpia lo guardado de la versión anterior (evita las hojas en blanco tras actualizar).
-- Probado en el emulador: el editor carga y reemplaza el texto en menos de 1 segundo.
+- **Zoom con dos dedos**: ahora se queda en el punto que estás enfocando (antes se corría hacia abajo, sobre todo en planos).
+- **Planos**: el control de «hoja en blanco» ya no confunde las líneas finas con una hoja vacía, así no vuelve al dibujo lento.
+- **Escaneos**: el texto se reconoce solo en la página que ves y en las 5 de antes y de después (la más cercana primero); las demás, cuando llegues a ellas. Carga más rápido.
+- Sigue todo lo de la v1.5: **Marcar → «Cambiar»** para reemplazar texto del PDF (párrafo o línea).
 
-**Descarga:** `PdFOL_Android_v1.5.apk` (casi todos los teléfonos). Para teléfonos viejos de 32 bits: `PdFOL_Android_v1.5_32bits.apk`.
+**Descarga:** `PdFOL_Android_v1.5.1.apk` (casi todos los teléfonos). Para teléfonos viejos de 32 bits: `PdFOL_Android_v1.5.1_32bits.apk`.
