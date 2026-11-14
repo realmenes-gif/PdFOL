@@ -2,9 +2,13 @@
 // Usa pdf.js (dibujo, texto, busqueda y marcas), pdf-lib (para estampar la firma al guardar)
 // y MuPDF (para cambiar el texto del PDF; se carga solo al usarlo).
 
-const VERSION = "1.5.2";
+const VERSION = "1.5.3";
 const REPO = "realmenes-gif/PdFOL";
 const CAMBIOS = [
+  ["1.5.3", [
+    "Tablet: al alejar y deslizar, la hoja ya no se corre de costado. Todas las hojas se ven del mismo ancho (los planos grandes se achican al ancho de las demás), como en PdFOL de Windows.",
+    "Al deslizar derecho (arriba/abajo o de costado), la hoja sigue en esa dirección sin desviarse.",
+  ]],
   ["1.5.2", [
     "Zoom nuevo: mientras pellizcás la hoja solo se agranda (sin redibujar) y al soltar queda justo en el punto que enfocaste.",
     "Zoom máximo limitado a lo que el celular puede dibujar: ya no se pone en blanco al acercar mucho.",
@@ -253,8 +257,8 @@ function menuMas(boton) {
   if (t) {
     if (!esAncho()) it.push({ t: "Miniaturas", i: ICO.minis, f: alternarMinis });
     it.push({ t: "Ir a la página…", i: ICO.pagina, f: irAPagina, der: `${t.viewer.currentPageNumber} de ${t.pdf.numPages}` });
-    it.push({ t: "Ajustar al ancho", i: ICO.ancho, f: () => { t.viewer.currentScaleValue = "page-width"; } });
-    it.push({ t: "Página entera", i: ICO.entera, f: () => { t.viewer.currentScaleValue = "page-fit"; } });
+    it.push({ t: "Ajustar al ancho", i: ICO.ancho, f: () => aplicarAjuste(t, "ancho") });
+    it.push({ t: "Página entera", i: ICO.entera, f: () => aplicarAjuste(t, "pagina") });
     it.push("-");
     it.push({ t: "Guardar", i: ICO.guardar, f: guardar, der: t.modificado ? "con cambios" : "" });
     it.push({ t: "Guardar una copia", i: ICO.copia, f: () => guardar("copia") });
@@ -596,7 +600,8 @@ async function abrirDoc(f, { reemplazar = null } = {}) {
 function conectarEventos(t) {
   const { eventBus, viewer } = t;
   eventBus.on("pagesinit", () => {
-    viewer.currentScaleValue = t.escala || (esAncho() ? "auto" : "page-width");
+    if (t.escala && !isNaN(+t.escala)) viewer.currentScaleValue = t.escala;
+    else aplicarAjuste(t, t.escala === "page-fit" ? "pagina" : "ancho", esAncho());
     if (t.pagIni > 1) viewer.currentPageNumber = Math.min(t.pagIni, t.pdf.numPages);
     actualizarIndicador(); actualizarZoomTxt();
     setTimeout(() => ocrAlMoverse(t), 900);
@@ -604,7 +609,13 @@ function conectarEventos(t) {
   eventBus.on("pagechanging", () => {
     if (t === tabAct()) { actualizarIndicador(true); marcarMiniAct(); clearTimeout(t.tOcrMov); t.tOcrMov = setTimeout(() => ocrAlMoverse(t), 400); }
   });
-  eventBus.on("scalechanging", () => { if (t === tabAct()) actualizarZoomTxt(); ubicarFirmas(t); if (sel?.t === t) requestAnimationFrame(dibujarSel); });
+  eventBus.on("scalechanging", () => {
+    igualarAnchos(t);
+    if (t === tabAct()) actualizarZoomTxt(); ubicarFirmas(t); if (sel?.t === t) requestAnimationFrame(dibujarSel);
+  });
+  // todas las hojas ya tienen su tamaño real: se recalcula el ancho comun (y el ajuste)
+  eventBus.on("pagesloaded", () => { t.anchoRef = null; if (t.ajuste) aplicarAjuste(t, t.ajuste, t.ajusteTope); else igualarAnchos(t); });
+  eventBus.on("rotationchanging", () => { t.anchoRef = null; igualarAnchos(t); });
   eventBus.on("updateviewarea", () => ubicarFirmas(t));
   eventBus.on("pagerendered", (e) => { ubicarFirmas(t); ponerImagenNativa(t, e.source); });
   eventBus.on("textlayerrendered", (e) => revisarTextoPagina(t, e.pageNumber));
@@ -659,9 +670,9 @@ $("z-menos").onclick = () => zoomBoton(1 / 1.25);
 $("z-val").onclick = (e) => {
   const t = tabAct(); if (!t) return;
   menu([
-    { t: "Ajustar al ancho", i: ICO.ancho, f: () => { t.viewer.currentScaleValue = "page-width"; } },
-    { t: "Página entera", i: ICO.entera, f: () => { t.viewer.currentScaleValue = "page-fit"; } },
-    ...[50, 75, 100, 150, 200, 300].map((z) => ({ t: z + " %", f: () => { t.viewer.currentScaleValue = String(z / 100); } })),
+    { t: "Ajustar al ancho", i: ICO.ancho, f: () => aplicarAjuste(t, "ancho") },
+    { t: "Página entera", i: ICO.entera, f: () => aplicarAjuste(t, "pagina") },
+    ...[50, 75, 100, 150, 200, 300].map((z) => ({ t: z + " %", f: () => { t.ajuste = null; t.viewer.currentScaleValue = String(z / 100); } })),
   ], e.currentTarget);
 };
 
@@ -684,6 +695,46 @@ async function irAPagina() {
 }
 
 // ---------------------------------------------------------------- gestos: pellizcar, doble toque y dos dedos
+// v1.5.3: todas las hojas con el mismo ancho (como PdFOL de Windows). En un expediente con planos, el plano
+// se achica al ancho de las demas hojas: no queda espacio de costado y la hoja ya no se corre al deslizar.
+function anchoRef(t) {
+  if (t.anchoRef) return t.anchoRef;
+  const ws = (t.viewer._pages || []).map((pv) => pv.viewport.width / pv.scale).filter((w) => w > 0).sort((a, b) => a - b);
+  t.anchoRef = ws[Math.floor(ws.length / 2)] || 0;  // el ancho mas comun (la mediana)
+  return t.anchoRef;
+}
+function igualarAnchos(t) {
+  const v = t.viewer, pvs = v._pages;
+  if (!pvs?.length || prefs.anchoIgual === false) return;
+  const ref = anchoRef(t);
+  if (!ref) return;
+  let cambio = false;
+  for (const pv of pvs) {
+    const w0 = pv.viewport.width / pv.scale;
+    const obj = v.currentScale * Math.min(1, ref / w0);
+    if (Math.abs(pv.scale - obj) > 1e-4) { pv.update({ scale: obj }); cambio = true; }
+    // el tamaño de la hoja en pantalla sale de esta variable: cada hoja lleva la suya
+    if (obj < v.currentScale - 1e-4) pv.div.style.setProperty("--scale-factor", obj * (96 / 72));
+    else pv.div.style.removeProperty("--scale-factor");
+  }
+  if (cambio) v.update();
+}
+// «Ajustar al ancho» y «Página entera» con las hojas igualadas
+function aplicarAjuste(t, modo, tope = false) {
+  const v = t.viewer;
+  v.currentScaleValue = modo === "ancho" ? "page-width" : "page-fit";
+  const pv = v._pages?.[v.currentPageNumber - 1];
+  const ref = anchoRef(t);
+  let nuevo = v.currentScale;
+  if (pv && ref && prefs.anchoIgual !== false) {
+    const wc = pv.viewport.width / pv.scale;
+    nuevo = modo === "ancho" ? nuevo * wc / ref : nuevo / Math.min(1, ref / wc);
+  }
+  if (tope) nuevo = Math.min(nuevo, 1.25);  // pantallas anchas: no tan grande
+  if (Math.abs(nuevo - v.currentScale) > 1e-3) v.currentScale = nuevo;
+  t.ajuste = modo; t.ajusteTope = tope;
+}
+
 const LADO_MAX = 12000;
 function escalaMax(t) {
   let mayor = 0;
@@ -709,6 +760,7 @@ function zoomEn(t, escala, x, y, ancla = anclaEn(t, x, y)) {
   const v = t.viewer;
   escala = Math.min(escalaMax(t), Math.max(ESCALA_MIN, escala));
   if (Math.abs(escala - v.currentScale) < 0.001) return;
+  t.ajuste = null;
   v.currentScale = escala;
   const pv = ancla && v.getPageView(ancla.n - 1);
   if (!pv) return;
@@ -767,10 +819,14 @@ function armarGestos(t) {
     if (e.touches.length === 1 && arrastre && !pinza) {
       const p = e.touches[0];
       if (!arrastre.activo && Math.hypot(p.clientX - arrastre.x, p.clientY - arrastre.y) < 6) return;
+      if (!arrastre.activo) {  // v1.5.3: si arranca derecho (vertical u horizontal), sigue en ese eje
+        const ax = Math.abs(p.clientX - arrastre.x), ay = Math.abs(p.clientY - arrastre.y);
+        arrastre.eje = ay > ax * 1.8 ? "y" : ax > ay * 1.8 ? "x" : null;
+      }
       arrastre.activo = true;
       e.preventDefault();
-      c.scrollLeft -= p.clientX - arrastre.x;
-      c.scrollTop -= p.clientY - arrastre.y;
+      if (arrastre.eje !== "y") c.scrollLeft -= p.clientX - arrastre.x;
+      if (arrastre.eje !== "x") c.scrollTop -= p.clientY - arrastre.y;
       arrastre.x = p.clientX; arrastre.y = p.clientY;
       const m = arrastre.muestras; m.push([performance.now(), p.clientX, p.clientY]);
       if (m.length > 6) m.shift();
@@ -806,6 +862,8 @@ function armarGestos(t) {
         const dt = ult[0] - pri[0];
         if (dt > 0 && ahora - ult[0] < 60) {
           let vx = (ult[1] - pri[1]) / dt, vy = (ult[2] - pri[2]) / dt;
+          if (arrastre.eje === "y") vx = 0;
+          if (arrastre.eje === "x") vy = 0;
           const v = Math.hypot(vx, vy);
           if (v > VEL_MAX) { vx *= VEL_MAX / v; vy *= VEL_MAX / v; }
           if (v > 0.15) lanzar(vx, vy);
@@ -840,10 +898,10 @@ function armarGestos(t) {
 function dobleToque(t, x, y) {
   const v = t.viewer;
   const pv = v.getPageView(v.currentPageNumber - 1);
-  const anchoPag = pv ? pv.viewport.width / v.currentScale : 600;
+  const anchoPag = anchoRef(t) || (pv ? pv.viewport.width / pv.scale : 600);
   const ajuste = (t.cont.clientWidth - 16) / anchoPag;
   if (v.currentScale < ajuste * 1.6) zoomEn(t, ajuste * 2.2, x, y);
-  else v.currentScaleValue = "page-width";
+  else aplicarAjuste(t, "ancho");
 }
 
 // ---------------------------------------------------------------- miniaturas
@@ -2254,7 +2312,8 @@ async function guardar(como) {
   aviso("Guardando…", 20000);
   let datos;
   try { datos = await bytesFinales(t); } catch (e) { aviso(e.message || "No se pudo guardar."); return false; }
-  const pag = t.viewer.currentPageNumber, esc = t.viewer.currentScaleValue;
+  const pag = t.viewer.currentPageNumber;
+  const esc = t.ajuste === "pagina" ? "page-fit" : t.ajuste ? "page-width" : t.viewer.currentScaleValue;
   if (!AN) { // navegador (pruebas): se descarga
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([datos], { type: "application/pdf" }));
@@ -2459,10 +2518,7 @@ window.addEventListener("resize", () => {
   // al girar el telefono o cambiar el tamaño: «Ajustar al ancho» se vuelve a ajustar
   clearTimeout(window._tAjuste);
   window._tAjuste = setTimeout(() => {
-    for (const x of pest) {
-      const v = x.viewer.currentScaleValue;
-      if (v && isNaN(+v)) x.viewer.currentScaleValue = v;
-    }
+    for (const x of pest) if (x.ajuste) aplicarAjuste(x, x.ajuste, x.ajusteTope);
   }, 150);
   if (esAncho()) $("velo-minis").hidden = true;
 });
