@@ -1,16 +1,8 @@
-## PdFOL v3.0 · by Meneses999
+## PdFOL v3.1 · by Meneses999
 
-**Nueva cara, como Nitro y Adobe**, con los mismos íconos y colores:
+- **Abre más rápido**: la primera hoja la dibuja la ventana apenas aparece, sin esperar a los procesos de dibujo. En Windows esos procesos son otras copias de PdFOL.exe que tardaban segundos en arrancar y competían con el inicio; ahora arrancan después.
+- La ventana aparece **ya de su tamaño final**: la hoja no se ve corrida y después salta.
+- Si cerrás en **pantalla completa o minimizado**, la próxima vez abre bien (maximizada o como estaba).
+- Sigue todo lo de la v3.0: cara nueva estilo Nitro / Adobe, girar la vista, una / continua / dos páginas, marcadores, inicio con recientes.
 
-- **Arriba**: las pestañas de los documentos abiertos y el buscador.
-- **La cinta**: Inicio · Editar · Organizar · Herramientas · Ver. En *Inicio* están las de todos los días (abrir, guardar, imprimir, deshacer, seleccionar/mano, ajustar, girar, texto, firmar y resaltar).
-- **Girar la vista** en el visor (Girar ← / →): solo cambia cómo se ve; el PDF queda igual (para girar páginas de verdad: Organizar).
-- **Una página, continua o dos páginas** lado a lado.
-- **Barra de abajo**: páginas (« ‹ 1 de 40 › »), modo de vista, girar y zoom con deslizador.
-- **A la izquierda**: miniaturas, **marcadores** (índice del PDF) y buscar.
-- **Inicio sin documento**: abrir, **recientes** y herramientas a un clic.
-- **Arranque más rápido y corto**: una tarjeta quieta que aparece al instante (ya no se abre una segunda copia del programa para la animación).
-- **Pantalla completa** (F11, Esc para salir). Los PDF abren con la página entera (o con el ajuste que usaste la última vez).
-- **Organizar**: la lista de archivos tiene su propio desplazamiento, así «Procesar» ya no se pierde.
-
-**Descarga:** `PdFOL_v3.0_portable.zip` (sin instalar) o `PdFOL_v3.0_instalador.exe`.
+**Descarga:** `PdFOL_v3.1_portable.zip` (sin instalar) o `PdFOL_v3.1_instalador.exe`.

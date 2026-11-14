@@ -42,6 +42,15 @@ import threading
 import time
 import zlib
 
+_T0 = time.time()
+
+
+def _tiempo(que):
+    """PDFOL_TIEMPOS=1: anota cuanto tarda cada parte del arranque."""
+    if os.environ.get("PDFOL_TIEMPOS"):
+        print(f"TIEMPO {time.time() - _T0:6.2f} s  {que}", flush=True)
+
+
 if sys.stdout is None:
     sys.stdout = open(os.devnull, "w")
 if sys.stderr is None:
@@ -353,12 +362,18 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v3.0"
-VERSION_INTERNA = "3.0"
+VERSION = "v3.1"
+VERSION_INTERNA = "3.1"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v3.1", [
+        "Abre más rápido: la primera hoja la dibuja la ventana apenas aparece, sin esperar a los procesos de dibujo "
+        "(en Windows tardaban segundos en arrancar y ahora arrancan después, sin competir con el inicio).",
+        "La ventana aparece ya de su tamaño final: la hoja no se ve corrida y después salta.",
+        "Si cerrás en pantalla completa o minimizado, la próxima vez abre bien (maximizada o como estaba).",
+    ]),
     ("v3.0", [
         "Nueva cara, como Nitro y Adobe (mismos íconos y colores): pestañas de documentos arriba y una cinta con "
         "Inicio · Editar · Organizar · Herramientas · Ver.",
@@ -1764,6 +1779,7 @@ def _proceso_render(entrada, salida):
     if sys.stderr is None:
         sys.stderr = open(os.devnull, "w")
     fitz.TOOLS.mupdf_display_errors(False)
+    salida.put(("listo",))  # v3.0: avisa que ya dibuja (hasta aca, la primera hoja la dibuja la ventana)
     docs, orden_docs = {}, []
     dls, orden_dls = {}, []
     recientes = {}  # clave -> hora de envio (no repetir lo que ya va en camino)
@@ -3233,6 +3249,7 @@ def esquinas_redondeadas(ventana):
 
 # ------------------------------------------------------------------ interfaz
 def iniciar_interfaz():
+    _tiempo("librerias cargadas")
     import tkinter as tk
     from tkinter import filedialog, messagebox, colorchooser
     import customtkinter as ctk
@@ -3242,16 +3259,23 @@ def iniciar_interfaz():
     if instancia is None:  # PdFOL ya estaba abierto: los PDF se abrieron alli como pestanas
         cerrar_pantalla_de_inicio()
         return
-    # v2.5: los procesos que dibujan las paginas arrancan ya, mientras se arma la ventana (usan otros nucleos)
+    # v3.0: los procesos que dibujan arrancan recien con la ventana a la vista: en Windows cada uno es otra
+    # copia de PdFOL.exe y competian con el arranque. Mientras tanto la primera hoja la dibuja la ventana.
     q_pag, q_min, q_bus, q_sal = mp.Queue(), mp.Queue(), mp.Queue(), mp.Queue()
     procs_inicio = []
     for q_, f_ in ((q_pag, _proceso_render), (q_min, _proceso_render)):  # v2.6: el de buscar, despues
         try:
-            pr_ = mp.Process(target=f_, args=(q_, q_sal), daemon=True)
-            pr_.start()
-            procs_inicio.append(pr_)
+            procs_inicio.append(mp.Process(target=f_, args=(q_, q_sal), daemon=True))
         except Exception:
             pass
+
+    def arrancar_procesos():
+        for k_, pr_ in enumerate(procs_inicio):
+            try:
+                if pr_._popen is None:
+                    pr_.start()
+            except Exception:
+                pass
     almacen = AlmacenPerfiles()
     aplicar_tema(almacen.datos.get("tema", "Azul gris"))
     modo_ini = almacen.datos.get("apariencia", "Automático")
@@ -5614,6 +5638,7 @@ def iniciar_interfaz():
 
     def soltar_archivo(ruta):
         """Los procesos sueltan el PDF (para poder guardarle los resaltados)."""
+        soltar_ayuda(ruta)
         for q_ in (q_pag, q_min, q_bus):
             q_.put(("cerrar", ruta))
 
@@ -5860,6 +5885,13 @@ def iniciar_interfaz():
         rutas = set(o_.get("fuentes") or []) | {t_["ruta"]}
         falta = False
         for r_ in rutas:
+            if r_ not in vis["med"] and not vis.get("render_listo"):
+                try:  # v3.0: los tamanos los mide la ventana (los procesos todavia arrancan)
+                    d_ = _abrir_cache(ayuda["docs"], ayuda["orden"], r_, maximo=3)
+                    if d_.page_count <= 1500:
+                        vis["med"][r_] = [(d_[i].rect.width, d_[i].rect.height) for i in range(d_.page_count)]
+                except Exception:
+                    pass
             if r_ not in vis["med"]:
                 falta = True
                 if r_ not in vis["pedida"]:
@@ -6741,11 +6773,48 @@ def iniciar_interfaz():
         visor_dibujar()
         mini_dibujar()
 
+    # v3.0: en Windows los procesos que dibujan tardan en arrancar; mientras tanto, la hoja que se ve
+    # la dibuja la ventana misma (una por vez, sin trabarla), asi el PDF aparece enseguida
+    ayuda = {"docs": {}, "orden": [], "hechos": set(), "job": None}
+
+    def soltar_ayuda(ruta=None):
+        for r_ in list(ayuda["docs"]):
+            if ruta is None or r_ == ruta:
+                try:
+                    ayuda["docs"].pop(r_).close()
+                    ayuda["orden"].remove(r_)
+                except Exception:
+                    pass
+
+    def ayudar_render():
+        ayuda["job"] = None
+        if vis.get("render_listo") or app.get("cerrando"):
+            return
+        for k_, ruta, pag, z, rot, parar, fol_, tr in list(vis["ult"] or []):
+            if k_ in vis["cache"] or k_ in ayuda["hechos"]:
+                continue
+            ayuda["hechos"].add(k_)
+            try:
+                d_ = _abrir_cache(ayuda["docs"], ayuda["orden"], ruta, maximo=3)
+                img = dibujar_trozo(d_[pag], d_[pag].get_displaylist(annots=True), z, rot, parar, fol_, tr)
+                vis["cache"][k_] = ImageTk.PhotoImage(img)
+                vis["lru"].append(k_)
+                if len(vis["cache"]) == 1:
+                    _tiempo("primera hoja (dibujada por la ventana)")
+                vis["ult"] = None
+                visor_pedir_dibujo()
+            except Exception:
+                pass
+            ayuda["job"] = raiz.after(10, ayudar_render)
+            return
+
     def enviar_pedidos():
         lista = list(vistas[0].ult) + (list(vistas[1].ult) if vis["comp"] else [])
         if lista != vis["ult"]:
             vis["ult"] = lista
             q_pag.put(("ver", lista))
+            if not vis.get("render_listo") and ayuda["job"] is None:
+                ayuda["job"] = raiz.after(1, ayudar_render)
         while len(vis["lru"]) > CACHE_TROZOS:
             vis["cache"].pop(vis["lru"].pop(0), None)
 
@@ -8386,6 +8455,12 @@ def iniciar_interfaz():
         try:
             for _ in range(16):
                 msg = q_sal.get_nowait()
+                if msg[0] == "listo":
+                    if not vis.get("render_listo"):
+                        vis["render_listo"] = True
+                        _tiempo("procesos de dibujo listos")
+                        soltar_ayuda()
+                    continue
                 if msg[0] == "medidas":
                     _, ruta, med, err = msg
                     vis["med"][ruta] = med
@@ -10325,7 +10400,10 @@ def iniciar_interfaz():
         app["cerrando"] = True
         try:  # recordar si quedo maximizada o en otro tamano
             maxi = raiz.state() == "zoomed" or (os.name != "nt" and bool(raiz.attributes("-zoomed")))
-            almacen.datos["ventana"] = "max" if maxi else raiz.geometry()
+            if app.get("completa") or raiz.state() == "iconic":
+                pass  # v3.0: en pantalla completa o minimizada no se guarda un tamano raro
+            else:
+                almacen.datos["ventana"] = "max" if maxi else raiz.geometry()
             almacen.guardar()
         except Exception:
             pass
@@ -10358,6 +10436,7 @@ def iniciar_interfaz():
         poner_color((0, 0, 0), refrescar_prev=False)
     def mostrar_ventana():
         """Ventana lista: aparece (maximizada o como la dejaste) y se va el husky."""
+        _tiempo("ventana visible")
         if not os.environ.get("PDFOL_PRUEBA"):
             geo_ = almacen.datos.get("ventana", "max")
             if geo_ != "max":
@@ -10365,12 +10444,18 @@ def iniciar_interfaz():
                     raiz.geometry(geo_)
                 except Exception:
                     geo_ = "max"
+            if geo_ == "max":  # v3.0: ya del tamano final, asi la hoja no aparece corrida y despues salta
+                try:
+                    raiz.geometry(f"{raiz.winfo_screenwidth()}x{raiz.winfo_screenheight() - 80}+0+0")
+                except Exception:
+                    pass
             raiz.deiconify()
             if geo_ == "max":
                 maximizar()
             raiz.lift()
             raiz.focus_force()
         raiz.after(350, cerrar_pantalla_de_inicio)
+        raiz.after(250, arrancar_procesos)
         raiz.after(700, armar_lo_que_falta)  # v2.5: las paginas que no se ven, despues
     raiz.after(150, iniciar_dibujantes)  # primero se muestra la ventana
     raiz.bind("<Map>", lambda e: raiz.after(60, redibujar_todo) if e.widget is raiz else None, add="+")
