@@ -65,7 +65,11 @@ jobs:
         if: steps.ver.outputs.existe == '0'
         shell: pwsh
         run: |
+          # v3.0: la tarjeta de inicio que el .exe muestra al instante (antes de cargar Python)
+          python "${{ steps.ver.outputs.archivo }}" --pdfol-crear-splash splash_pdfol.png
+          if (-not (Test-Path splash_pdfol.png)) { Write-Error "No se creo la imagen de inicio"; exit 1 }
           python -m PyInstaller --noconfirm --clean --windowed --onedir --name PdFOL --icon PdFOL.ico `
+            --splash splash_pdfol.png `
             --collect-all pymupdf --collect-all pikepdf --collect-all customtkinter --collect-all tkinterdnd2 `
             --hidden-import PIL._tkinter_finder --hidden-import PIL.ImageTk --hidden-import PIL.JpegImagePlugin `
             --hidden-import PIL.PngImagePlugin --hidden-import PIL.IcoImagePlugin --hidden-import PIL.BmpImagePlugin `
