@@ -362,12 +362,17 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v3.2.2"
-VERSION_INTERNA = "3.2.2"
+VERSION = "v3.3"
+VERSION_INTERNA = "3.3"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v3.3", [
+        "Girar de verdad desde el visor: con los botones de girar elegís «esta página», «todo el documento» o «solo "
+        "la vista». Al guardar (Ctrl+S) el PDF queda girado; Ctrl+Z deshace.",
+        "Íconos más nítidos: se dibujan a mayor resolución y respetan la escala de Windows (125 %, 150 %…).",
+    ]),
     ("v3.2.2", [
         "Organizar: en «Proceso» elegís qué hacer al procesar (Foliar, Aplanar, Comprimir) y sus ajustes se abren a "
         "la derecha, sin salir de Organizar.",
@@ -3334,6 +3339,15 @@ def iniciar_interfaz():
         except Exception:
             pass
     raiz = ctk.CTk(fg_color=C["fondo"])
+    # v3.3: escala de la pantalla de Windows (125 %, 150 %...). Los dibujos propios (barra de arriba, riel
+    # derecho) se hacen a ese tamano, asi los iconos salen nitidos y del tamano justo
+    try:
+        S_UI = max(1.0, float(ctk.ScalingTracker.get_window_scaling(raiz)))
+    except Exception:
+        S_UI = 1.0
+
+    def px(n):
+        return int(round(n * S_UI))
     if _INICIO is not None:
         raiz.withdraw()  # la ventana aparece recien cuando esta completa (mientras, el husky)
     raiz.title(f"{NOMBRE} {VERSION} · by {AUTOR}")
@@ -3465,12 +3479,12 @@ def iniciar_interfaz():
     # ---- v3.2: arriba, como Adobe Acrobat: la hoja ocupa casi todo.
     # Fila 1 (36 px): husky, «Inicio», «Herramientas» y las pestanas de los documentos; a la derecha, buscar.
     # Fila 2 (44 px): una sola barra de iconos chicos (sin textos; al pasar el mouse dicen que hacen).
-    ALTO_SUP = 36
+    ALTO_SUP = px(36)
     superior = tk.Canvas(raiz, height=ALTO_SUP, highlightthickness=0, bd=0)
     superior.grid(row=0, column=0, sticky="ew")
     import tkinter.font as tkfont
     f_item = tkfont.Font(family=FAM, size=10)
-    logo_tk = foto_tk(icono_husky(24))
+    logo_tk = foto_tk(icono_husky(px(24)))
 
     def _icono_apagado(img):
         a = img.getchannel("A").point(lambda v: v * 0.38)
@@ -3496,25 +3510,26 @@ def iniciar_interfaz():
                 pass
         superior.create_line(0, h - 1, w, h - 1, fill=col("borde"))
         if app.get("menu_logo"):
-            superior.create_rectangle(2, 3, 40, h - 3, fill=col("lat_sel"), outline="")
-        superior.create_image(21, h // 2, image=logo_tk, tags=("item", "logo"))
-        superior.create_rectangle(2, 3, 40, h - 3, outline="", fill="", tags=("item", "logo"))
+            superior.create_rectangle(2, 3, px(40), h - 3, fill=col("lat_sel"), outline="")
+        superior.create_image(px(21), h // 2, image=logo_tk, tags=("item", "logo"))
+        superior.create_rectangle(2, 3, px(40), h - 3, outline="", fill="", tags=("item", "logo"))
         if app.get("hay_nueva"):
-            superior.create_oval(30, 4, 39, 13, fill="#F97316", outline=col("lat_ini"), width=2, tags=("item", "logo"))
-        x = 46
+            superior.create_oval(px(30), px(4), px(39), px(13), fill="#F97316", outline=col("lat_ini"), width=2,
+                                 tags=("item", "logo"))
+        x = px(46)
         try:
             sin_doc = not pest
         except NameError:  # todavia se esta armando la ventana
             sin_doc = True
         for clave_, txt_ in (("inicio", "Inicio"), ("herr", "Herramientas")):
-            ancho_ = f_item.measure(txt_) + 28
+            ancho_ = f_item.measure(txt_) + px(28)
             elegida = app["vista_top"] == clave_ or (clave_ == "inicio" and sin_doc and not app["vista_top"])
             if elegida:
-                superior.create_rectangle(x, 4, x + ancho_, h, fill=col("tarjeta"), outline=col("borde"))
+                superior.create_rectangle(x, px(4), x + ancho_, h, fill=col("tarjeta"), outline=col("borde"))
                 superior.create_line(x + 1, h - 1, x + ancho_, h - 1, fill=col("tarjeta"))
             superior.create_text(x + ancho_ / 2, h // 2 + 1, text=txt_, fill=col("texto"),
                                  font=(FAM, 10, "bold" if elegida else "normal"), tags=("item", "top:" + clave_))
-            superior.create_rectangle(x, 4, x + ancho_, h, outline="", fill="", tags=("item", "top:" + clave_))
+            superior.create_rectangle(x, px(4), x + ancho_, h, outline="", fill="", tags=("item", "top:" + clave_))
             x += ancho_ + 2
         superior.create_line(x + 4, 9, x + 4, h - 9, fill=col("borde"))
         app["x_pest"] = x + 12
@@ -3549,7 +3564,7 @@ def iniciar_interfaz():
     barra_pest = ctk.CTkFrame(raiz, fg_color=C["tarjeta"], corner_radius=0, height=44)
     barra_pest.grid(row=2, column=0, sticky="ew")
     barra_pest.grid_columnconfigure(0, weight=1)
-    ALTO_CINTA = 44
+    ALTO_CINTA = px(44)
     cinta = tk.Canvas(barra_pest, height=ALTO_CINTA, highlightthickness=0, bd=0, cursor="hand2")
     cinta.grid(row=0, column=0, sticky="ew")
     ctk.CTkFrame(raiz, height=1, fg_color=C["borde"], corner_radius=0).grid(row=2, column=0, sticky="sew")
@@ -3568,7 +3583,7 @@ def iniciar_interfaz():
             if color:
                 im_ = _icono(clave, color, tam)
             else:  # icono de trazo, del color del texto, sin fondo (como Adobe)
-                im_ = _icono(clave, col("tarjeta"), 20, glifo=_hex(col("texto")), sin_fondo=True)
+                im_ = _icono(clave, col("tarjeta"), px(20), glifo=_hex(col("texto")), sin_fondo=True)
             iconos_cinta[k_] = foto_tk(im_)
         return iconos_cinta[k_]
 
@@ -3606,10 +3621,10 @@ def iniciar_interfaz():
                    ("ZOOM", None, None, None, None, False),
                    ("ajuste", "Ajustar: al ancho / página entera", "ancho" if zoom_ != "Página entera" else "pagina",
                     None, lambda: menu_ajuste(), zoom_ in ("Ajustar ancho", "Página entera"))],
-                  [("girar_izq", "Girar la vista a la izquierda (no cambia el PDF)", "girar_izq", None,
-                    lambda: girar_vista(-90), False),
-                   ("girar_der", "Girar la vista a la derecha (no cambia el PDF)", "girar_der", None,
-                    lambda: girar_vista(90), False),
+                  [("girar_izq", "Girar a la izquierda: esta página, todo el documento o solo la vista", "girar_izq",
+                    None, lambda: menu_girar(-90), False),
+                   ("girar_der", "Girar a la derecha: esta página, todo el documento o solo la vista", "girar_der",
+                    None, lambda: menu_girar(90), False),
                    ("modo", "Vista: una página, continua o dos páginas",
                     {"una": "una", "dos": "dos"}.get(modo_v, "continua"), None, lambda: menu_modo(), modo_v != "continua")],
                   [("resaltar", "Resaltar", "resaltar", None, lambda: alternar_resaltar(), bool(vis["modo_res"])),
@@ -3626,10 +3641,10 @@ def iniciar_interfaz():
 
     def _ancho_item(it_):
         if it_[0] == "PAG":
-            return 42 + 8 + f_item.measure(v_tot_bar.get() or "/ 000") + 6
+            return px(50) + f_item.measure(v_tot_bar.get() or "/ 000") + px(6)
         if it_[0] == "ZOOM":
-            return f_item.measure("000 % ▾") + 12
-        return 36
+            return f_item.measure("000 % ▾") + px(12)
+        return px(36)
 
     v_tot_bar = tk.StringVar(value="")
     v_pct_bar = tk.StringVar(value="")
@@ -3656,8 +3671,8 @@ def iniciar_interfaz():
                     ancho_ = _ancho_item(it_)
                     if id_ == "PAG":
                         if hay_doc:
-                            cinta.create_window(x + 4, h // 2, window=e_pag_bar, anchor="w")
-                            cinta.create_text(x + 52, h // 2, text=v_tot_bar.get(), anchor="w", fill=col("texto2"),
+                            cinta.create_window(x + px(4), h // 2, window=e_pag_bar, anchor="w")
+                            cinta.create_text(x + px(52), h // 2, text=v_tot_bar.get(), anchor="w", fill=col("texto2"),
                                               font=(FAM, 10))
                     elif id_ == "ZOOM":
                         cinta.create_text(x + ancho_ / 2, h // 2, text=(v_pct_bar.get() + " ▾") if hay_doc else "",
@@ -3676,7 +3691,8 @@ def iniciar_interfaz():
                         cinta.create_rectangle(x + 3, 6, x + ancho_ - 3, h - 6, outline="", fill="",
                                                tags=("item", "b:" + id_))
                         if id_ == "guardar" and n_resaltes():  # puntito: hay cambios sin guardar
-                            cinta.create_oval(x + ancho_ - 13, 8, x + ancho_ - 5, 16, fill="#F97316", outline="")
+                            cinta.create_oval(x + ancho_ - px(13), px(8), x + ancho_ - px(5), px(16), fill="#F97316",
+                                              outline="")
                         app["cinta_acc"][id_] = acc_
                         app["cinta_ayuda"][id_] = ayuda_
                     x += ancho_
@@ -4540,8 +4556,8 @@ def iniciar_interfaz():
             sep(fila1)
             continue
         clave, texto, glifo, color_ = it_
-        im_ = _icono(glifo, color_, 26)
-        img_org[clave] = (ctk.CTkImage(im_, size=(26, 26)), ctk.CTkImage(_icono_apagado(im_), size=(26, 26)))
+        im_ = _icono(glifo, color_, 78)
+        img_org[clave] = (ctk.CTkImage(im_, size=(26, 26)), ctk.CTkImage(_icono_apagado(im_), size=(26, 26)))  # v3.3: im_ grande
         b_ = ctk.CTkButton(fila1, text=texto, image=img_org[clave][0], compound="top", width=48,
                            height=56, corner_radius=9, font=F(10), fg_color="transparent", hover_color=C["suave"],
                            text_color=C["texto"], text_color_disabled=C["texto2"])
@@ -5854,8 +5870,8 @@ def iniciar_interfaz():
         return b_
 
     def img_inf(clave):
-        return ctk.CTkImage(_icono(clave, C["suave"][0], 18, glifo=_hex(C["acento"][0])),
-                            _icono(clave, C["suave"][1], 18, glifo=_hex(C["acento"][1])), size=(18, 18))
+        return ctk.CTkImage(_icono(clave, C["suave"][0], 54, glifo=_hex(C["acento"][0])),
+                            _icono(clave, C["suave"][1], 54, glifo=_hex(C["acento"][1])), size=(18, 18))
 
     v_pag_inf, v_tot_inf = tk.StringVar(value=""), tk.StringVar(value="")
     for txt_, f_ in (("«", lambda: ir_inf(0)), ("‹", lambda: ir_inf("ant"))):
@@ -5922,14 +5938,14 @@ def iniciar_interfaz():
     fila_ini.pack(fill="x")
     ctk.CTkButton(fila_ini, text="   Abrir PDF   ·   Ctrl+O", font=F(15, "bold"), width=330,
                   height=86, corner_radius=12, anchor="w", fg_color=C["acento"], hover_color=C["acento_h"],
-                  text_color="#FFFFFF", image=ctk.CTkImage(_icono("abrir", "#2563EB", 40), size=(40, 40)),
+                  text_color="#FFFFFF", image=ctk.CTkImage(_icono("abrir", "#2563EB", 40 * 3), size=(40, 40)),
                   command=lambda: abrir_archivos()).pack(side="left", padx=(0, 12))
     for c_ini, t_ini, f_ini in (("organizar", "Unir PDFs", lambda: cinta_unir()),
                                 ("comprimir", "Comprimir", lambda: cinta_panel("comprimir")),
                                 ("foliar", "Foliar", lambda: cinta_panel("foliar"))):
         ctk.CTkButton(fila_ini, text=t_ini, font=F(13), width=140, height=86, corner_radius=12, compound="top",
                       fg_color=C["tarjeta"], hover_color=C["suave_h"], text_color=C["texto"], border_width=1,
-                      border_color=C["borde"], image=ctk.CTkImage(_icono(c_ini, COLOR_ICONO[c_ini], 30), size=(30, 30)),
+                      border_color=C["borde"], image=ctk.CTkImage(_icono(c_ini, COLOR_ICONO[c_ini], 30 * 3), size=(30, 30)),
                       command=f_ini).pack(side="left", padx=(0, 10))
     ctk.CTkLabel(inicio_caja, text="Recientes", font=F(14, "bold"), text_color=C["texto"], anchor="w").pack(
         fill="x", pady=(24, 6))
@@ -5959,7 +5975,7 @@ def iniciar_interfaz():
                 fecha, tam_ = "", ""
             fila_ = ctk.CTkFrame(lista_rec, fg_color="transparent", corner_radius=8, height=50, cursor="hand2")
             fila_.pack(fill="x", padx=6, pady=(4, 0))
-            ico_ = ctk.CTkLabel(fila_, text="", image=ctk.CTkImage(_icono("documento", COLOR_ICONO["documento"], 24),
+            ico_ = ctk.CTkLabel(fila_, text="", image=ctk.CTkImage(_icono("documento", COLOR_ICONO["documento"], 72),
                                                                     size=(24, 24)))
             ico_.pack(side="left", padx=(10, 12), pady=8)
             txts_ = ctk.CTkFrame(fila_, fg_color="transparent")
@@ -6063,7 +6079,7 @@ def iniciar_interfaz():
                 None,
                 ("apariencia", "Apariencia", lambda: cinta_pagina("apariencia"), "p:apariencia"),
                 ("herramientas", "Todas las herramientas", lambda: ir_top("herr"), "top:herr")]
-    riel_der = tk.Canvas(cuerpo, width=44, highlightthickness=0, bd=0, cursor="hand2")
+    riel_der = tk.Canvas(cuerpo, width=px(44), highlightthickness=0, bd=0, cursor="hand2")
     riel_der.grid(row=0, column=4, sticky="ns")
     iconos_riel = {}
 
@@ -6090,24 +6106,24 @@ def iniciar_interfaz():
         riel_der.configure(bg=col("tarjeta"))
         h_ = riel_der.winfo_height()
         riel_der.create_line(0, 0, 0, h_, fill=col("borde"))
-        y = 10
+        y = px(10)
         app["riel_acc"], app["riel_ayuda"] = {}, {}
         for k_, it_ in enumerate(RIEL_DER):
             if it_ is None:
-                riel_der.create_line(10, y + 4, 34, y + 4, fill=col("borde"))
-                y += 10
+                riel_der.create_line(px(10), y + px(4), px(34), y + px(4), fill=col("borde"))
+                y += px(10)
                 continue
             cl_, ayuda_, f_, est_ = it_
             if riel_elegido(est_):
-                riel_der.create_rectangle(4, y, 40, y + 36, fill=col("lat_sel"), outline="")
+                riel_der.create_rectangle(px(4), y, px(40), y + px(36), fill=col("lat_sel"), outline="")
             kk = (cl_, modo_oscuro())
             if kk not in iconos_riel:
-                iconos_riel[kk] = foto_tk(_icono(cl_, COLOR_ICONO.get(cl_, "#64748B"), 24))
-            riel_der.create_image(22, y + 18, image=iconos_riel[kk], tags=("item", f"r:{k_}"))
-            riel_der.create_rectangle(4, y, 40, y + 36, outline="", fill="", tags=("item", f"r:{k_}"))
+                iconos_riel[kk] = foto_tk(_icono(cl_, COLOR_ICONO.get(cl_, "#64748B"), px(24)))
+            riel_der.create_image(px(22), y + px(18), image=iconos_riel[kk], tags=("item", f"r:{k_}"))
+            riel_der.create_rectangle(px(4), y, px(40), y + px(36), outline="", fill="", tags=("item", f"r:{k_}"))
             app["riel_acc"][str(k_)] = f_
             app["riel_ayuda"][str(k_)] = ayuda_
-            y += 40
+            y += px(40)
 
     def click_riel(ev):
         ayuda_esconder()
@@ -6403,9 +6419,11 @@ def iniciar_interfaz():
             parar = bool(V["girar_prev"].get())
             giro = t_.get("giro", 0)  # v3.0: girar la vista (no cambia el PDF)
             dos = t_.get("modo_vista") == "dos"
-            if giro:
-                pags = [(r_, p_, (g_ + giro) % 360) for r_, p_, g_ in pags]
-            k_ = (W, H, parar, self.zoom, version_de(t_), len(pags), t_["id"], giro, dos)
+            pend = giros_pendientes()  # v3.3: paginas giradas que se guardan en el PDF
+            if giro or pend:
+                pags = [(r_, p_, (g_ + giro + pend.get((r_, p_), 0)) % 360) for r_, p_, g_ in pags]
+            k_ = (W, H, parar, self.zoom, version_de(t_), len(pags), t_["id"], giro, dos, tuple(sorted(pend.items())),
+                  vis.get("med_ver", 0))
             if k_ == self.lay_k:
                 return self.lay
             if self.lay is not None and self.reanclar is None:
@@ -6692,7 +6710,7 @@ def iniciar_interfaz():
                     cv_.create_text(x + w_ // 2, y + min(h_ // 2, 120), text=f"Página {i + 1}…",
                                     fill="#9AA6B4", font=(FAM, 11))
                 # resaltados (guardables) y resultados de la busqueda
-                items_ = vis["res"].get(ruta, {}).get(pag, [])
+                items_ = [it_ for it_ in vis["res"].get(ruta, {}).get(pag, []) if it_["tipo"] != "giro"]
                 if items_:
                     M = matriz_vista(lay["dims"][i][0], lay["dims"][i][1], z, rot, parar)
                     for it_ in items_:
@@ -7171,6 +7189,9 @@ def iniciar_interfaz():
         cvm.delete("all")
         t_ = pest_activa()
         pags = paginas_de(t_) if (t_ and medidas_listas(t_)) else []
+        pend_ = giros_pendientes()
+        if pend_:  # v3.3: las miniaturas tambien muestran las paginas giradas sin guardar
+            pags = [(r_, p_, (g_ + pend_.get((r_, p_), 0)) % 360) for r_, p_, g_ in pags]
         n = len(pags)
         Wm, Hm = max(cvm.winfo_width(), 100), max(cvm.winfo_height(), 100)
         cvm.configure(scrollregion=(0, 0, Wm, max(Hm, n * MINI_CELDA + 10)))
@@ -7933,6 +7954,8 @@ def iniciar_interfaz():
         return v_
 
     def item_contiene(item, p_):
+        if item["tipo"] == "giro":
+            return False
         p_ = fitz.Point(p_)
         if item["tipo"] in ("firma", "texto_n", "reemplazo"):
             return fitz.Rect(item["rect"]).contains(p_)
@@ -8118,6 +8141,63 @@ def iniciar_interfaz():
         raiz.clipboard_append(vis.get("texto_sel") or "")
         v_estado.set("Texto copiado.")
 
+    # ---- v3.3: girar paginas de verdad (se guarda en el PDF con «Guardar», como los demas cambios)
+    def giros_pendientes():
+        out = {}
+        for r_, ps_ in vis["res"].items():
+            for p_, l_ in ps_.items():
+                g_ = sum(it_.get("grados", 0) for it_ in l_ if it_["tipo"] == "giro") % 360
+                if g_:
+                    out[(r_, p_)] = g_
+        return out
+
+    def girar_paginas(d, todas=False):
+        t_ = pest_activa()
+        v_ = vista_activa()
+        if not t_ or not v_ or not v_.lay:
+            v_estado.set("Abrí un PDF para girar sus páginas.")
+            return
+        if app["pagina"] != "visor":
+            mostrar_pagina("visor")
+        pags_ = v_.lay["pags"]
+        elegidas = range(len(pags_)) if todas else [min(v_.pag, len(pags_) - 1)]
+        v_.reanclar = v_.posicion() if v_.lay else None
+        guardar_historia()
+        for i_ in elegidas:
+            ruta, pag, _r = pags_[i_]
+            lista = vis["res"].setdefault(ruta, {}).setdefault(pag, [])
+            ya = next((it_ for it_ in lista if it_["tipo"] == "giro"), None)
+            if ya:
+                ya["grados"] = (ya["grados"] + d) % 360
+                if not ya["grados"]:
+                    lista.remove(ya)
+                    vis["res_pila"] = [x for x in vis["res_pila"] if x[2] is not ya]
+            else:
+                vis["nres"] += 1
+                it_ = {"tipo": "giro", "grados": d % 360, "id": vis["nres"], "ver": 0, "op": 1.0, "color": (0, 0, 0),
+                       "rect": (0, 0, 0, 0)}
+                lista.append(it_)
+                vis["res_pila"].append((ruta, pag, it_))
+            if not lista:
+                vis["res"][ruta].pop(pag, None)
+        for v__ in vistas:
+            v__.lay_k = None
+        vis["ult"] = vis["ult_mini"] = None
+        actualizar_resaltes()
+        n_ = len(elegidas)
+        v_estado.set(("Todo el documento girado" if todas else "Página girada") +
+                     " · «Guardar» (Ctrl+S) lo deja así en el PDF · Ctrl+Z deshace.")
+        visor_pedir_dibujo()
+        mini_pedir_dibujo()
+        return n_
+
+    def menu_girar(d):
+        lado_ = "derecha" if d > 0 else "izquierda"
+        menu_desde(_pos_cinta("girar_der" if d > 0 else "girar_izq"),
+                   [(f"Girar esta página a la {lado_}", lambda: girar_paginas(d)),
+                    (f"Girar todo el documento a la {lado_}", lambda: girar_paginas(d, True)), ("-", None),
+                    (f"Girar solo la vista a la {lado_} (no cambia el PDF)", lambda: girar_vista(d))])
+
     def n_resaltes(rutas=None):
         return sum(len(l_) for r_, ps in vis["res"].items() if rutas is None or r_ in rutas for l_ in ps.values())
 
@@ -8194,6 +8274,7 @@ def iniciar_interfaz():
                     d = fitz.open(fuente)
                     con_fuentes = any(it_["tipo"] in ("texto_n", "reemplazo") and "fontfile" in kw_fuente(it_)
                                       for items_ in pags.values() for it_ in items_)
+                    hubo_giro = []
                     for pag, items_ in pags.items():
                         pg = d[pag]
                         dm = pg.derotation_matrix
@@ -8201,7 +8282,7 @@ def iniciar_interfaz():
                         if editables_:
                             guardar_editables(pg, editables_)
                         for it_ in items_:
-                            if it_["tipo"] in ("firma", "texto_n", "reemplazo"):
+                            if it_["tipo"] in ("firma", "texto_n", "reemplazo", "giro"):
                                 continue
                             c_ = tuple(v_ / 255 for v_ in it_["color"])
                             if it_["tipo"] in ("texto", "rect"):
@@ -8221,6 +8302,11 @@ def iniciar_interfaz():
                             except Exception:
                                 pass
                             a_.update()
+                        giro_ = sum(it_.get("grados", 0) for it_ in items_ if it_["tipo"] == "giro") % 360
+                        if giro_:  # v3.3: la pagina queda girada en el PDF (despues de poner lo demas)
+                            pg.set_rotation((pg.rotation + giro_) % 360)
+                            if giro_ % 180:
+                                hubo_giro.append(pag)
                     if con_fuentes:  # v2.7: de las fuentes de Windows solo quedan las letras usadas (PDF liviano)
                         try:
                             d.subset_fonts()
@@ -8240,6 +8326,14 @@ def iniciar_interfaz():
                         d.close()
                     if not copia:
                         vis["ver_arch"][fuente] = ver_arch(fuente) + 1
+                        med_ = vis["med"].get(fuente)
+                        if hubo_giro and med_:  # las hojas giradas cambian de forma (alto <-> ancho)
+                            med_ = list(med_)
+                            for pq_ in hubo_giro:
+                                if pq_ < len(med_):
+                                    med_[pq_] = (med_[pq_][1], med_[pq_][0])
+                            vis["med"][fuente] = med_
+                            vis["med_ver"] = vis.get("med_ver", 0) + 1
                     hechos += sum(len(r_) for r_ in pags.values()) if k_ == 0 else 0
                 except Exception as e:
                     errores.append(f"{os.path.basename(dest)}: {e}")
@@ -8253,7 +8347,7 @@ def iniciar_interfaz():
         if errores:
             messagebox.showerror(NOMBRE, "No se pudieron guardar algunos resaltados:\n\n" + "\n".join(errores))
         elif hechos:
-            v_estado.set(f"{hechos} resaltado(s) guardados " + ("en la copia." if copia else "en el PDF."))
+            v_estado.set(f"{hechos} cambio(s) guardados " + ("en la copia." if copia else "en el PDF."))
 
     # ================= v2.6: firmas, sellos y texto (se dibujan como los resaltados y se guardan con ellos)
     EDITABLES = ("firma", "texto_n", "reemplazo")
@@ -9317,7 +9411,7 @@ def iniciar_interfaz():
         m_.tk_popup(superior.winfo_rootx() + 600, superior.winfo_rooty() + ALTO_SUP - 6)
 
     # ================= panel de herramienta (Aplanar / Foliar / Comprimir) a la derecha
-    iconos_panel = {c_: ctk.CTkImage(_icono(c_, col_, 26), size=(26, 26)) for c_, _t, col_, *_r in ICONOS}
+    iconos_panel = {c_: ctk.CTkImage(_icono(c_, col_, 26 * 3), size=(26, 26)) for c_, _t, col_, *_r in ICONOS}
 
     def abrir_panel(clave):
         asegurar_pagina(clave)
@@ -9754,7 +9848,7 @@ def iniciar_interfaz():
         w.transient(raiz)
         cab = ctk.CTkFrame(w, fg_color="transparent")
         cab.pack(fill="x", padx=22, pady=(18, 8))
-        ctk.CTkLabel(cab, text="", image=ctk.CTkImage(icono_husky(40), size=(40, 40))).pack(side="left", padx=(0, 10))
+        ctk.CTkLabel(cab, text="", image=ctk.CTkImage(icono_husky(40 * 3), size=(40, 40))).pack(side="left", padx=(0, 10))
         ctk.CTkLabel(cab, text=titulo, font=F(17, "bold"), text_color=C["texto"]).pack(side="left")
         lista_cambios(w, secciones, alto=340).pack(fill="both", padx=22)
         pie = ctk.CTkFrame(w, fg_color="transparent")
@@ -9811,7 +9905,7 @@ def iniciar_interfaz():
         w.transient(raiz)
         caja = ctk.CTkFrame(w, fg_color=C["tarjeta"], corner_radius=14, border_width=1, border_color=C["borde"])
         caja.pack(padx=18, pady=18)
-        ctk.CTkLabel(caja, text="", image=ctk.CTkImage(icono_husky(96), size=(96, 96))).pack(pady=(20, 6))
+        ctk.CTkLabel(caja, text="", image=ctk.CTkImage(icono_husky(96 * 3), size=(96, 96))).pack(pady=(20, 6))
         fila_ = ctk.CTkFrame(caja, fg_color="transparent")
         fila_.pack()
         ctk.CTkLabel(fila_, text=NOMBRE, font=F(24, "bold"), text_color=C["texto"]).pack(side="left")
@@ -9869,7 +9963,7 @@ def iniciar_interfaz():
         w.transient(raiz)
         cab = ctk.CTkFrame(w, fg_color="transparent")
         cab.pack(fill="x", padx=22, pady=(18, 6))
-        ctk.CTkLabel(cab, text="", image=ctk.CTkImage(icono_husky(48), size=(48, 48))).pack(side="left", padx=(0, 12))
+        ctk.CTkLabel(cab, text="", image=ctk.CTkImage(icono_husky(48 * 3), size=(48, 48))).pack(side="left", padx=(0, 12))
         ctk.CTkLabel(cab, text="¿Querés abrir siempre los PDF con PdFOL?", font=F(15, "bold"),
                      text_color=C["texto"]).pack(side="left")
         ctk.CTkLabel(w, text="Así, con doble clic en cualquier PDF se abre en PdFOL (en una pestaña nueva si ya "
@@ -10543,8 +10637,9 @@ def iniciar_interfaz():
 
     # riel de la izquierda
     def _riel_img(clave):
-        return ctk.CTkImage(_icono(clave, C["tarjeta"][0], 22, glifo=_hex(C["texto2"][0])),
-                            _icono(clave, C["tarjeta"][1], 22, glifo=_hex(C["texto2"][1])), size=(22, 22))
+        return ctk.CTkImage(_icono(clave, C["tarjeta"][0], 66, glifo=_hex(C["texto2"][0]), sin_fondo=True),
+                            _icono(clave, C["tarjeta"][1], 66, glifo=_hex(C["texto2"][1]), sin_fondo=True),
+                            size=(20, 20))
     for k_r, f_r, tip_r in (("miniaturas", lambda: alternar_miniaturas(), "Miniaturas"),
                             ("marcadores", lambda: alternar_marcadores(), "Marcadores"),
                             ("buscar", lambda: enfocar_busqueda(), "Buscar (Ctrl+F)")):

@@ -1,7 +1,7 @@
-## PdFOL v3.2.2 · by Meneses999
+## PdFOL v3.3 · by Meneses999
 
-- **Organizar**: en la tarjeta **Proceso** (junto a «Procesar») elegís qué hacer al procesar: **Foliar**, **Aplanar** y **Comprimir**. Al tocar una se activa y **sus ajustes se abren a la derecha, sin salir de Organizar**. Tocarla de nuevo la apaga.
-- La columna de herramientas de la derecha se ve también en Organizar y en las demás páginas.
-- Sigue todo lo de la v3.2: diseño como Adobe, la hoja ocupa casi toda la pantalla.
+- **Girar de verdad desde el visor**: los botones de girar (izquierda / derecha) ofrecen **«Girar esta página»**, **«Girar todo el documento»** o **«Girar solo la vista»**. Las dos primeras se guardan: al guardar (Ctrl+S o «Guardar cambios») el PDF queda girado. Ctrl+Z deshace.
+- **Íconos más nítidos**: se dibujan a mayor resolución y respetan la escala de Windows (125 %, 150 %…).
+- Sigue todo lo de la v3.2.2.
 
-**Descarga:** `PdFOL_v3.2.2_portable.zip` (sin instalar) o `PdFOL_v3.2.2_instalador.exe`.
+**Descarga:** `PdFOL_v3.3_portable.zip` (sin instalar) o `PdFOL_v3.3_instalador.exe`.
