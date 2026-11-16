@@ -1,12 +1,7 @@
-## PdFOL v3.2 · by Meneses999
+## PdFOL v3.2.1 · by Meneses999
 
-**Diseño como Adobe Acrobat: la hoja ocupa casi toda la pantalla.**
+- La **columna de herramientas de la derecha** ahora dice el nombre de cada herramienta al pasar el mouse, a la izquierda del ícono. (Con la pantalla de Windows al 125 % o 150 %, la ayuda quedaba fuera de la ventana.)
+- Lo mismo para los íconos de la barra de arriba.
+- Sigue todo lo de la v3.2: diseño como Adobe, la hoja ocupa casi toda la pantalla.
 
-- Arriba, solo dos filas finas: **Inicio · Herramientas ·** tus documentos, y una **barra de íconos chicos** (al pasar el mouse dicen qué hacen).
-- Al centro de la barra: **página** (↑ ↓ 1 / 40), **zoom** (− + 140 % ▾), ajuste, **girar** y modo de vista.
-- A la derecha, una **columna de herramientas** con sus colores (texto, firmar, resaltar, organizar, comparar, aplanar, foliar, comprimir, imprimir…).
-- **Herramientas** muestra todas en tarjetas; **Inicio**, tus recientes.
-- Los mensajes aparecen un momento abajo a la izquierda de la hoja (ya no hay barra fija abajo).
-- Las miniaturas empiezan cerradas: se abren con el ícono de la izquierda.
-
-**Descarga:** `PdFOL_v3.2_portable.zip` (sin instalar) o `PdFOL_v3.2_instalador.exe`.
+**Descarga:** `PdFOL_v3.2.1_portable.zip` (sin instalar) o `PdFOL_v3.2.1_instalador.exe`.

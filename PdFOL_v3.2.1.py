@@ -362,12 +362,16 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v3.2"
-VERSION_INTERNA = "3.2"
+VERSION = "v3.2.1"
+VERSION_INTERNA = "3.2.1"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v3.2.1", [
+        "La columna de herramientas de la derecha dice el nombre de cada una al pasar el mouse (con la pantalla de "
+        "Windows al 125 % o 150 % la ayuda quedaba fuera de la ventana).",
+    ]),
     ("v3.2", [
         "Diseño como Adobe Acrobat: la hoja ocupa casi toda la pantalla. Arriba solo dos filas finas: Inicio · "
         "Herramientas · documentos, y una barra de íconos chicos (al pasar el mouse dicen qué hacen).",
@@ -3681,8 +3685,9 @@ def iniciar_interfaz():
         poner(der, w - ancho_d - 10)
 
     # ayuda al pasar el mouse (los iconos no tienen texto)
-    ayuda_lbl = ctk.CTkLabel(raiz, text="", font=F(11), fg_color=C["texto"], text_color=C["tarjeta"],
-                             corner_radius=6, height=24)
+    # v3.2.1: etiqueta comun de tk (las de CustomTkinter multiplican la posicion por la escala de Windows y,
+    # con la pantalla al 125 % o 150 %, la ayuda del riel derecho quedaba fuera de la ventana)
+    ayuda_lbl = tk.Label(raiz, text="", font=(FAM, 9), padx=8, pady=3, bd=0)
     ayuda_job = {"id": None, "tag": None}
 
     def ayuda_esconder(*_):
@@ -3711,8 +3716,14 @@ def iniciar_interfaz():
         y_ = canvas_.winfo_rooty() - raiz.winfo_rooty() + ev.y + 22
 
         def mostrar_():
-            ayuda_lbl.configure(text=f"  {texto_}  ")
-            ayuda_lbl.place(x=min(x_, raiz.winfo_width() - 20 - f_item.measure(texto_) - 30), y=y_)
+            ayuda_lbl.configure(text=texto_, bg=col("texto"), fg=col("tarjeta"))
+            ayuda_lbl.update_idletasks()
+            ancho_a = ayuda_lbl.winfo_reqwidth()
+            if canvas_ is riel_der:  # a la izquierda del icono, a su altura
+                xa, ya = canvas_.winfo_rootx() - raiz.winfo_rootx() - ancho_a - 6, y_ - 34
+            else:
+                xa, ya = min(x_ - 12, raiz.winfo_width() - ancho_a - 8), y_
+            ayuda_lbl.place(x=max(4, xa), y=ya)
             ayuda_lbl.lift()
         ayuda_job["id"] = raiz.after(450, mostrar_)
 
