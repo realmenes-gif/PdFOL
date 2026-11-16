@@ -1,7 +1,7 @@
-## PdFOL v3.2.1 · by Meneses999
+## PdFOL v3.2.2 · by Meneses999
 
-- La **columna de herramientas de la derecha** ahora dice el nombre de cada herramienta al pasar el mouse, a la izquierda del ícono. (Con la pantalla de Windows al 125 % o 150 %, la ayuda quedaba fuera de la ventana.)
-- Lo mismo para los íconos de la barra de arriba.
+- **Organizar**: en la tarjeta **Proceso** (junto a «Procesar») elegís qué hacer al procesar: **Foliar**, **Aplanar** y **Comprimir**. Al tocar una se activa y **sus ajustes se abren a la derecha, sin salir de Organizar**. Tocarla de nuevo la apaga.
+- La columna de herramientas de la derecha se ve también en Organizar y en las demás páginas.
 - Sigue todo lo de la v3.2: diseño como Adobe, la hoja ocupa casi toda la pantalla.
 
-**Descarga:** `PdFOL_v3.2.1_portable.zip` (sin instalar) o `PdFOL_v3.2.1_instalador.exe`.
+**Descarga:** `PdFOL_v3.2.2_portable.zip` (sin instalar) o `PdFOL_v3.2.2_instalador.exe`.

@@ -362,12 +362,17 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v3.2.1"
-VERSION_INTERNA = "3.2.1"
+VERSION = "v3.2.2"
+VERSION_INTERNA = "3.2.2"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v3.2.2", [
+        "Organizar: en «Proceso» elegís qué hacer al procesar (Foliar, Aplanar, Comprimir) y sus ajustes se abren a "
+        "la derecha, sin salir de Organizar.",
+        "La columna de herramientas de la derecha se ve también en Organizar y en las demás páginas.",
+    ]),
     ("v3.2.1", [
         "La columna de herramientas de la derecha dice el nombre de cada una al pasar el mouse (con la pantalla de "
         "Windows al 125 % o 150 % la ayuda quedaba fuera de la ventana).",
@@ -3804,7 +3809,9 @@ def iniciar_interfaz():
     visor = ctk.CTkFrame(contenido, fg_color=C["fondo"], corner_radius=0)
     paginas["visor"] = visor
     ANCHO_PANEL = 470
-    panel_der = ctk.CTkFrame(visor, fg_color=C["fondo"], corner_radius=12, border_width=1,
+    # v3.2.2: el panel derecho vive al costado de todo (no solo del visor): Foliar, Aplanar y Comprimir se
+    # ajustan tambien desde Organizar, que es donde se da «Procesar»
+    panel_der = ctk.CTkFrame(cuerpo, fg_color=C["fondo"], corner_radius=12, border_width=1,
                              border_color=C["borde"], width=ANCHO_PANEL)
     panel_der.grid_propagate(False)
     panel_der.pack_propagate(False)
@@ -3827,11 +3834,26 @@ def iniciar_interfaz():
     inferior.grid_columnconfigure(0, weight=1)
     ctk.CTkLabel(inferior, text="Proceso", font=F(13, "bold"), text_color=C["texto"], anchor="w").grid(
         row=0, column=0, sticky="ew", padx=14, pady=(10, 6))
+    # v3.2.2: en Organizar, que hacer al procesar (y sus ajustes) a la vista, junto a «Procesar»
+    caja_opc_org = ctk.CTkFrame(inferior, fg_color="transparent")
+    ctk.CTkLabel(caja_opc_org, text="Al procesar también:", font=F(11), text_color=C["texto2"], anchor="w").pack(
+        fill="x", padx=4, pady=(0, 4))
+    fila_opc_org = ctk.CTkFrame(caja_opc_org, fg_color="transparent")
+    fila_opc_org.pack(fill="x")
+    chips_org = {}
+    for k_o, (cl_o, txt_o) in enumerate((("fol", "Foliar"), ("apl", "Aplanar"), ("comp", "Comprimir"))):
+        chips_org[cl_o] = ctk.CTkButton(fila_opc_org, text=txt_o, height=28, corner_radius=8, font=F(12),
+                                        anchor="w", fg_color=C["suave"], hover_color=C["suave_h"],
+                                        text_color=C["texto"])
+        chips_org[cl_o].pack(fill="x", padx=2, pady=2)
+    ctk.CTkLabel(caja_opc_org, text="Tocá una para activarla y ver sus ajustes a la derecha.", font=F(10),
+                 text_color=C["texto2"], anchor="w", wraplength=ANCHO_IZQ - 34, justify="left").pack(
+        fill="x", padx=4, pady=(4, 6))
     caja_bot = ctk.CTkFrame(inferior, fg_color="transparent")
-    caja_bot.grid(row=1, column=0, sticky="ew", padx=10)
+    caja_bot.grid(row=2, column=0, sticky="ew", padx=10)
     caja_bot.grid_columnconfigure((0, 1), weight=1, uniform="bp")
     caja_estado = ctk.CTkFrame(inferior, fg_color="transparent")
-    caja_estado.grid(row=2, column=0, sticky="ew", padx=12, pady=(8, 12))
+    caja_estado.grid(row=3, column=0, sticky="ew", padx=12, pady=(8, 12))
     caja_estado.grid_columnconfigure(0, weight=1)
     barra = ctk.CTkProgressBar(caja_estado, height=6, progress_color=C["acento"], fg_color=C["suave"])
     barra.grid(row=0, column=0, sticky="ew", pady=(0, 6))
@@ -6041,8 +6063,8 @@ def iniciar_interfaz():
                 None,
                 ("apariencia", "Apariencia", lambda: cinta_pagina("apariencia"), "p:apariencia"),
                 ("herramientas", "Todas las herramientas", lambda: ir_top("herr"), "top:herr")]
-    riel_der = tk.Canvas(visor, width=44, highlightthickness=0, bd=0, cursor="hand2")
-    riel_der.grid(row=0, column=2, rowspan=2, sticky="ns")
+    riel_der = tk.Canvas(cuerpo, width=44, highlightthickness=0, bd=0, cursor="hand2")
+    riel_der.grid(row=0, column=4, sticky="ns")
     iconos_riel = {}
 
     def riel_elegido(clave_):
@@ -7546,6 +7568,29 @@ def iniciar_interfaz():
         raiz.after(30, mini_dibujar)
         visor_pedir_dibujo()
 
+    PANEL_DE_OPC = {"fol": "foliar", "apl": "aplanar", "comp": "comprimir"}
+
+    def pintar_chips_org(*_):
+        for cl_, b_ in chips_org.items():
+            on_ = bool(V[cl_].get())
+            b_.configure(fg_color=C["acento"] if on_ else C["suave"], text_color="#FFFFFF" if on_ else C["texto"],
+                         text=("  ✓  " if on_ else "  ○  ") + {"fol": "Foliar", "apl": "Aplanar", "comp": "Comprimir"}[cl_]
+                         + ("   · ajustes ›" if on_ else ""))
+
+    def chip_org(cl_):
+        panel_ = PANEL_DE_OPC[cl_]
+        if V[cl_].get() and app.get("panel") == panel_:
+            V[cl_].set(False)  # ya estaba activa y a la vista: se apaga
+            cerrar_panel()
+        else:
+            V[cl_].set(True)
+            abrir_panel(panel_)
+        pintar_chips_org()
+
+    for cl_o, b_o in chips_org.items():
+        b_o.configure(command=lambda c__=cl_o: chip_org(c__))
+        V[cl_o].trace_add("write", pintar_chips_org)
+
     def columna_izquierda():
         """Columna izquierda: miniaturas o marcadores en el visor (si estan visibles) o el documento activo;
         abajo, «Proceso» (v3.0: en el visor, solo con Aplanar, Foliar o Comprimir abiertos)."""
@@ -7553,6 +7598,11 @@ def iniciar_interfaz():
         t_ = pest_activa()
         v_doc_nom.set(t_["nombre"] if t_ else "Ningún documento abierto")
         con_proceso = (not en_visor) or app.get("panel") in ("aplanar", "foliar", "comprimir")
+        if app["pagina"] == "organizar":
+            caja_opc_org.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 4))
+            pintar_chips_org()
+        else:
+            caja_opc_org.grid_remove()
         if con_proceso:
             inferior.grid(row=2, column=0, sticky="sew", pady=(8, 0))
         else:
@@ -9271,7 +9321,8 @@ def iniciar_interfaz():
 
     def abrir_panel(clave):
         asegurar_pagina(clave)
-        if app["pagina"] != "visor":
+        # Foliar, Aplanar y Comprimir tambien se abren al lado de Organizar; lo demas, en el visor
+        if app["pagina"] != "visor" and not (app["pagina"] == "organizar" and clave in EN_PANEL):
             mostrar_pagina("visor")
         for k_, p_ in paneles.items():
             if k_ != clave and p_._parent_frame.winfo_manager():
@@ -9281,7 +9332,7 @@ def iniciar_interfaz():
         if paneles[clave]._parent_frame.winfo_manager() != "pack":
             paneles[clave].pack(fill="both", expand=True, padx=2, pady=(4, 6))
         if not panel_der.winfo_ismapped():
-            panel_der.grid(row=1, column=1, sticky="ns", padx=(0, 14), pady=(10, 12))
+            panel_der.grid(row=0, column=3, sticky="ns", padx=(0, 10), pady=(10, 12))
         app["panel"] = clave
         vis["edit_item"] = None
         columna_izquierda()
@@ -9921,6 +9972,9 @@ def iniciar_interfaz():
         if clave in EN_PANEL:  # Aplanar, Foliar y Comprimir van en el panel derecho del visor
             abrir_panel(clave)
             return
+        if app.get("panel") and (clave not in ("visor", "organizar") or
+                                 (clave == "organizar" and app["panel"] not in EN_PANEL)):
+            cerrar_panel()  # el panel derecho solo acompana al visor (y a Organizar con sus procesos)
         for k, w in paginas.items():
             w.grid_forget()
         if clave == "visor":  # el documento usa todo el espacio (sin titulo)
@@ -10444,7 +10498,7 @@ def iniciar_interfaz():
         dibujar_cinta()
 
     def cinta_panel(clave):
-        if app["pagina"] == "visor" and app.get("panel") == clave:
+        if app["pagina"] in ("visor", "organizar") and app.get("panel") == clave:
             cerrar_panel()  # tocarla de nuevo la cierra
         else:
             abrir_panel(clave)
