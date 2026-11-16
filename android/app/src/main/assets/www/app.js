@@ -2,9 +2,12 @@
 // Usa pdf.js (dibujo, texto, busqueda y marcas), pdf-lib (para estampar la firma al guardar)
 // y MuPDF (para cambiar el texto del PDF; se carga solo al usarlo).
 
-const VERSION = "1.5.5";
+const VERSION = "1.5.6";
 const REPO = "realmenes-gif/PdFOL";
 const CAMBIOS = [
+  ["1.5.6", [
+    "Girar la vista: botón redondo abajo a la izquierda (en tablet, junto al zoom) y en el menú ⋮ (derecha o izquierda). Solo cambia cómo se ve; el PDF queda igual.",
+  ]],
   ["1.5.5", [
     "Desplazamiento rápido más ágil: mientras arrastrás, el globo dice a qué página vas y la hoja salta cuando parás o soltás. Ya no se dibujan todas las hojas que pasan, así la página donde parás aparece enseguida.",
     "Al deslizar rápido, solo se piden las imágenes de las hojas que quedan a la vista.",
@@ -88,6 +91,8 @@ const ICO = {
   pagina: '<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/>',
   ancho: '<path d="M4 12h16M7 9l-3 3 3 3M17 9l3 3-3 3"/>',
   entera: '<rect x="6" y="3" width="12" height="18" rx="1.5"/>',
+  girarD: '<path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4v5h-5"/>',
+  girarI: '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v5h5"/>',
   copia: '<rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
   luna: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
   estrella: '<path d="m12 4 2.4 5 5.4.6-4 3.7 1.1 5.4L12 16l-4.9 2.7 1.1-5.4-4-3.7 5.4-.6z"/>',
@@ -267,6 +272,8 @@ function menuMas(boton) {
     it.push({ t: "Ir a la página…", i: ICO.pagina, f: irAPagina, der: `${t.viewer.currentPageNumber} de ${t.pdf.numPages}` });
     it.push({ t: "Ajustar al ancho", i: ICO.ancho, f: () => aplicarAjuste(t, "ancho") });
     it.push({ t: "Página entera", i: ICO.entera, f: () => aplicarAjuste(t, "pagina") });
+    it.push({ t: "Girar a la derecha", i: ICO.girarD, f: () => girarVista(t, 90), der: t.viewer.pagesRotation ? t.viewer.pagesRotation + "°" : "" });
+    it.push({ t: "Girar a la izquierda", i: ICO.girarI, f: () => girarVista(t, -90) });
     it.push("-");
     it.push({ t: "Guardar", i: ICO.guardar, f: guardar, der: t.modificado ? "con cambios" : "" });
     it.push({ t: "Guardar una copia", i: ICO.copia, f: () => guardar("copia") });
@@ -330,9 +337,10 @@ function activar(i) {
     actualizarIndicador();
     if (!$("miniaturas").hidden) armarMinis();
     $("zoom-fab").hidden = !esAncho();
+    $("b-girar").hidden = esAncho();
     actualizarZoomTxt();
   } else {
-    $("zoom-fab").hidden = true; $("indicador").hidden = true; $("miniaturas").hidden = true; $("velo-minis").hidden = true;
+    $("zoom-fab").hidden = true; $("b-girar").hidden = true; $("indicador").hidden = true; $("miniaturas").hidden = true; $("velo-minis").hidden = true;
     $("busqueda").hidden = true;
   }
 }
@@ -755,18 +763,42 @@ function actualizarZoomTxt() {
   const t = tabAct();
   if (t) $("z-val").textContent = Math.round(t.viewer.currentScale * 100) + " %";
 }
+// v1.5.6: girar la vista (como en Windows): solo cambia como se ve; el PDF queda igual
+function girarVista(t, d) {
+  if (!t) return;
+  if (modo !== "ver") salirDeModo();
+  const v = t.viewer, pag = v.currentPageNumber;
+  v.pagesRotation = (v.pagesRotation + d + 360) % 360;
+  t.anchoRef = null;
+  if (t.ajuste) aplicarAjuste(t, t.ajuste, t.ajusteTope); else igualarAnchos(t);
+  v.currentPageNumber = pag;
+  aviso(v.pagesRotation ? `Vista girada ${v.pagesRotation}° (el PDF no cambia).` : "Vista derecha.");
+}
+// para marcar o firmar la vista vuelve derecha (las marcas se ubican sobre la hoja tal como es)
+function vistaDerecha(t) {
+  if (t?.viewer.pagesRotation) {
+    t.viewer.pagesRotation = 0;
+    t.anchoRef = null;
+    if (t.ajuste) aplicarAjuste(t, t.ajuste, t.ajusteTope); else igualarAnchos(t);
+    aviso("La vista volvió derecha para marcar o firmar.");
+  }
+}
 function zoomBoton(f) {
   const t = tabAct(); if (!t) return;
   const r = t.cont.getBoundingClientRect();
   zoomEn(t, t.viewer.currentScale * f, r.left + r.width / 2, r.top + r.height / 2);
 }
 $("z-mas").onclick = () => zoomBoton(1.25);
+$("z-girar").onclick = () => girarVista(tabAct(), 90);
+$("b-girar").onclick = () => girarVista(tabAct(), 90);
 $("z-menos").onclick = () => zoomBoton(1 / 1.25);
 $("z-val").onclick = (e) => {
   const t = tabAct(); if (!t) return;
   menu([
     { t: "Ajustar al ancho", i: ICO.ancho, f: () => aplicarAjuste(t, "ancho") },
     { t: "Página entera", i: ICO.entera, f: () => aplicarAjuste(t, "pagina") },
+    { t: "Girar a la derecha", i: ICO.girarD, f: () => girarVista(t, 90) },
+    { t: "Girar a la izquierda", i: ICO.girarI, f: () => girarVista(t, -90) },
     ...[50, 75, 100, 150, 200, 300].map((z) => ({ t: z + " %", f: () => { t.ajuste = null; t.viewer.currentScaleValue = String(z / 100); } })),
   ], e.currentTarget);
 };
@@ -1119,6 +1151,7 @@ function cuentaBusqueda(t, mc, estado) {
 // ---------------------------------------------------------------- marcar (resaltar texto, marcador libre, lapiz)
 function entrarMarcar() {
   if (!tabAct()) return;
+  vistaDerecha(tabAct());
   if (modo === "firma") salirDeModo();
   modo = "marcar";
   $("herr-marcar").hidden = false;
@@ -2019,6 +2052,7 @@ function editarFirma(t, fi) {
   for (const x of t.firmas) x.el?.classList.toggle("edit", x === fi);
   if (fi) {
     if (modo === "marcar") salirDeModo();
+    vistaDerecha(t);
     modo = "firma";
     $("herr-firma").hidden = false;
   } else if (modo === "firma") {
@@ -2609,7 +2643,7 @@ document.addEventListener("keydown", (e) => {
 window.addEventListener("resize", () => {
   dibujarAcciones();
   const t = tabAct();
-  if (t) { $("zoom-fab").hidden = !esAncho(); ubicarFirmas(t); }
+  if (t) { $("zoom-fab").hidden = !esAncho(); $("b-girar").hidden = esAncho(); ubicarFirmas(t); }
   // al girar el telefono o cambiar el tamaño: «Ajustar al ancho» se vuelve a ajustar
   clearTimeout(window._tAjuste);
   window._tAjuste = setTimeout(() => {

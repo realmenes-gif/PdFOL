@@ -394,3 +394,10 @@ body.eligiendo .visor .textLayer, body.eligiendo .visor .textLayer span { -webki
 .fila-cb #cb-neg { margin-left: auto; height: 36px; padding: 0 12px; border-radius: 10px; }
 .fila-cb #cb-neg.sel { background: var(--acento); color: #fff; }
 .dialogo .ayuda-cb { font-size: 12px; margin: 10px 0 0; }
+
+/* v1.5.6: girar la vista: boton redondo abajo a la izquierda (en telefonos; en tablet va junto al zoom) */
+#b-girar {
+  position: absolute; left: 14px; bottom: calc(14px + var(--abajo, 0px)); width: 44px; height: 44px; z-index: 3;
+  background: var(--tarjeta); border: 1px solid var(--borde); box-shadow: var(--sombra);
+}
+#b-girar svg, #z-girar svg { width: 22px; height: 22px; fill: none; stroke: var(--texto); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
