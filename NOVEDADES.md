@@ -1,8 +1,12 @@
-## PdFOL v3.1 · by Meneses999
+## PdFOL v3.2 · by Meneses999
 
-- **Abre más rápido**: la primera hoja la dibuja la ventana apenas aparece, sin esperar a los procesos de dibujo. En Windows esos procesos son otras copias de PdFOL.exe que tardaban segundos en arrancar y competían con el inicio; ahora arrancan después.
-- La ventana aparece **ya de su tamaño final**: la hoja no se ve corrida y después salta.
-- Si cerrás en **pantalla completa o minimizado**, la próxima vez abre bien (maximizada o como estaba).
-- Sigue todo lo de la v3.0: cara nueva estilo Nitro / Adobe, girar la vista, una / continua / dos páginas, marcadores, inicio con recientes.
+**Diseño como Adobe Acrobat: la hoja ocupa casi toda la pantalla.**
 
-**Descarga:** `PdFOL_v3.1_portable.zip` (sin instalar) o `PdFOL_v3.1_instalador.exe`.
+- Arriba, solo dos filas finas: **Inicio · Herramientas ·** tus documentos, y una **barra de íconos chicos** (al pasar el mouse dicen qué hacen).
+- Al centro de la barra: **página** (↑ ↓ 1 / 40), **zoom** (− + 140 % ▾), ajuste, **girar** y modo de vista.
+- A la derecha, una **columna de herramientas** con sus colores (texto, firmar, resaltar, organizar, comparar, aplanar, foliar, comprimir, imprimir…).
+- **Herramientas** muestra todas en tarjetas; **Inicio**, tus recientes.
+- Los mensajes aparecen un momento abajo a la izquierda de la hoja (ya no hay barra fija abajo).
+- Las miniaturas empiezan cerradas: se abren con el ícono de la izquierda.
+
+**Descarga:** `PdFOL_v3.2_portable.zip` (sin instalar) o `PdFOL_v3.2_instalador.exe`.

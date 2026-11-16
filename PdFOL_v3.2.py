@@ -362,12 +362,20 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v3.1"
-VERSION_INTERNA = "3.1"
+VERSION = "v3.2"
+VERSION_INTERNA = "3.2"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v3.2", [
+        "Diseño como Adobe Acrobat: la hoja ocupa casi toda la pantalla. Arriba solo dos filas finas: Inicio · "
+        "Herramientas · documentos, y una barra de íconos chicos (al pasar el mouse dicen qué hacen).",
+        "Página, zoom, ajuste, girar y modo de vista en la misma barra, al centro.",
+        "A la derecha, una columna de herramientas con sus colores; «Herramientas» las muestra todas en tarjetas.",
+        "Los mensajes aparecen un momento abajo a la izquierda de la hoja (ya no hay barra fija abajo).",
+        "Las miniaturas empiezan cerradas (se abren con el ícono de la izquierda).",
+    ]),
     ("v3.1", [
         "Abre más rápido: la primera hoja la dibuja la ventana apenas aparece, sin esperar a los procesos de dibujo "
         "(en Windows tardaban segundos en arrancar y ahora arrancan después, sin competir con el inicio).",
@@ -2654,14 +2662,42 @@ GLIFOS = {
     "agregar": [[(4, 6), (4, 4), (16, 4), (16, 6)], [(10, 4), (10, 20)], [(7, 20), (13, 20)], [(18, 13), (18, 21)],
                 [(14, 17), (22, 17)]],
     "inicio": [[(3, 11), (12, 4), (21, 11)], [(6, 9), (6, 20), (18, 20), (18, 9)]],
+    "firmar": [[(3, 16), (5.5, 13), (7, 8.5), (9, 7.5), (10, 11.5), (9, 17), (12, 13.5), (14, 15.5), (16, 12.5),
+                (18.5, 15)], [(3, 20.5), (21, 20.5)]],
+    "ant": [_arco(12, 12, 9, 0, 360, 28), [(8, 12.5), (12, 8.5), (16, 12.5)], [(12, 8.5), (12, 16.5)]],
+    "sig": [_arco(12, 12, 9, 0, 360, 28), [(8, 11.5), (12, 15.5), (16, 11.5)], [(12, 7.5), (12, 15.5)]],
+    "zoom_menos": [_arco(12, 12, 9, 0, 360, 28), [(8, 12), (16, 12)]],
+    "zoom_mas": [_arco(12, 12, 9, 0, 360, 28), [(8, 12), (16, 12)], [(12, 8), (12, 16)]],
+    "carpeta": [[(3, 7.5), (3, 18.5), (21, 18.5), (21, 9), (11.5, 9), (9.5, 6.5), (3, 6.5), (3, 7.5)]],
+    "impresora": [[(7, 9), (7, 4), (17, 4), (17, 9)], [(7, 17), (4, 17), (4, 10), (20, 10), (20, 17), (17, 17)],
+                  _rect(7, 14, 17, 20)],
+    "disco": [[(5, 4), (16, 4), (19, 7), (19, 20), (5, 20), (5, 4)], [(8, 4), (8, 9), (15, 9), (15, 4)],
+              [(8, 20), (8, 14), (16, 14), (16, 20)]],
+    "herramientas": [[(14.5, 6), (18, 2.5), (21.5, 6), (18, 9.5), (14.5, 6)], [(16, 8), (5, 19), (5, 21), (7, 21),
+                                                                           (18, 10)], _rect(3, 3, 9, 9),
+                     _rect(15, 15, 21, 21)],
 }
 
 
-def _icono(clave, color, tam=30, escala=4, glifo=(255, 255, 255)):
-    """Icono redondeado con glifo blanco (dibujado, sin archivos externos)."""
+def _icono(clave, color, tam=30, escala=4, glifo=(255, 255, 255), sin_fondo=False):
+    """Icono redondeado con glifo blanco (dibujado, sin archivos externos).
+    v3.2: sin_fondo dibuja solo el trazo, mas grande (para la barra estilo Adobe)."""
     T = tam * escala
     img = Image.new("RGBA", (T, T), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
+    if sin_fondo and clave in GLIFOS:
+        w = tuple(glifo) + (255,)
+        k_ = T / 24 * 0.92
+        o_ = T * 0.04
+        for tr in GLIFOS[clave]:
+            pts = [(o_ + x * k_, o_ + y * k_) for x, y in tr]
+            if len(pts) == 2 and pts[0] == pts[1]:
+                pts[1] = (pts[1][0] + 0.1, pts[1][1])
+            d.line(pts, fill=w, width=max(2, int(T * 0.068)), joint="curve")
+            for q in (pts[0], pts[-1]):
+                rr = max(1, int(T * 0.034))
+                d.ellipse([q[0] - rr, q[1] - rr, q[0] + rr, q[1] + rr], fill=w)
+        return img.resize((tam, tam), Image.LANCZOS)
     r, g, b = _hex(color)
     arriba = tuple(min(255, int(v + (255 - v) * 0.18)) for v in (r, g, b))
     for y in range(T):  # degradado suave dentro del icono
@@ -3417,25 +3453,27 @@ def iniciar_interfaz():
     def col(clave):
         return C[clave][1 if modo_oscuro() else 0]
 
-    # ---- v3.0: arriba, como Nitro / Adobe. Fila 1: husky + PdFOL, pestanas de documentos y busqueda.
-    # Fila 2: la cinta (Inicio · Editar · Organizar · Herramientas · Ver) con los mismos iconos y colores.
-    ALTO_SUP = 46
+    # ---- v3.2: arriba, como Adobe Acrobat: la hoja ocupa casi todo.
+    # Fila 1 (36 px): husky, «Inicio», «Herramientas» y las pestanas de los documentos; a la derecha, buscar.
+    # Fila 2 (44 px): una sola barra de iconos chicos (sin textos; al pasar el mouse dicen que hacen).
+    ALTO_SUP = 36
     superior = tk.Canvas(raiz, height=ALTO_SUP, highlightthickness=0, bd=0)
     superior.grid(row=0, column=0, sticky="ew")
     import tkinter.font as tkfont
-    f_item = tkfont.Font(family=FAM, size=9)
-    logo_tk = foto_tk(icono_husky(30))
+    f_item = tkfont.Font(family=FAM, size=10)
+    logo_tk = foto_tk(icono_husky(24))
 
     def _icono_apagado(img):
         a = img.getchannel("A").point(lambda v: v * 0.38)
         img = img.copy()
         img.putalpha(a)
         return img
-    e_buscar = ctk.CTkEntry(superior, width=240, height=28, corner_radius=14, font=F(12), bg_color=C["lat_ini"],
+    e_buscar = ctk.CTkEntry(superior, width=220, height=26, corner_radius=13, font=F(12), bg_color=C["lat_ini"],
                             fg_color=C["campo"], border_color=C["borde"], text_color=C["texto"],
                             placeholder_text="Buscar  (Ctrl+F)", placeholder_text_color=C["texto2"])
     caja_pest = tk.Frame(superior, bd=0, highlightthickness=0, height=34)
-    X_PEST = 172
+    app["vista_top"] = None  # None: el documento · "inicio" · "herr"
+    X_PEST = 300
 
     def dibujar_superior(*_):
         superior.delete("all")
@@ -3448,202 +3486,255 @@ def iniciar_interfaz():
             except Exception:
                 pass
         superior.create_line(0, h - 1, w, h - 1, fill=col("borde"))
-        if app.get("menu_logo"):  # resaltado mientras el menu del husky esta abierto
-            superior.create_rectangle(4, 5, X_PEST - 10, h - 6, fill=col("lat_sel"), outline="")
-        superior.create_image(10, h // 2, image=logo_tk, anchor="w", tags=("item", "logo"))
-        id_nom = superior.create_text(46, h // 2, text=NOMBRE, anchor="w", fill=col("texto"),
-                                      font=(FAM, 15, "bold"), tags=("item", "logo"))
-        x_fin = superior.bbox(id_nom)[2]
-        superior.create_text(x_fin + 5, h // 2 + 2, text=VERSION, anchor="w", fill=col("acento"),
-                             font=(FAM, 10, "bold"), tags=("item", "logo"))
-        superior.create_rectangle(4, 5, X_PEST - 10, h - 6, outline="", fill="", tags=("item", "logo"))
-        if app.get("hay_nueva"):  # puntito: hay una version nueva
-            superior.create_oval(30, 5, 42, 17, fill="#F97316", outline=col("lat_ini"), width=2,
-                                 tags=("item", "logo"))
-        ancho_b = 250 if w > 1100 else 190
+        if app.get("menu_logo"):
+            superior.create_rectangle(2, 3, 40, h - 3, fill=col("lat_sel"), outline="")
+        superior.create_image(21, h // 2, image=logo_tk, tags=("item", "logo"))
+        superior.create_rectangle(2, 3, 40, h - 3, outline="", fill="", tags=("item", "logo"))
+        if app.get("hay_nueva"):
+            superior.create_oval(30, 4, 39, 13, fill="#F97316", outline=col("lat_ini"), width=2, tags=("item", "logo"))
+        x = 46
+        try:
+            sin_doc = not pest
+        except NameError:  # todavia se esta armando la ventana
+            sin_doc = True
+        for clave_, txt_ in (("inicio", "Inicio"), ("herr", "Herramientas")):
+            ancho_ = f_item.measure(txt_) + 28
+            elegida = app["vista_top"] == clave_ or (clave_ == "inicio" and sin_doc and not app["vista_top"])
+            if elegida:
+                superior.create_rectangle(x, 4, x + ancho_, h, fill=col("tarjeta"), outline=col("borde"))
+                superior.create_line(x + 1, h - 1, x + ancho_, h - 1, fill=col("tarjeta"))
+            superior.create_text(x + ancho_ / 2, h // 2 + 1, text=txt_, fill=col("texto"),
+                                 font=(FAM, 10, "bold" if elegida else "normal"), tags=("item", "top:" + clave_))
+            superior.create_rectangle(x, 4, x + ancho_, h, outline="", fill="", tags=("item", "top:" + clave_))
+            x += ancho_ + 2
+        superior.create_line(x + 4, 9, x + 4, h - 9, fill=col("borde"))
+        app["x_pest"] = x + 12
+        ancho_b = 220 if w > 1100 else 170
         e_buscar.configure(width=ancho_b)
-        superior.create_window(w - 14, h // 2, window=e_buscar, anchor="e")
-        superior.create_window(X_PEST, h // 2, window=caja_pest, anchor="w")
+        superior.create_window(w - 10, h // 2, window=e_buscar, anchor="e")
+        superior.create_window(app["x_pest"], h, window=caja_pest, anchor="sw")
         dibujar_cinta()
+
+    def ir_top(clave_):
+        app["vista_top"] = None if app["vista_top"] == clave_ and pest else clave_
+        if app["pagina"] != "visor":
+            mostrar_pagina("visor")
+        mostrar_inicio()
+        dibujar_superior()
 
     def click_superior(ev):
         for it in reversed(superior.find_overlapping(ev.x, ev.y, ev.x, ev.y)):
-            if "logo" in superior.gettags(it):
+            tags_ = superior.gettags(it)
+            if "logo" in tags_:
                 menu_husky()
                 return
+            for t in tags_:
+                if t.startswith("top:"):
+                    ir_top(t[4:])
+                    return
 
     superior.bind("<Configure>", dibujar_superior)
     superior.bind("<Button-1>", click_superior)
 
-    # ---- la cinta
-    barra_pest = ctk.CTkFrame(raiz, fg_color=C["tarjeta"], corner_radius=0, height=106)
+    # ---- la barra de iconos
+    barra_pest = ctk.CTkFrame(raiz, fg_color=C["tarjeta"], corner_radius=0, height=44)
     barra_pest.grid(row=2, column=0, sticky="ew")
     barra_pest.grid_columnconfigure(0, weight=1)
-    ALTO_CINTA = 104
+    ALTO_CINTA = 44
     cinta = tk.Canvas(barra_pest, height=ALTO_CINTA, highlightthickness=0, bd=0, cursor="hand2")
     cinta.grid(row=0, column=0, sticky="ew")
     ctk.CTkFrame(raiz, height=1, fg_color=C["borde"], corner_radius=0).grid(row=2, column=0, sticky="sew")
-    PESTANAS_CINTA = ["Inicio", "Editar", "Organizar", "Herramientas", "Ver"]
     app["cinta"] = "Inicio"
     iconos_cinta = {}
     COLOR_ICONO = {c_: col_ for c_, _t, col_, *_r in ICONOS}
     COLOR_ICONO.update(resaltar="#EAB308", cambiar="#0284C7", agregar="#0284C7")
+    v_pag_bar = tk.StringVar(value="")
+    e_pag_bar = ctk.CTkEntry(cinta, textvariable=v_pag_bar, width=42, height=26, corner_radius=6, font=F(12),
+                             justify="center", fg_color=C["campo"], border_color=C["borde"], text_color=C["texto"])
+    e_pag_bar.bind("<Return>", lambda e: ir_inf("bar"))
 
-    def icono_cinta(clave, color=None):
-        k_ = (clave, color, modo_oscuro())
+    def icono_cinta(clave, color=None, tam=22):
+        k_ = (clave, color, modo_oscuro(), tam)
         if k_ not in iconos_cinta:
             if color:
-                im_ = _icono(clave, color, 26)
-            else:  # icono suave: fondo gris y glifo del color de acento
-                im_ = _icono(clave, col("suave"), 26, glifo=_hex(col("acento")))
+                im_ = _icono(clave, color, tam)
+            else:  # icono de trazo, del color del texto, sin fondo (como Adobe)
+                im_ = _icono(clave, col("tarjeta"), 20, glifo=_hex(col("texto")), sin_fondo=True)
             iconos_cinta[k_] = foto_tk(im_)
         return iconos_cinta[k_]
 
     def cinta_items():
-        """[(grupo de botones)] de la pestana elegida: (id, texto, icono, color o None, accion, elegido)."""
+        """Grupos de iconos: (id, ayuda, icono, color o None, accion, elegido)."""
         t_ = pest_activa()
         v_ = vista_activa()
-        giro = (t_ or {}).get("giro", 0)
         modo_v = (t_ or {}).get("modo_vista", "continua")
         zoom_ = v_.zoom if v_ else None
-        en_visor = app["pagina"] == "visor"
+        en_visor = app["pagina"] == "visor" and not app["vista_top"]
         panel = app.get("panel") if en_visor else None
         texto_modo = None
         try:
             texto_modo = v_tmodo.get()
         except Exception:
             pass
-        sel_ = (en_visor and v_herr.get() == "Seleccionar" and not vis["modo_res"] and not panel)
+        sel_ = en_visor and v_herr.get() == "Seleccionar" and not vis["modo_res"] and not panel
         mano_ = en_visor and v_herr.get() == "Mano" and not vis["modo_res"] and not panel
-        guardar_ = ("guardar", "Guardar" + (f" ({n_resaltes()})" if n_resaltes() else ""), "guardar", "#3B82F6",
-                    lambda: guardar_resaltados_dialogo() if n_resaltes() else v_estado.set("No hay cambios sin guardar."),
-                    False)
-        deshacer_ = [("deshacer", "Deshacer", "deshacer", None, cinta_deshacer, False),
-                     ("rehacer", "Rehacer", "rehacer", None, lambda: rehacer_edicion(), False)]
-        girar_ = [("girar_izq", "Girar ←", "girar_izq", None, lambda: girar_vista(-90), False),
-                  ("girar_der", "Girar →", "girar_der", None, lambda: girar_vista(90), giro != 0)]
-        ajuste_ = [("ancho", "Ancho", "ancho", None, lambda: zoom_cinta("Ajustar ancho"), zoom_ == "Ajustar ancho"),
-                   ("pagina", "Página", "pagina", None, lambda: zoom_cinta("Página entera"),
-                    zoom_ == "Página entera")]
-        editar_ = [("texto", "Texto", "texto", COLOR_ICONO["texto"], lambda: cinta_panel("texto"),
-                    panel == "texto"),
-                   ("firmar", "Firmar", "firmar", COLOR_ICONO["firmar"], lambda: cinta_panel("firmar"),
-                    panel == "firmar"),
-                   ("resaltar", "Resaltar", "resaltar", COLOR_ICONO["resaltar"], lambda: alternar_resaltar(),
-                    bool(vis["modo_res"]))]
-        if app["cinta"] == "Inicio":
-            return [[("abrir", "Abrir", "abrir", COLOR_ICONO["abrir"], lambda: abrir_archivos(), False), guardar_,
-                     ("imprimir", "Imprimir", "imprimir", COLOR_ICONO["imprimir"], lambda: abrir_imprimir(), False)],
-                    deshacer_,
-                    [("seleccionar", "Seleccionar", "seleccionar", None, lambda: cinta_herr("Seleccionar"), sel_),
-                     ("mano", "Mano", "mano", None, lambda: cinta_herr("Mano"), mano_)],
-                    ajuste_ + girar_, editar_]
-        if app["cinta"] == "Editar":
-            return [[("agregar", "Agregar texto", "agregar", COLOR_ICONO["agregar"], lambda: cinta_texto("Agregar"),
-                      panel == "texto" and texto_modo == "Agregar"),
-                     ("cambiar", "Cambiar texto", "cambiar", COLOR_ICONO["cambiar"], lambda: cinta_texto("Cambiar"),
-                      panel == "texto" and texto_modo == "Cambiar"),
-                     ("firmar", "Firmar y sellar", "firmar", COLOR_ICONO["firmar"], lambda: cinta_panel("firmar"),
-                      panel == "firmar"),
-                     ("resaltar", "Resaltar", "resaltar", COLOR_ICONO["resaltar"], lambda: alternar_resaltar(),
-                      bool(vis["modo_res"]))],
-                    deshacer_, [guardar_]]
-        if app["cinta"] == "Organizar":
-            return [[("organizar", "Organizar y unir", "organizar", COLOR_ICONO["organizar"],
-                      lambda: cinta_pagina("organizar"), app["pagina"] == "organizar"),
-                     ("unir", "Unir PDFs", "unir", COLOR_ICONO["organizar"], lambda: cinta_unir(), False),
-                     ("comparar", "Comparar", "comparar", COLOR_ICONO["comparar"], lambda: boton_comparar(),
-                      bool(app.get("comparando")))],
-                    [("documento", "Documento", "documento", COLOR_ICONO["documento"],
-                      lambda: cinta_pagina("documento"), app["pagina"] == "documento")]]
-        if app["cinta"] == "Herramientas":
-            return [[("aplanar", "Aplanar", "aplanar", COLOR_ICONO["aplanar"], lambda: cinta_panel("aplanar"),
-                      panel == "aplanar"),
-                     ("foliar", "Foliar", "foliar", COLOR_ICONO["foliar"], lambda: cinta_panel("foliar"),
-                      panel == "foliar"),
-                     ("comprimir", "Comprimir", "comprimir", COLOR_ICONO["comprimir"],
-                      lambda: cinta_panel("comprimir"), panel == "comprimir")],
-                    [("imprimir", "Imprimir", "imprimir", COLOR_ICONO["imprimir"], lambda: abrir_imprimir(), False),
-                     ("perfiles", "Perfiles", "perfiles", COLOR_ICONO["perfiles"], lambda: cinta_pagina("perfiles"),
-                      app["pagina"] == "perfiles")]]
-        # Ver
-        return [[("una", "Una página", "una", None, lambda: modo_vista("una"), modo_v == "una"),
-                 ("continua", "Continua", "continua", None, lambda: modo_vista("continua"), modo_v == "continua"),
-                 ("dos", "Dos páginas", "dos", None, lambda: modo_vista("dos"), modo_v == "dos")],
-                ajuste_ + girar_,
-                [("miniaturas", "Miniaturas", "miniaturas", None, lambda: alternar_miniaturas(),
-                  almacen.datos.get("miniaturas") is not False and app.get("lado_izq", "minis") == "minis"),
-                 ("marcadores", "Marcadores", "marcadores", None, lambda: alternar_marcadores(),
-                  app.get("lado_izq") == "marcadores"),
-                 ("impresa", "Hoja impresa", "impresa", None, lambda: V["girar_prev"].set(not V["girar_prev"].get()),
-                  bool(V["girar_prev"].get())),
-                 ("completa", "Pantalla completa", "completa", None, lambda: pantalla_completa(),
-                  bool(app.get("completa")))],
-                [("apariencia", "Apariencia", "apariencia", COLOR_ICONO["apariencia"],
-                  lambda: cinta_pagina("apariencia"), app["pagina"] == "apariencia")]]
+        n_ = n_resaltes()
+        izq = [[("guardar", "Guardar los cambios en el PDF (Ctrl+S)" + (f" · {n_} sin guardar" if n_ else ""),
+                 "disco", None, lambda: guardar_resaltados_dialogo() if n_resaltes() else
+                 v_estado.set("No hay cambios sin guardar."), False),
+                ("abrir", "Abrir PDF (Ctrl+O)", "carpeta", None, lambda: abrir_archivos(), False),
+                ("imprimir", "Imprimir", "impresora", None, lambda: abrir_imprimir(), False),
+                ("buscar", "Buscar en el documento (Ctrl+F)", "buscar", None, lambda: enfocar_busqueda(), False)]]
+        centro = [[("ant", "Página anterior", "ant", None, lambda: ir_inf("ant"), False),
+                   ("sig", "Página siguiente", "sig", None, lambda: ir_inf("sig"), False),
+                   ("PAG", None, None, None, None, False)],
+                  [("seleccionar", "Seleccionar texto", "seleccionar", None, lambda: cinta_herr("Seleccionar"), sel_),
+                   ("mano", "Mano (mover la hoja)", "mano", None, lambda: cinta_herr("Mano"), mano_)],
+                  [("menos", "Alejar", "zoom_menos", None, lambda: (vista_activa() and vista_activa().zoom_paso(-1)),
+                    False),
+                   ("mas", "Acercar", "zoom_mas", None, lambda: (vista_activa() and vista_activa().zoom_paso(1)),
+                    False),
+                   ("ZOOM", None, None, None, None, False),
+                   ("ajuste", "Ajustar: al ancho / página entera", "ancho" if zoom_ != "Página entera" else "pagina",
+                    None, lambda: menu_ajuste(), zoom_ in ("Ajustar ancho", "Página entera"))],
+                  [("girar_izq", "Girar la vista a la izquierda (no cambia el PDF)", "girar_izq", None,
+                    lambda: girar_vista(-90), False),
+                   ("girar_der", "Girar la vista a la derecha (no cambia el PDF)", "girar_der", None,
+                    lambda: girar_vista(90), False),
+                   ("modo", "Vista: una página, continua o dos páginas",
+                    {"una": "una", "dos": "dos"}.get(modo_v, "continua"), None, lambda: menu_modo(), modo_v != "continua")],
+                  [("resaltar", "Resaltar", "resaltar", None, lambda: alternar_resaltar(), bool(vis["modo_res"])),
+                   ("cambiar", "Cambiar texto del PDF", "cambiar", None, lambda: cinta_texto("Cambiar"),
+                    panel == "texto" and texto_modo == "Cambiar"),
+                   ("agregar", "Agregar texto", "agregar", None, lambda: cinta_texto("Agregar"),
+                    panel == "texto" and texto_modo == "Agregar"),
+                   ("firmar", "Firmar y sellar", "firmar", None, lambda: cinta_panel("firmar"), panel == "firmar")]]
+        der = [[("deshacer", "Deshacer (Ctrl+Z)", "deshacer", None, cinta_deshacer, False),
+                ("rehacer", "Rehacer (Ctrl+Y)", "rehacer", None, lambda: rehacer_edicion(), False),
+                ("completa", "Pantalla completa (F11)", "completa", None, lambda: pantalla_completa(),
+                 bool(app.get("completa")))]]
+        return izq, centro, der
+
+    def _ancho_item(it_):
+        if it_[0] == "PAG":
+            return 42 + 8 + f_item.measure(v_tot_bar.get() or "/ 000") + 6
+        if it_[0] == "ZOOM":
+            return f_item.measure("000 % ▾") + 12
+        return 36
+
+    v_tot_bar = tk.StringVar(value="")
+    v_pct_bar = tk.StringVar(value="")
 
     def dibujar_cinta(*_):
         cinta.delete("all")
         w = max(cinta.winfo_width(), 900)
+        h = ALTO_CINTA
         cinta.configure(bg=col("tarjeta"))
-        # pestanas de la cinta
-        x = 12
-        for nom in PESTANAS_CINTA:
-            ancho_ = f_item.measure(nom) * 1.15 + 26
-            elegida = nom == app["cinta"]
-            cinta.create_text(x + ancho_ / 2, 17, text=nom, fill=col("acento") if elegida else col("texto"),
-                              font=(FAM, 10, "bold" if elegida else "normal"), tags=("item", "tab:" + nom))
-            if elegida:
-                cinta.create_line(x + 8, 31, x + ancho_ - 8, 31, fill=col("acento"), width=2)
-            cinta.create_rectangle(x, 2, x + ancho_, 33, outline="", fill="", tags=("item", "tab:" + nom))
-            x += ancho_
-        cinta.create_line(0, 33, w, 33, fill=col("linea"))
-        # botones
-        x = 10
-        app["cinta_acc"] = {}
         try:
-            grupos_ = cinta_items()
+            izq, centro, der = cinta_items()
         except NameError:  # todavia se esta armando la ventana
-            grupos_ = []
-        for g_, grupo in enumerate(grupos_):
-            if g_:
-                cinta.create_line(x + 3, 44, x + 3, ALTO_CINTA - 10, fill=col("borde"))
-                x += 8
-            for id_, txt_, ico_, color_, acc_, elegido in grupo:
-                ancho_ = max(f_item.measure(txt_) + 18, 60)
-                if elegido:
-                    x0, y0, x1, y1, r = x + 2, 38, x + ancho_ - 2, ALTO_CINTA - 4, 8
-                    cinta.create_polygon(x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1, x1 - r, y1,
-                                         x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0,
-                                         smooth=True, fill=col("lat_sel"), outline="")
-                cx = x + ancho_ / 2
-                cinta.create_image(cx, 58, image=icono_cinta(ico_, color_), tags=("item", "b:" + id_))
-                cinta.create_text(cx, 87, text=txt_, fill=col("texto"), font=(FAM, 9, "bold" if elegido else "normal"),
-                                  tags=("item", "b:" + id_))
-                cinta.create_rectangle(x + 2, 38, x + ancho_ - 2, ALTO_CINTA - 4, outline="", fill="",
-                                       tags=("item", "b:" + id_))
-                app["cinta_acc"][id_] = acc_
-                x += ancho_
-        v_perfil_ = v_perfil_lbl.get()
-        if v_perfil_:
-            cinta.create_text(w - 16, 17, text=v_perfil_, anchor="e", fill=col("texto2"), font=(FAM, 9))
+            return
+        app["cinta_acc"], app["cinta_ayuda"] = {}, {}
+        hay_doc = bool(pest) and not app["vista_top"]
+
+        def poner(grupos, x):
+            for g_, grupo in enumerate(grupos):
+                if g_:
+                    cinta.create_line(x + 5, 11, x + 5, h - 11, fill=col("borde"))
+                    x += 10
+                for it_ in grupo:
+                    id_, ayuda_, ico_, color_, acc_, elegido = it_
+                    ancho_ = _ancho_item(it_)
+                    if id_ == "PAG":
+                        if hay_doc:
+                            cinta.create_window(x + 4, h // 2, window=e_pag_bar, anchor="w")
+                            cinta.create_text(x + 52, h // 2, text=v_tot_bar.get(), anchor="w", fill=col("texto2"),
+                                              font=(FAM, 10))
+                    elif id_ == "ZOOM":
+                        cinta.create_text(x + ancho_ / 2, h // 2, text=(v_pct_bar.get() + " ▾") if hay_doc else "",
+                                          fill=col("texto"), font=(FAM, 10), tags=("item", "b:zoom_menu"))
+                        cinta.create_rectangle(x, 8, x + ancho_, h - 8, outline="", fill="", tags=("item", "b:zoom_menu"))
+                        app["cinta_acc"]["zoom_menu"] = menu_zoom
+                        app["cinta_ayuda"]["zoom_menu"] = "Zoom"
+                    else:
+                        if elegido:
+                            x0, y0, x1, y1, r = x + 3, 6, x + ancho_ - 3, h - 6, 6
+                            cinta.create_polygon(x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1,
+                                                 x1 - r, y1, x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0,
+                                                 smooth=True, fill=col("lat_sel"), outline="")
+                        cinta.create_image(x + ancho_ / 2, h // 2, image=icono_cinta(ico_, color_),
+                                           tags=("item", "b:" + id_))
+                        cinta.create_rectangle(x + 3, 6, x + ancho_ - 3, h - 6, outline="", fill="",
+                                               tags=("item", "b:" + id_))
+                        if id_ == "guardar" and n_resaltes():  # puntito: hay cambios sin guardar
+                            cinta.create_oval(x + ancho_ - 13, 8, x + ancho_ - 5, 16, fill="#F97316", outline="")
+                        app["cinta_acc"][id_] = acc_
+                        app["cinta_ayuda"][id_] = ayuda_
+                    x += ancho_
+            return x
+
+        poner(izq, 10)
+        ancho_c = sum(sum(_ancho_item(i_) for i_ in g) for g in centro) + 10 * (len(centro) - 1)
+        x_c = max(210, (w - ancho_c) // 2)
+        poner(centro, x_c)
+        ancho_d = sum(_ancho_item(i_) for i_ in der[0])
+        poner(der, w - ancho_d - 10)
+
+    # ayuda al pasar el mouse (los iconos no tienen texto)
+    ayuda_lbl = ctk.CTkLabel(raiz, text="", font=F(11), fg_color=C["texto"], text_color=C["tarjeta"],
+                             corner_radius=6, height=24)
+    ayuda_job = {"id": None, "tag": None}
+
+    def ayuda_esconder(*_):
+        if ayuda_job["id"]:
+            raiz.after_cancel(ayuda_job["id"])
+        ayuda_job.update(id=None, tag=None)
+        ayuda_lbl.place_forget()
+
+    def ayuda_mover(ev, canvas_, textos_):
+        tag_ = None
+        for it in reversed(canvas_.find_overlapping(ev.x, ev.y, ev.x, ev.y)):
+            for t in canvas_.gettags(it):
+                if t.startswith(("b:", "r:")):
+                    tag_ = t
+                    break
+            if tag_:
+                break
+        if tag_ == ayuda_job["tag"]:
+            return
+        ayuda_esconder()
+        texto_ = textos_().get(tag_[2:]) if tag_ else None
+        if not texto_:
+            return
+        ayuda_job["tag"] = tag_
+        x_ = canvas_.winfo_rootx() - raiz.winfo_rootx() + ev.x
+        y_ = canvas_.winfo_rooty() - raiz.winfo_rooty() + ev.y + 22
+
+        def mostrar_():
+            ayuda_lbl.configure(text=f"  {texto_}  ")
+            ayuda_lbl.place(x=min(x_, raiz.winfo_width() - 20 - f_item.measure(texto_) - 30), y=y_)
+            ayuda_lbl.lift()
+        ayuda_job["id"] = raiz.after(450, mostrar_)
 
     def click_cinta(ev):
+        ayuda_esconder()
         for it in reversed(cinta.find_overlapping(ev.x, ev.y, ev.x, ev.y)):
             for t in cinta.gettags(it):
-                if t.startswith("tab:"):
-                    app["cinta"] = t[4:]
-                    dibujar_cinta()
-                    return
                 if t.startswith("b:"):
                     acc_ = app.get("cinta_acc", {}).get(t[2:])
                     if acc_:
+                        if app["vista_top"] and t[2:] not in ("abrir", "zoom_menu"):
+                            app["vista_top"] = None
+                            mostrar_inicio()
+                            dibujar_superior()
                         acc_()
                     raiz.after(20, dibujar_cinta)
                     return
 
     cinta.bind("<Configure>", dibujar_cinta)
     cinta.bind("<Button-1>", click_cinta)
+    cinta.bind("<Motion>", lambda e: ayuda_mover(e, cinta, lambda: app.get("cinta_ayuda", {})))
+    cinta.bind("<Leave>", ayuda_esconder)
     dibujar_lateral = dibujar_superior  # nombre de la v1.1 (lo llaman perfiles y apariencia)
 
     # ---- franja de actualizacion (fila 1, solo cuando hay una version nueva)
@@ -3663,7 +3754,10 @@ def iniciar_interfaz():
     cuerpo.grid_columnconfigure(2, weight=1)
     cuerpo.grid_rowconfigure(0, weight=1)
     # v3.0: riel de iconos a la izquierda (como Adobe): miniaturas, marcadores y buscar
-    riel = ctk.CTkFrame(cuerpo, fg_color=C["tarjeta"], corner_radius=0, width=48)
+    if not almacen.datos.get("v32_minis"):  # v3.2: como Adobe, las miniaturas empiezan cerradas (una vez)
+        almacen.datos["v32_minis"] = True
+        almacen.datos["miniaturas"] = False
+    riel = ctk.CTkFrame(cuerpo, fg_color=C["tarjeta"], corner_radius=0, width=40)
     riel.grid(row=0, column=0, sticky="nsw")
     riel_b = {}
     col_izq = ctk.CTkFrame(cuerpo, fg_color="transparent", width=ANCHO_IZQ)
@@ -5707,7 +5801,7 @@ def iniciar_interfaz():
 
     # ---------- v3.0: barra de abajo (como Nitro): estado, paginas, modo de vista y zoom
     barra_inf = ctk.CTkFrame(visor, fg_color=C["tarjeta"], corner_radius=0, height=38)
-    barra_inf.grid(row=2, column=0, columnspan=2, sticky="ew")
+    # v3.2: ya no se muestra (como en Adobe, paginas y zoom van en la barra de arriba)
     barra_inf.grid_columnconfigure(0, weight=1)
     ctk.CTkFrame(barra_inf, height=1, fg_color=C["borde"], corner_radius=0).place(relx=0, rely=0, relwidth=1)
     v_estado_corto = tk.StringVar(value="")
@@ -5771,9 +5865,9 @@ def iniciar_interfaz():
             return
         n_ = len(v_.lay["pags"])
         paso_ = 2 if (v_.t or {}).get("modo_vista") == "dos" else 1
-        if a_ == "txt":
+        if a_ in ("txt", "bar"):
             try:
-                v_.ir(int(v_pag_inf.get().strip()) - 1)
+                v_.ir(int((v_pag_bar if a_ == "bar" else v_pag_inf).get().strip()) - 1)
             except ValueError:
                 pass
             v_.cv.focus_set()
@@ -5852,14 +5946,216 @@ def iniciar_interfaz():
         ctk.CTkFrame(lista_rec, height=6, fg_color="transparent").pack()
 
     def mostrar_inicio():
-        hay = bool(pest)
-        if not hay and app["pagina"] == "visor" and not vis["comp"]:
+        """v3.2: «Inicio» (o sin documento) y «Herramientas» se ven sobre la hoja, como en Adobe."""
+        en_visor = app["pagina"] == "visor" and not vis["comp"]
+        ver_ini = en_visor and (app["vista_top"] == "inicio" or (not pest and app["vista_top"] != "herr"))
+        ver_herr = en_visor and app["vista_top"] == "herr"
+        if ver_ini:
             if not inicio_f.winfo_ismapped():
                 dibujar_inicio()
                 inicio_f.place(relx=0, rely=0, relwidth=1, relheight=1)
-                inicio_f.lift()
+            inicio_f.lift()
         elif inicio_f.winfo_ismapped():
             inicio_f.place_forget()
+        if ver_herr:
+            if not herr_w.winfo_ismapped():
+                herr_w.place(relx=0, rely=0, relwidth=1, relheight=1)
+            herr_w.lift()
+        elif herr_w.winfo_ismapped():
+            herr_w.place_forget()
+
+    # ---------- v3.2: «Herramientas»: todas las herramientas en tarjetas (como Adobe)
+    herr_w = ctk.CTkFrame(area_doc, fg_color=C["fondo"], corner_radius=0)
+    herr_f = ctk.CTkScrollableFrame(herr_w, fg_color=C["fondo"], corner_radius=0)
+    herr_f.pack(fill="both", expand=True)
+    herr_caja = ctk.CTkFrame(herr_f, fg_color="transparent")
+    herr_caja.pack(pady=(26, 20), padx=30, anchor="n")
+    ctk.CTkLabel(herr_caja, text="Herramientas", font=F(24, "bold"), text_color=C["texto"], anchor="w").grid(
+        row=0, column=0, columnspan=3, sticky="ew", pady=(0, 14))
+    HERRAMIENTAS = [
+        ("agregar", "Agregar texto", "Escribir texto nuevo sobre la hoja", lambda: cinta_texto("Agregar")),
+        ("cambiar", "Cambiar texto", "Reemplazar texto del PDF (párrafo o renglón)", lambda: cinta_texto("Cambiar")),
+        ("firmar", "Firmar y sellar", "Firmas y sellos desde una imagen", lambda: cinta_panel("firmar")),
+        ("resaltar", "Resaltar", "Marcar texto o zonas", lambda: alternar_resaltar()),
+        ("organizar", "Organizar y unir", "Ordenar, girar, quitar y unir páginas", lambda: cinta_pagina("organizar")),
+        ("comparar", "Comparar", "Dos PDF lado a lado", lambda: boton_comparar()),
+        ("documento", "Documento", "Propiedades, páginas y archivo", lambda: cinta_pagina("documento")),
+        ("aplanar", "Aplanar", "Planos livianos para imprimir y ver", lambda: cinta_panel("aplanar")),
+        ("foliar", "Foliar", "Numerar las hojas", lambda: cinta_panel("foliar")),
+        ("comprimir", "Comprimir", "Bajar el peso del PDF", lambda: cinta_panel("comprimir")),
+        ("imprimir", "Imprimir", "Imprimir con las opciones de PdFOL", lambda: abrir_imprimir()),
+        ("perfiles", "Perfiles", "Guardar y usar tus ajustes", lambda: cinta_pagina("perfiles")),
+        ("apariencia", "Apariencia", "Claro, oscuro y colores", lambda: cinta_pagina("apariencia")),
+    ]
+
+    def usar_herramienta(f_):
+        app["vista_top"] = None
+        mostrar_inicio()
+        dibujar_superior()
+        f_()
+
+    for k_h, (cl_, tit_, desc_, f_) in enumerate(HERRAMIENTAS):
+        tarj_h = ctk.CTkFrame(herr_caja, fg_color=C["tarjeta"], corner_radius=12, border_width=1,
+                              border_color=C["borde"], width=250, height=74, cursor="hand2")
+        tarj_h.grid(row=1 + k_h // 3, column=k_h % 3, padx=6, pady=6, sticky="nsew")
+        tarj_h.grid_propagate(False)
+        ico_h = ctk.CTkLabel(tarj_h, text="", image=ctk.CTkImage(_icono(cl_, COLOR_ICONO.get(cl_, "#64748B"), 34),
+                                                                  size=(34, 34)))
+        ico_h.place(x=14, rely=0.5, anchor="w")
+        l1_h = ctk.CTkLabel(tarj_h, text=tit_, font=F(13, "bold"), text_color=C["texto"], anchor="w")
+        l1_h.place(x=60, y=14)
+        l2_h = ctk.CTkLabel(tarj_h, text=desc_, font=F(11), text_color=C["texto2"], anchor="w", wraplength=180,
+                            justify="left")
+        l2_h.place(x=60, y=36)
+        for w_ in (tarj_h, ico_h, l1_h, l2_h):
+            w_.bind("<Button-1>", lambda e, f__=f_: usar_herramienta(f__))
+            w_.bind("<Enter>", lambda e, t__=tarj_h: t__.configure(border_color=C["acento"]))
+            w_.bind("<Leave>", lambda e, t__=tarj_h: t__.configure(border_color=C["borde"]))
+
+    # ---------- v3.2: riel de herramientas a la derecha (iconos de color, como Adobe)
+    RIEL_DER = [("agregar", "Agregar texto", lambda: cinta_texto("Agregar"), "texto:Agregar"),
+                ("cambiar", "Cambiar texto del PDF", lambda: cinta_texto("Cambiar"), "texto:Cambiar"),
+                ("firmar", "Firmar y sellar", lambda: cinta_panel("firmar"), "firmar"),
+                ("resaltar", "Resaltar", lambda: alternar_resaltar(), "resaltar"),
+                None,
+                ("organizar", "Organizar y unir", lambda: cinta_pagina("organizar"), "p:organizar"),
+                ("comparar", "Comparar dos PDF", lambda: boton_comparar(), "comparar"),
+                ("documento", "Documento", lambda: cinta_pagina("documento"), "p:documento"),
+                None,
+                ("aplanar", "Aplanar", lambda: cinta_panel("aplanar"), "aplanar"),
+                ("foliar", "Foliar", lambda: cinta_panel("foliar"), "foliar"),
+                ("comprimir", "Comprimir", lambda: cinta_panel("comprimir"), "comprimir"),
+                ("imprimir", "Imprimir", lambda: abrir_imprimir(), None),
+                ("perfiles", "Perfiles", lambda: cinta_pagina("perfiles"), "p:perfiles"),
+                None,
+                ("apariencia", "Apariencia", lambda: cinta_pagina("apariencia"), "p:apariencia"),
+                ("herramientas", "Todas las herramientas", lambda: ir_top("herr"), "top:herr")]
+    riel_der = tk.Canvas(visor, width=44, highlightthickness=0, bd=0, cursor="hand2")
+    riel_der.grid(row=0, column=2, rowspan=2, sticky="ns")
+    iconos_riel = {}
+
+    def riel_elegido(clave_):
+        if not clave_:
+            return False
+        if clave_.startswith("p:"):
+            return app["pagina"] == clave_[2:]
+        if clave_.startswith("top:"):
+            return app["vista_top"] == clave_[4:]
+        if clave_.startswith("texto:"):
+            try:
+                return app.get("panel") == "texto" and v_tmodo.get() == clave_[6:]
+            except Exception:
+                return False
+        if clave_ == "resaltar":
+            return bool(vis["modo_res"])
+        if clave_ == "comparar":
+            return bool(vis["comp"])
+        return app["pagina"] == "visor" and app.get("panel") == clave_
+
+    def dibujar_riel_der(*_):
+        riel_der.delete("all")
+        riel_der.configure(bg=col("tarjeta"))
+        h_ = riel_der.winfo_height()
+        riel_der.create_line(0, 0, 0, h_, fill=col("borde"))
+        y = 10
+        app["riel_acc"], app["riel_ayuda"] = {}, {}
+        for k_, it_ in enumerate(RIEL_DER):
+            if it_ is None:
+                riel_der.create_line(10, y + 4, 34, y + 4, fill=col("borde"))
+                y += 10
+                continue
+            cl_, ayuda_, f_, est_ = it_
+            if riel_elegido(est_):
+                riel_der.create_rectangle(4, y, 40, y + 36, fill=col("lat_sel"), outline="")
+            kk = (cl_, modo_oscuro())
+            if kk not in iconos_riel:
+                iconos_riel[kk] = foto_tk(_icono(cl_, COLOR_ICONO.get(cl_, "#64748B"), 24))
+            riel_der.create_image(22, y + 18, image=iconos_riel[kk], tags=("item", f"r:{k_}"))
+            riel_der.create_rectangle(4, y, 40, y + 36, outline="", fill="", tags=("item", f"r:{k_}"))
+            app["riel_acc"][str(k_)] = f_
+            app["riel_ayuda"][str(k_)] = ayuda_
+            y += 40
+
+    def click_riel(ev):
+        ayuda_esconder()
+        for it in reversed(riel_der.find_overlapping(ev.x, ev.y, ev.x, ev.y)):
+            for t in riel_der.gettags(it):
+                if t.startswith("r:"):
+                    f_ = app["riel_acc"].get(t[2:])
+                    if f_:
+                        if app["vista_top"] and "herr" not in str(t):
+                            app["vista_top"] = None
+                            mostrar_inicio()
+                            dibujar_superior()
+                        f_()
+                    raiz.after(20, dibujar_riel_der)
+                    return
+
+    riel_der.bind("<Configure>", dibujar_riel_der)
+    riel_der.bind("<Button-1>", click_riel)
+    riel_der.bind("<Motion>", lambda e: ayuda_mover(e, riel_der, lambda: app.get("riel_ayuda", {})))
+    riel_der.bind("<Leave>", ayuda_esconder)
+
+    # ---------- v3.2: los mensajes aparecen un rato abajo a la izquierda de la hoja (sin barra fija)
+    aviso_lbl = ctk.CTkLabel(area_doc, text="", font=F(12), fg_color=C["tarjeta"], text_color=C["texto"],
+                             corner_radius=8, height=30, anchor="w", wraplength=700, justify="left")
+    aviso_job = {"id": None}
+
+    def mostrar_aviso(*_):
+        t_ = " ".join(v_estado.get().split())
+        if "«Analizar»" in t_ and app.get("panel") not in ("aplanar", "foliar", "comprimir"):
+            t_ = ""  # mensaje de Aplanar: solo con ese panel abierto
+        if aviso_job["id"]:
+            raiz.after_cancel(aviso_job["id"])
+            aviso_job["id"] = None
+        if not t_ or app["pagina"] != "visor":
+            aviso_lbl.place_forget()
+            return
+        aviso_lbl.configure(text=f"  {t_ if len(t_) <= 220 else t_[:218] + '…'}  ")
+        aviso_lbl.place(x=16, rely=1.0, y=-14, anchor="sw")
+        aviso_lbl.lift()
+        aviso_job["id"] = raiz.after(7000, lambda: aviso_lbl.place_forget())
+    v_estado.trace_add("write", mostrar_aviso)
+    aviso_lbl.bind("<Button-1>", lambda e: aviso_lbl.place_forget())
+
+    def menu_desde(widget_x, items_):
+        m_ = tk.Menu(raiz, tearoff=0, font=(FAM, 10))
+        for txt_, f_ in items_:
+            if txt_ == "-":
+                m_.add_separator()
+            else:
+                m_.add_command(label=txt_, command=f_)
+        try:
+            m_.tk_popup(widget_x[0], widget_x[1])
+        finally:
+            m_.grab_release()
+
+    def _pos_cinta(id_):
+        for it in cinta.find_all():
+            if "b:" + id_ in cinta.gettags(it):
+                x0, y0, x1, y1 = cinta.bbox(it)
+                return cinta.winfo_rootx() + x0, cinta.winfo_rooty() + y1 + 2
+        return raiz.winfo_pointerx(), raiz.winfo_pointery()
+
+    def menu_zoom():
+        v_ = vista_activa()
+        if not v_ or not v_.t:
+            return
+        menu_desde(_pos_cinta("zoom_menu"), [("Ajustar al ancho", lambda: zoom_cinta("Ajustar ancho")),
+                                             ("Página entera", lambda: zoom_cinta("Página entera")), ("-", None)] +
+                   [(f"{p_} %", lambda p__=p_: v_.poner_zoom(p__)) for p_ in (50, 75, 100, 125, 150, 200, 300, 400)])
+
+    def menu_ajuste():
+        menu_desde(_pos_cinta("ajuste"), [("Ajustar al ancho", lambda: zoom_cinta("Ajustar ancho")),
+                                          ("Página entera", lambda: zoom_cinta("Página entera"))])
+
+    def menu_modo():
+        menu_desde(_pos_cinta("modo"), [("Una página", lambda: modo_vista("una")),
+                                        ("Continua", lambda: modo_vista("continua")),
+                                        ("Dos páginas", lambda: modo_vista("dos")), ("-", None),
+                                        ("Hoja impresa", lambda: V["girar_prev"].set(not V["girar_prev"].get())),
+                                        ("Miniaturas", lambda: alternar_miniaturas()),
+                                        ("Marcadores", lambda: alternar_marcadores())])
 
     def pest_activa():
         i = vis["act"]
@@ -8585,6 +8881,9 @@ def iniciar_interfaz():
         return False
 
     def activar_pestana(i, mostrar_visor=True):
+        if app.get("vista_top") and mostrar_visor:  # v3.2: tocar un documento deja Inicio / Herramientas
+            app["vista_top"] = None
+            raiz.after_idle(lambda: (mostrar_inicio(), dibujar_superior()))
         if i == vis["act"]:
             if mostrar_visor and app["pagina"] != "visor":
                 mostrar_pagina("visor")
@@ -8649,7 +8948,7 @@ def iniciar_interfaz():
             guardar_estado(t_ant)
         cont_pest["n"] += 1
         t_ = {"id": cont_pest["n"], "ruta": r_, "nombre": os.path.basename(r_), "pag": 0, "frac": 0.0,
-              "org_y": 0, "zoom": almacen.datos.get("zoom_inicial", "Página entera"),
+              "org_y": 0, "zoom": almacen.datos.get("zoom_inicial", "Ajustar ancho"),
               "modo_vista": "continua", "giro": 0}
         recordar_reciente(r_)
         pest.append(t_)
@@ -10184,10 +10483,9 @@ def iniciar_interfaz():
     for k_r, f_r, tip_r in (("miniaturas", lambda: alternar_miniaturas(), "Miniaturas"),
                             ("marcadores", lambda: alternar_marcadores(), "Marcadores"),
                             ("buscar", lambda: enfocar_busqueda(), "Buscar (Ctrl+F)")):
-        riel_b[k_r] = ctk.CTkButton(riel, text="", width=36, height=36, corner_radius=8, image=_riel_img(k_r),
+        riel_b[k_r] = ctk.CTkButton(riel, text="", width=32, height=32, corner_radius=8, image=_riel_img(k_r),
                                     fg_color="transparent", hover_color=C["suave"], command=f_r)
-        riel_b[k_r].pack(padx=6, pady=(10 if k_r == "miniaturas" else 3, 0))
-        riel_b[k_r].bind("<Enter>", lambda e, t__=tip_r: v_estado.set(t__) if not app["ocupado"] else None)
+        riel_b[k_r].pack(padx=4, pady=(10 if k_r == "miniaturas" else 3, 0))
     ctk.CTkFrame(riel, width=1, fg_color=C["borde"], corner_radius=0).place(relx=1.0, x=-1, rely=0, relheight=1)
 
     # todo lo que depende del estado se revisa 4 veces por segundo (barato: solo si cambio algo)
@@ -10203,8 +10501,12 @@ def iniciar_interfaz():
                 v_tot_inf.set(f"de {n_}")
                 if raiz.focus_get() is not e_pag_inf._entry:
                     v_pag_inf.set(str(v_.pag + 1))
+                if raiz.focus_get() is not e_pag_bar._entry:
+                    v_pag_bar.set(str(v_.pag + 1))
+                v_tot_bar.set(f"/ {n_}")
                 pct_ = v_.pct_actual()
                 v_pct_inf.set(f"{pct_:.0f} %")
+                v_pct_bar.set(f"{pct_:.0f} %")
                 if not zoom_inf["arrastrando"]:
                     s_zoom.set(max(0.0, min(1.0, math.log(max(10, min(800, pct_)) / 10) / math.log(80))))
             else:
@@ -10217,7 +10519,8 @@ def iniciar_interfaz():
             hay_vis = any(w_.winfo_manager() for w_ in barra_vis.winfo_children())
             firma_ = (modo_, lado_, hay_vis, vis["comp"], app["pagina"], app.get("panel"), app["cinta"],
                       n_resaltes(), v_herr.get(), bool(vis["modo_res"]), id(t_), (t_ or {}).get("giro", 0),
-                      v_.zoom if v_ else None, bool(V["girar_prev"].get()), modo_oscuro(), len(pest), busca)
+                      v_.zoom if v_ else None, bool(V["girar_prev"].get()), modo_oscuro(), len(pest), busca,
+                      app.get("vista_top"), v_tot_bar.get(), v_pct_bar.get(), bool(app.get("completa")))
             if firma_ != estado_ui["firma"]:
                 estado_ui["firma"] = firma_
                 for m_, b_ in b_modos.items():
@@ -10235,6 +10538,8 @@ def iniciar_interfaz():
                         v__.bar.grid_remove()
                 mostrar_inicio()
                 dibujar_cinta()
+                dibujar_riel_der()
+                dibujar_superior()
         except Exception:
             pass
         raiz.after(250, revisar_ui)
