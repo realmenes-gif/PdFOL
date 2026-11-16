@@ -1,8 +1,9 @@
-## PdFOL v3.5 · by Meneses999
+## PdFOL v3.6 · by Meneses999
 
-- **Pasar páginas de un PDF a otro desde «Comparar»**: con los dos PDF lado a lado, cada hoja muestra su número arriba a la derecha (**⠿ Pág. 3**). Clic ahí la elige (Ctrl+clic / Shift para varias) y **arrastrándola** la llevás al otro PDF (se copia; con **Shift** se mueve) o a otro lugar del mismo PDF. También **Ctrl+C / Ctrl+X / Ctrl+V**, **Supr** y el **clic derecho** (copiar, cortar, pegar antes o después, quitar).
-- **Guardar** (Ctrl+S o «Guardar cambios»): «En este PDF» lo deja así, o «Como copia…» deja el original sin tocar.
-- Se quitó el panel «Otro PDF» de Organizar (v3.4).
-- Sigue la copia de imágenes al Explorador (v3.4) y girar páginas (v3.3).
+- **Comparar en miniaturas**: al comparar, los dos PDF se ven en **miniaturas del mismo tamaño, varias por fila**. Tomá una hoja de cualquier parte y **arrastrala al otro PDF** (se copia; con **Shift** se mueve) o a otro lugar del mismo. Una raya azul muestra dónde cae.
+- **Agrandar para ver cuál es**: **Ctrl+rueda** o los botones **− / +** agrandan o achican las miniaturas; **doble clic** en una hoja la muestra grande y otro doble clic vuelve a las miniaturas.
+- Siguen Ctrl+C / Ctrl+X / Ctrl+V, Supr y clic derecho. «Guardar» (Ctrl+S): en este PDF o como copia.
+- Al «Separar», cada PDF vuelve a como se veía antes.
+- Nuevo modo de vista **«Miniaturas»** también fuera de Comparar (menú de modos de la barra).
 
-**Descarga:** `PdFOL_v3.5_portable.zip` (sin instalar) o `PdFOL_v3.5_instalador.exe`.
+**Descarga:** `PdFOL_v3.6_portable.zip` (sin instalar) o `PdFOL_v3.6_instalador.exe`.

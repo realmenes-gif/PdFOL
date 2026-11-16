@@ -363,12 +363,18 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v3.5"
-VERSION_INTERNA = "3.5"
+VERSION = "v3.6"
+VERSION_INTERNA = "3.6"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v3.6", [
+        "Comparar abre los dos PDF en miniaturas (todas del mismo tamaño, varias por fila). Arrastrá una hoja de "
+        "cualquier parte al otro PDF. Ctrl+rueda o − / + las agranda o achica; doble clic ve una hoja grande y otro "
+        "doble clic vuelve. Al separar, cada PDF vuelve a como se veía.",
+        "Nuevo modo de vista «Miniaturas» (botón de modos de la barra).",
+    ]),
     ("v3.5", [
         "Pasar páginas de un PDF a otro desde «Comparar»: cada hoja muestra su número arriba a la derecha. Tomala de "
         "ahí y arrastrala al otro PDF (copia; con Shift la mueve) o a otro lugar del mismo. También Ctrl+C / Ctrl+X / "
@@ -3639,7 +3645,7 @@ def iniciar_interfaz():
                    ("girar_der", "Girar a la derecha: esta página, todo el documento o solo la vista", "girar_der",
                     None, lambda: menu_girar(90), False),
                    ("modo", "Vista: una página, continua o dos páginas",
-                    {"una": "una", "dos": "dos"}.get(modo_v, "continua"), None, lambda: menu_modo(), modo_v != "continua")],
+                    {"una": "una", "dos": "dos", "mosaico": "dos"}.get(modo_v, "continua"), None, lambda: menu_modo(), modo_v != "continua")],
                   [("resaltar", "Resaltar", "resaltar", None, lambda: alternar_resaltar(), bool(vis["modo_res"])),
                    ("cambiar", "Cambiar texto del PDF", "cambiar", None, lambda: cinta_texto("Cambiar"),
                     panel == "texto" and texto_modo == "Cambiar"),
@@ -6225,7 +6231,9 @@ def iniciar_interfaz():
     def menu_modo():
         menu_desde(_pos_cinta("modo"), [("Una página", lambda: modo_vista("una")),
                                         ("Continua", lambda: modo_vista("continua")),
-                                        ("Dos páginas", lambda: modo_vista("dos")), ("-", None),
+                                        ("Dos páginas", lambda: modo_vista("dos")),
+                                        ("Miniaturas (se agrandan con el zoom)", lambda: modo_vista("mosaico")),
+                                        ("-", None),
                                         ("Hoja impresa", lambda: V["girar_prev"].set(not V["girar_prev"].get())),
                                         ("Miniaturas", lambda: alternar_miniaturas()),
                                         ("Marcadores", lambda: alternar_marcadores())])
@@ -6443,11 +6451,12 @@ def iniciar_interfaz():
             parar = bool(V["girar_prev"].get())
             giro = t_.get("giro", 0)  # v3.0: girar la vista (no cambia el PDF)
             dos = t_.get("modo_vista") == "dos"
+            mosaico = t_.get("modo_vista") == "mosaico"  # v3.6: miniaturas en filas (se agrandan con el zoom)
             pend = giros_pendientes()  # v3.3: paginas giradas que se guardan en el PDF
             if giro or pend:
                 pags = [(r_, p_, (g_ + giro + pend.get((r_, p_), 0)) % 360) for r_, p_, g_ in pags]
             k_ = (W, H, parar, self.zoom, version_de(t_), len(pags), t_["id"], giro, dos, tuple(sorted(pend.items())),
-                  vis.get("med_ver", 0))
+                  vis.get("med_ver", 0), mosaico, getattr(self, "tam_mini", 0))
             if k_ == self.lay_k:
                 return self.lay
             if self.lay is not None and self.reanclar is None:
@@ -6461,12 +6470,17 @@ def iniciar_interfaz():
                 med = vis["med"][ruta]
                 w0, h0 = med[pag] if pag < len(med) else (612, 792)
                 vw, vh = dims_vista((w0, h0), rot, parar)
-                if self.zoom == "Ajustar ancho":
+                if mosaico and self.zoom not in ("Ajustar ancho", "Página entera") and not isinstance(self.zoom, (int, float)):
+                    tm_ = getattr(self, "tam_mini", px(170))  # todas del mismo tamano (planos y carta)
+                    z = min(tm_ / max(vw, 1), tm_ * 1.414 / max(vh, 1))
+                elif self.zoom == "Ajustar ancho":
                     z = disp_w / max(vw, 1)
                 elif self.zoom == "Página entera":
                     z = min(disp_w / max(vw, 1), disp_h / max(vh, 1))
-                else:
+                elif isinstance(self.zoom, (int, float)):
                     z = float(self.zoom) / 100 * PX_PT
+                else:
+                    z = disp_w / max(vw, 1)
                 dw, dh = max(8, int(round(vw * z))), max(8, int(round(vh * z)))
                 hs.append(dh)
                 ws.append(dw)
@@ -6474,6 +6488,16 @@ def iniciar_interfaz():
                 dims.append((w0, h0))
             if dos:
                 filas = [list(range(k_i, min(k_i + 2, len(ws)))) for k_i in range(0, len(ws), 2)]
+            elif mosaico:  # tantas por fila como entren
+                filas, fila_, ancho_ = [], [], 0
+                for k_i in range(len(ws)):
+                    if fila_ and ancho_ + ESPACIO_V + ws[k_i] > disp_w:
+                        filas.append(fila_)
+                        fila_, ancho_ = [], 0
+                    ancho_ += (ESPACIO_V if fila_ else 0) + ws[k_i]
+                    fila_.append(k_i)
+                if fila_:
+                    filas.append(fila_)
             else:
                 filas = [[k_i] for k_i in range(len(ws))]
             ys = [0] * len(ws)
@@ -6606,6 +6630,26 @@ def iniciar_interfaz():
             sincronizar(self)
 
         def zoom_paso(self, d, ancla=None):
+            if self.t and self.t.get("modo_vista") == "mosaico" and self.zoom == "Miniaturas" and self.lay:
+                # v3.6: miniaturas: se agrandan o achican todas por igual
+                tm_ = getattr(self, "tam_mini", px(170))
+                maximo = max(px(80), self.cv.winfo_width() - 60)
+                nuevo_ = max(px(70), min(maximo, tm_ * 1.25 if d > 0 else tm_ / 1.25))
+                if abs(nuevo_ - tm_) < 1:
+                    return
+                ax, ay = ancla if ancla else (self.cv.winfo_width() / 2, self.cv.winfo_height() / 2)
+                i = self.pagina_en(self.cv.canvasy(ay), self.cv.canvasx(ax))
+                self.tam_mini = nuevo_
+                self.reanclar = False
+                self.lay_k = None
+                lay = self.layout()
+                self.reanclar = None
+                if lay:
+                    self.cv.configure(scrollregion=(0, 0, lay["cw"], max(lay["total"], self.cv.winfo_height())))
+                    self._scroll_a(max(0, lay["ys"][i] + lay["hs"][i] / 2 - ay))
+                self.dibujar()
+                sincronizar(self)
+                return
             pct = self.pct_actual()
             if d > 0:
                 nuevo = next((p_ for p_ in PASOS_ZOOM if p_ > pct + 0.5), PASOS_ZOOM[-1])
@@ -6737,7 +6781,7 @@ def iniciar_interfaz():
                     sel_p = i in (org_de(t_).get("sel") or ())
                     if sel_p:
                         cv_.create_rectangle(x - 4, y - 4, x + w_ + 4, y + h_ + 4, outline=col("acento"), width=4)
-                    etq_ = f"⠿  Pág. {i + 1}"
+                    etq_ = f"⠿  Pág. {i + 1}" if w_ > px(150) else f"⠿ {i + 1}"
                     bw_ = px(22) + px(7) * len(etq_)
                     x0_ = x + w_ - 6 - bw_  # arriba a la derecha: casi nunca tapa el texto
                     cv_.create_rectangle(x0_, y + 6, x0_ + bw_, y + 6 + px(24), outline="",
@@ -6831,10 +6875,12 @@ def iniciar_interfaz():
             self._parr = None
             if vis["comp"] and self.t is not None:  # v3.5: comparando, el numero de la hoja la elige
                 i_ins = insignia_en(self, ev)
+                base_ = self._punto_pagina(self.cv.canvasx(ev.x), self.cv.canvasy(ev.y))
+                if i_ins is None and base_ and self.t.get("modo_vista") == "mosaico":
+                    i_ins = base_[0]  # v3.6: en miniaturas se toma la hoja de cualquier parte
                 if i_ins is not None:
                     pagina_press(self, i_ins, ev)
                     return
-                base_ = self._punto_pagina(self.cv.canvasx(ev.x), self.cv.canvasy(ev.y))
                 if base_:
                     vis["pag_clic"] = (self.t["id"], base_[0])
                     if org.get("sel") and not (ev.state & 0x5):
@@ -7020,6 +7066,9 @@ def iniciar_interfaz():
 
         def _doble_clic(self, ev, renglon=False):
             """Doble clic: la palabra; triple clic: el renglon (o cierra la polilinea)."""
+            if vis["comp"] and self.t and self.t.get("modo_vista") == "mosaico" and not renglon:
+                agrandar_hoja(self, ev)  # v3.6: miniatura <-> hoja grande
+                return
             if app.get("panel") == "texto" and not renglon and edicion_doble(self, ev):
                 return
             if getattr(self, "_poly", None):
@@ -7564,9 +7613,16 @@ def iniciar_interfaz():
         cx_ = v_.cv.canvasx(xr - v_.cv.winfo_rootx())
         cy_ = v_.cv.canvasy(yr - v_.cv.winfo_rooty())
         i = v_.pagina_en(cy_, cx_)
-        if cy_ > lay["ys"][i] + lay["hs"][i] / 2:
+        if fila_multiple(lay, i):  # v3.6: miniaturas: antes o despues segun el lado
+            if cx_ > lay["xs"][i] + lay["ws"][i] / 2:
+                i += 1
+        elif cy_ > lay["ys"][i] + lay["hs"][i] / 2:
             i += 1
         return max(0, min(len(lay["pags"]), i))
+
+    def fila_multiple(lay, i):
+        ys = lay["ys"]
+        return (i + 1 < len(ys) and ys[i + 1] == ys[i]) or (i > 0 and ys[i - 1] == ys[i])
 
     def guia_paginas(v_, pos):
         for w_ in vistas:
@@ -7576,11 +7632,38 @@ def iniciar_interfaz():
         lay = v_.lay
         n = len(lay["pags"])
         k_ = min(pos, n - 1)
+        if fila_multiple(lay, k_) or (pos > 0 and fila_multiple(lay, pos - 1)):  # v3.6: raya vertical
+            if pos < n and (pos == 0 or lay["ys"][pos - 1] == lay["ys"][pos]):
+                xl, y0, y1 = lay["xs"][pos] - ESPACIO_V / 2, lay["ys"][pos], lay["ys"][pos] + lay["hs"][pos]
+            else:
+                j_ = pos - 1
+                xl, y0, y1 = lay["xs"][j_] + lay["ws"][j_] + ESPACIO_V / 2, lay["ys"][j_], lay["ys"][j_] + lay["hs"][j_]
+            v_.cv.create_line(xl, y0 - 6, xl, y1 + 6, fill=col("acento"), width=6, capstyle="round", tags="guia_p")
+            return
         yl = lay["ys"][k_] - ESPACIO_V / 2 if pos < n else lay["ys"][n - 1] + lay["hs"][n - 1] + ESPACIO_V / 2
         x0, x1 = lay["xs"][k_] - 10, lay["xs"][k_] + lay["ws"][k_] + 10
         v_.cv.create_line(x0, yl, x1, yl, fill=col("acento"), width=5, capstyle="round", tags="guia_p")
         v_.cv.create_text(x0 + 8, yl - 12, anchor="w", text=f"aquí  (antes de la {pos + 1})" if pos < n else "al final",
                           fill=col("acento"), font=(FAM, 10, "bold"), tags="guia_p")
+
+    def agrandar_hoja(v_, ev):
+        """Doble clic en una miniatura: se ve grande (entera); otro doble clic vuelve a las miniaturas."""
+        base_ = v_._punto_pagina(v_.cv.canvasx(ev.x), v_.cv.canvasy(ev.y))
+        i = base_[0] if base_ else v_.pag
+        v_._parr = None
+        previo = getattr(v_, "_zoom_mini", None)
+        if previo is not None:
+            v_._zoom_mini = None
+            v_.zoom = previo
+        else:
+            v_._zoom_mini = v_.zoom
+            v_.zoom = "Página entera"
+        v_.v_zoom.set(f"{v_.zoom:g} %" if isinstance(v_.zoom, float) else v_.zoom)
+        v_.reanclar = False
+        v_.lay_k = None
+        v_.ir(i)
+        v_estado.set("Doble clic de nuevo para volver a las miniaturas." if v_._zoom_mini is not None else
+                     "Miniaturas · Ctrl+rueda o − / + las agranda o achica · doble clic agranda una hoja.")
 
     def pagina_motion(v_, ev):
         a = v_._parr
@@ -10013,9 +10096,21 @@ def iniciar_interfaz():
             activar_pestana(i, mostrar_visor=False)
         for v_ in vistas:
             v_.poner(v_.t)
+            if v_.t is not None and v_.t.get("modo_vista") != "mosaico":  # v3.6: empieza en miniaturas
+                v_.t["vista_previa"] = (v_.t.get("modo_vista", "continua"), v_.zoom)
+                v_.t["modo_vista"] = "mosaico"
+                v_.zoom = "Miniaturas"
+                v_.v_zoom.set("Miniaturas")
+                v_._zoom_mini = None
+                v_.lay = v_.lay_k = None
+                v_._pendiente_pos = (0, 0.0)
+        if "juntas_previo" not in vis:  # cada PDF se recorre por su cuenta (para pasar hojas de uno a otro)
+            vis["juntas_previo"] = v_juntas.get()
+            v_juntas.set(False)
         dibujar_pestanas()
         dibujar_lateral()
-        v_estado.set("Comparando: el lado enmarcado en azul es el activo (miniaturas y herramientas trabajan sobre él).")
+        v_estado.set("Comparando en miniaturas: arrastrá una hoja al otro PDF (copia; con Shift la mueve) · "
+                     "Ctrl+rueda o − / + las agranda · doble clic ve una hoja grande.")
         raiz.after(40, visor_dibujar)
 
     def separar(quedar=None):
@@ -10024,6 +10119,17 @@ def iniciar_interfaz():
         quedar = quedar or vista_activa()
         t_q = quedar.t
         vis["comp"] = app["comparando"] = False
+        for v_ in vistas:  # v3.6: cada PDF vuelve a como se veia antes de comparar
+            t_v = v_.t
+            if t_v is not None and t_v.get("vista_previa"):
+                t_v["modo_vista"], z_v = t_v.pop("vista_previa")
+                t_v["zoom"] = z_v if z_v != "Miniaturas" else "Ajustar ancho"
+                if v_ is quedar:
+                    v_.zoom = t_v["zoom"]
+                    v_.v_zoom.set(f"{v_.zoom:g} %" if isinstance(v_.zoom, float) else v_.zoom)
+            v_._zoom_mini = None
+        if "juntas_previo" in vis:
+            v_juntas.set(vis.pop("juntas_previo"))
         vistas[1].marco.grid_forget()
         area_doc.grid_columnconfigure(1, weight=0, uniform="")
         vistas[0].marco.grid(row=0, column=0, sticky="nsew", padx=0)
