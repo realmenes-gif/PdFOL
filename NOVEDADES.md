@@ -1,7 +1,8 @@
-## PdFOL v3.4 · by Meneses999
+## PdFOL v3.5 · by Meneses999
 
-- **Organizar varios PDF a la vez**: en Organizar, el botón **«Otro PDF»** muestra a la derecha otro documento abierto (otra pestaña) en miniatura. Pasá páginas de uno a otro **arrastrando**, con **«← Copiar»**, **«Copiar →»** o **«Mover →»**, o con **Ctrl+C / Ctrl+V** en cualquiera de los dos lados. El botón **⇄** cambia cuál estás editando (para guardarlo).
-- **Copiar imágenes del PDF**: en el visor, hacé clic sobre una foto o imagen (Ctrl+clic para varias) y presioná **Ctrl+C**. Se pega **como archivo en una carpeta del Explorador de Windows**, o como imagen en Word, WhatsApp, Paint… Con clic derecho: «Guardar imagen como…» y «Copiar todas las imágenes de esta página». Sale en su calidad original.
-- Sigue todo lo de la v3.3 (girar páginas y documento desde el visor, íconos nítidos).
+- **Pasar páginas de un PDF a otro desde «Comparar»**: con los dos PDF lado a lado, cada hoja muestra su número arriba a la derecha (**⠿ Pág. 3**). Clic ahí la elige (Ctrl+clic / Shift para varias) y **arrastrándola** la llevás al otro PDF (se copia; con **Shift** se mueve) o a otro lugar del mismo PDF. También **Ctrl+C / Ctrl+X / Ctrl+V**, **Supr** y el **clic derecho** (copiar, cortar, pegar antes o después, quitar).
+- **Guardar** (Ctrl+S o «Guardar cambios»): «En este PDF» lo deja así, o «Como copia…» deja el original sin tocar.
+- Se quitó el panel «Otro PDF» de Organizar (v3.4).
+- Sigue la copia de imágenes al Explorador (v3.4) y girar páginas (v3.3).
 
-**Descarga:** `PdFOL_v3.4_portable.zip` (sin instalar) o `PdFOL_v3.4_instalador.exe`.
+**Descarga:** `PdFOL_v3.5_portable.zip` (sin instalar) o `PdFOL_v3.5_instalador.exe`.

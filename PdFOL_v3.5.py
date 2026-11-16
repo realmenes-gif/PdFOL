@@ -363,15 +363,19 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v3.4"
-VERSION_INTERNA = "3.4"
+VERSION = "v3.5"
+VERSION_INTERNA = "3.5"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v3.5", [
+        "Pasar páginas de un PDF a otro desde «Comparar»: cada hoja muestra su número arriba a la derecha. Tomala de "
+        "ahí y arrastrala al otro PDF (copia; con Shift la mueve) o a otro lugar del mismo. También Ctrl+C / Ctrl+X / "
+        "Ctrl+V, Supr y clic derecho. «Guardar» (Ctrl+S) deja el PDF así o lo guarda como copia.",
+        "Se quitó el panel «Otro PDF» de Organizar.",
+    ]),
     ("v3.4", [
-        "Organizar varios PDF a la vez: con «Otro PDF» se ve a la derecha otro documento abierto. Pasá páginas de "
-        "uno a otro arrastrando, con «← Copiar» / «Copiar →» / «Mover →» o con Ctrl+C y Ctrl+V. ⇄ cambia cuál editás.",
         "Copiar imágenes del PDF: hacé clic en una foto o imagen del visor (Ctrl+clic para varias) y Ctrl+C. Se pega "
         "como archivo en una carpeta del Explorador, o como imagen en Word, WhatsApp, Paint… Clic derecho: guardar "
         "imagen o copiar todas las de la página.",
@@ -3612,7 +3616,8 @@ def iniciar_interfaz():
         mano_ = en_visor and v_herr.get() == "Mano" and not vis["modo_res"] and not panel
         n_ = n_resaltes()
         izq = [[("guardar", "Guardar los cambios en el PDF (Ctrl+S)" + (f" · {n_} sin guardar" if n_ else ""),
-                 "disco", None, lambda: guardar_resaltados_dialogo() if n_resaltes() else
+                 "disco", None, lambda: guardar_resaltados_dialogo() if (n_resaltes() or (
+                     pest_activa() and tiene_organizado(pest_activa()))) else
                  v_estado.set("No hay cambios sin guardar."), False),
                 ("abrir", "Abrir PDF (Ctrl+O)", "carpeta", None, lambda: abrir_archivos(), False),
                 ("imprimir", "Imprimir", "impresora", None, lambda: abrir_imprimir(), False),
@@ -4518,6 +4523,12 @@ def iniciar_interfaz():
         abiertos = {}
         while True:
             clave, ruta_f, pag, ancho = org_pedidos.get()
+            if clave == "cerrar":  # v3.5: soltar el archivo (se va a reemplazar)
+                try:
+                    abiertos.pop(ruta_f).close()
+                except Exception:
+                    pass
+                continue
             try:
                 d = abiertos.get(ruta_f)
                 if d is None:
@@ -4549,8 +4560,7 @@ def iniciar_interfaz():
     def sep(f_):
         ctk.CTkFrame(f_, width=1, height=40, fg_color=C["borde"]).pack(side="left", padx=3)
 
-    BOTONES_ORG = (("abrir", "Abrir PDF", "abrir", "#2563EB"), ("unir", "Unir PDF", "unir", "#2563EB"),
-                   ("varios", "Otro PDF", "comparar", "#0D9488"), ("|",),
+    BOTONES_ORG = (("abrir", "Abrir PDF", "abrir", "#2563EB"), ("unir", "Unir PDF", "unir", "#2563EB"), ("|",),
                    ("ver", "Ver página", "ver", "#06B6D4"), ("visor_v", "En el visor", "visor", "#06B6D4"), ("|",),
                    ("rot_i", "Girar izq.", "girar_i", "#8B5CF6"), ("rot_d", "Girar der.", "girar_d", "#8B5CF6"),
                    ("|",),
@@ -4657,8 +4667,6 @@ def iniciar_interfaz():
         else:
             org_dibujar(True)
         cv.focus_set()
-        if o2["vis"]:
-            raiz.after(30, o2_dibujar)
 
     def org_guardar_paso():
         org["pila"].append((list(org["orden"]), set(org["sel"])))
@@ -4861,11 +4869,6 @@ def iniciar_interfaz():
         while len(org["lru"]) > ORG_CACHE:
             org["cache"].pop(org["lru"].pop(0), None)
         org_info()
-        try:
-            if o2["vis"]:
-                raiz.after_idle(o2_dibujar)
-        except NameError:
-            pass
 
     def org_cambio():
         """El orden de la pestana activa cambio: el visor y las miniaturas lo muestran."""
@@ -4877,6 +4880,10 @@ def iniciar_interfaz():
             visor_pedir_dibujo()
             mini_pedir_dibujo()
         marca = tiene_organizado(pest_activa()) if pest_activa() else None
+        try:
+            refrescar_boton_guardar()
+        except NameError:
+            pass
         if marca != vis.get("marca_org"):
             vis["marca_org"] = marca
             raiz.after_idle(dibujar_pestanas)
@@ -5029,10 +5036,6 @@ def iniciar_interfaz():
             return
         a["activo"] = True
         cv.configure(cursor="fleur")
-        if o2["vis"] and _guia_o2(ev.x_root, ev.y_root) is not None:  # v3.4: soltar en el otro PDF
-            cv.delete("guia")
-            return
-        cv2.delete("guia")
         h = org_hueco(ev)
         geo = org["geo"]
         tam, cw, ch, cols, mx = geo
@@ -5062,11 +5065,6 @@ def iniciar_interfaz():
             org_dibujar()
             return
         if a["activo"]:
-            h2 = _guia_o2(ev.x_root, ev.y_root) if o2["vis"] else None
-            cv2.delete("guia")
-            if h2 is not None:  # v3.4: soltado en el otro PDF: se copian ahi
-                o2_llevar(False, pos=h2)
-                return
             h = org_hueco(ev)
             antes = sum(1 for k_ in range(h) if k_ not in org["sel"])
             org_mover_a(antes)
@@ -5413,16 +5411,10 @@ def iniciar_interfaz():
                              "compresion": compresion, "folio": folio})
 
     def org_recibir():
-        hubo = hubo2 = False
+        hubo = False
         try:
             while True:
                 k, v = org_cola.get_nowait()
-                if k[0] == "o2":  # v3.4: miniatura del otro PDF (panel de la derecha)
-                    o2["pend"].discard(k)
-                    if v is not None and k[4] == o2["gen"]:
-                        o2["cache"][k] = v
-                        hubo2 = True
-                    continue
                 if len(k) == 4:  # miniatura
                     org["pend"].discard(k)
                     if v is not None and k[0] == org["gen"]:
@@ -5509,8 +5501,6 @@ def iniciar_interfaz():
             pass
         if hubo:
             org_dibujar()
-        elif hubo2:
-            o2_dibujar()
         raiz.after(150, org_recibir)
 
     def org_dialogo(rutas, con_posicion, al_aceptar):
@@ -5743,7 +5733,6 @@ def iniciar_interfaz():
                        ("Elegir todas", "Ctrl+A"), ("Mover páginas", "arrastrar · Ctrl+flechas"),
                        ("Copiar · Cortar · Pegar", "Ctrl+C · Ctrl+X · Ctrl+V"), ("Eliminar", "Supr"),
                        ("Deshacer · Rehacer", "Ctrl+Z · Ctrl+Y"), ("Ver la página", "doble clic · Enter"),
-                       ("Pasar páginas a otro PDF", "«Otro PDF» · arrastrar"),
                        ("Todas las opciones", "clic derecho")):
             m_.add_command(label=t_, acelerador=a_)
         b_ = b_org["ayuda"]
@@ -5762,427 +5751,6 @@ def iniciar_interfaz():
                    ("deshacer", org_deshacer), ("rehacer", org_rehacer), ("todo", org_original),
                    ("limpiar", org_limpiar), ("ayuda", lambda: ayuda_organizar())):
         b_org[k_].configure(command=f_)
-    # ================= v3.4: ORGANIZAR VARIOS PDF A LA VEZ
-    # A la derecha de Organizar se ve otro PDF abierto (otra pestana) en miniatura. Las paginas se pasan de uno
-    # a otro arrastrando, con los botones de abajo o con Ctrl+C / Ctrl+V (el copiado sirve en los dos lados).
-    o2 = {"vis": False, "tab": None, "sel": set(), "ancla": None, "cache": {}, "pend": set(), "fotos": {},
-          "geo": None, "arr": None, "gen": 0}
-    O2_TAM = 92
-    o2_marco = ctk.CTkFrame(marco_cv, fg_color=C["fondo"], corner_radius=10, width=px(330))
-    o2_marco.grid_propagate(False)
-    o2_marco.grid_columnconfigure(0, weight=1)
-    o2_marco.grid_rowconfigure(1, weight=1)
-    o2_cab = ctk.CTkFrame(o2_marco, fg_color="transparent")
-    o2_cab.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(8, 4))
-    v_o2 = tk.StringVar(value="")
-    o2_menu = ctk.CTkOptionMenu(o2_cab, variable=v_o2, values=[""], font=F(12), dropdown_font=F(12), height=30,
-                                fg_color=C["tarjeta"], button_color=C["suave_h"], button_hover_color=C["borde"],
-                                text_color=C["texto"], dynamic_resizing=False,
-                                command=lambda _v: o2_elegir_nombre(_v))
-    o2_menu.pack(side="left", fill="x", expand=True)
-    o2_b_cambiar = ctk.CTkButton(o2_cab, text="⇄", width=34, height=30, font=F(14, "bold"), corner_radius=8,
-                                 fg_color=C["suave"], hover_color=C["suave_h"], text_color=C["texto"],
-                                 command=lambda: o2_intercambiar())
-    o2_b_cambiar.pack(side="left", padx=(6, 0))
-    cv2 = tk.Canvas(o2_marco, highlightthickness=0, bd=0, takefocus=1)
-    cv2.grid(row=1, column=0, sticky="nsew", padx=(6, 0))
-    sb_o2 = ctk.CTkScrollbar(o2_marco, command=lambda *a: (cv2.yview(*a), o2_dibujar()),
-                             button_color=C["suave_h"], button_hover_color=C["borde"])
-    sb_o2.grid(row=1, column=1, sticky="ns", padx=(0, 2))
-    cv2.configure(yscrollcommand=sb_o2.set)
-    o2_pie = ctk.CTkFrame(o2_marco, fg_color="transparent")
-    o2_pie.grid(row=2, column=0, columnspan=2, sticky="ew", padx=8, pady=(4, 8))
-    o2_pie.grid_columnconfigure((0, 1), weight=1)
-
-    def _b_o2(txt_, cmd_, fila, colm, span=1):
-        b_ = ctk.CTkButton(o2_pie, text=txt_, height=30, font=F(11), corner_radius=8, fg_color=C["suave"],
-                           hover_color=C["suave_h"], text_color=C["texto"], command=cmd_)
-        b_.grid(row=fila, column=colm, columnspan=span, sticky="ew", padx=2, pady=2)
-        return b_
-    o2_b_traer = _b_o2("← Copiar al de la izquierda", lambda: o2_traer(), 0, 0, 2)
-    o2_b_llevar = _b_o2("Copiar →", lambda: o2_llevar(False), 1, 0)
-    o2_b_mover = _b_o2("Mover →", lambda: o2_llevar(True), 1, 1)
-    o2_info = ctk.CTkLabel(o2_pie, text="", font=F(10), text_color=C["texto2"], justify="left", anchor="w",
-                           wraplength=px(300))
-    o2_info.grid(row=2, column=0, columnspan=2, sticky="ew", padx=2)
-
-    def o2_otras():
-        act = pest_activa()
-        return [t_ for t_ in pest if t_ is not act]
-
-    def o2_pest():
-        otras = o2_otras()
-        t_ = next((x for x in otras if x["id"] == o2["tab"]), None)
-        if t_ is None and otras:
-            t_ = otras[-1]
-            o2["tab"], o2["sel"], o2["ancla"] = t_["id"], set(), None
-        return t_
-
-    def o2_org(t_):
-        """El orden de paginas de la otra pestana (se arma si todavia no tiene)."""
-        o_ = t_.get("org")
-        if not o_ or not o_.get("orden"):
-            try:
-                n_ = contar_paginas(t_["ruta"])
-            except Exception:
-                n_ = 0
-            orden_ = [(0, k, 0) for k in range(n_)]
-            o_ = {"fuentes": [t_["ruta"]], "orden": orden_, "sel": set(), "ancla": None, "pila": [], "rehacer": [],
-                  "ruta": t_["ruta"], "original": list(orden_), "origen": {}}
-            t_["org"] = o_
-        o_.setdefault("pila", [])
-        return o_
-
-    def o2_nombres():
-        vistos, out = {}, []
-        for t_ in o2_otras():
-            n_ = t_["nombre"]
-            vistos[n_] = vistos.get(n_, 0) + 1
-            out.append((n_ if vistos[n_] == 1 else f"{n_} ({vistos[n_]})", t_))
-        return out
-
-    def o2_elegir_nombre(nombre):
-        for n_, t_ in o2_nombres():
-            if n_ == nombre:
-                o2["tab"], o2["sel"], o2["ancla"] = t_["id"], set(), None
-                cv2.yview_moveto(0)
-                break
-        o2_dibujar()
-
-    def o2_mostrar(si=None):
-        o2["vis"] = (not o2["vis"]) if si is None else si
-        if o2["vis"]:
-            if not o2_otras():
-                o2["vis"] = False
-                if messagebox.askyesno(NOMBRE, "Para pasar páginas entre documentos necesitás otro PDF abierto.\n\n"
-                                               "¿Querés abrir otro PDF ahora?"):
-                    r_ = filedialog.askopenfilename(title="Elegí el otro PDF", filetypes=[("PDF", "*.pdf")])
-                    if r_:
-                        act_ = vis["act"]
-                        if abrir_pestana(r_, mostrar_visor=False):
-                            nuevo_ = pest_activa()
-                            activar_pestana(act_, mostrar_visor=False)
-                            o2["tab"] = nuevo_["id"] if nuevo_ else None
-                            o2["vis"] = True
-                if not o2["vis"]:
-                    return
-            o2_marco.grid(row=0, column=2, sticky="ns", padx=(4, 6), pady=6)
-        else:
-            o2_marco.grid_remove()
-        b_org["varios"].configure(fg_color=C["suave"] if o2["vis"] else "transparent")
-        raiz.after_idle(org_dibujar)
-        raiz.after(40, o2_dibujar)
-
-    def o2_geo():
-        cw, ch = O2_TAM + 20, O2_TAM + 34
-        ancho = max(cv2.winfo_width(), cw)
-        cols = max(1, (ancho - 4) // cw)
-        mx = max(2, (ancho - cols * cw) // 2)
-        return O2_TAM, cw, ch, cols, mx
-
-    def o2_mini(ruta, pag, rot, tam):
-        k = ("o2", ruta, pag, tam, o2["gen"])
-        img = o2["cache"].get(k)
-        if img is None:
-            if k not in o2["pend"]:
-                o2["pend"].add(k)
-                org_pedidos.put((k, ruta, pag, tam))
-            return None
-        return img.rotate(-rot, expand=True) if rot else img
-
-    def o2_dibujar(*_):
-        if not o2["vis"] or app["pagina"] != "organizar":
-            return
-        t_ = o2_pest()
-        cv2.configure(bg=col("fondo"))
-        cv2.delete("all")
-        previas, o2["fotos"] = o2["fotos"], {}
-        nombres = o2_nombres()
-        o2_menu.configure(values=[n_ for n_, _ in nombres] or [""])
-        if t_ is None:
-            v_o2.set("")
-            cv2.create_text(max(cv2.winfo_width(), 200) // 2, 80, text="No hay otro PDF abierto.",
-                            fill=col("texto2"), font=(FAM, 11))
-            return
-        v_o2.set(next((n_ for n_, x in nombres if x is t_), t_["nombre"]))
-        o_ = o2_org(t_)
-        geo = o2_geo()
-        o2["geo"] = geo
-        tam, cw, ch, cols, mx = geo
-        n = len(o_["orden"])
-        filas = (n + cols - 1) // cols
-        cv2.configure(scrollregion=(0, 0, cv2.winfo_width(), max(filas * ch + 12, cv2.winfo_height())))
-        y0 = cv2.canvasy(0)
-        f0, f1 = max(0, int(y0 // ch) - 1), min(filas, int((y0 + cv2.winfo_height()) // ch) + 2)
-        fs = o_["fuentes"]
-        for i in range(f0 * cols, min(n, f1 * cols)):
-            fid, pag, rot = o_["orden"][i]
-            x, y = mx + (i % cols) * cw, 6 + (i // cols) * ch
-            sel = i in o2["sel"]
-            cv2.create_rectangle(x + 2, y, x + cw - 4, y + ch - 4, outline=col("acento") if sel else "",
-                                 fill=col("suave") if sel else "", width=2)
-            img = o2_mini(fs[fid], pag, rot, tam)
-            cx, cy = x + (cw - 2) // 2, y + 5 + tam // 2
-            if img is None:
-                cv2.create_rectangle(cx - tam * 0.35, cy - tam * 0.48, cx + tam * 0.35, cy + tam * 0.48,
-                                     outline=col("borde"), fill=col("campo"))
-            else:
-                kf = (fs[fid], pag, rot, tam)
-                ft = previas.get(kf) or o2["fotos"].get(kf) or foto_tk(img)
-                o2["fotos"][kf] = ft
-                cv2.create_image(cx, cy, image=ft)
-                w_, h_ = img.size
-                cv2.create_rectangle(cx - w_ // 2, cy - h_ // 2, cx + w_ // 2, cy + h_ // 2, outline=col("borde"))
-            cv2.create_text(cx, y + tam + 16, text=str(i + 1), fill=col("acento") if sel else col("texto2"),
-                            font=(FAM, 9, "bold" if sel else "normal"))
-        while len(o2["cache"]) > 400:
-            o2["cache"].pop(next(iter(o2["cache"])))
-        ns_, nm_ = len(o2["sel"]), len(org["sel"])
-        o2_b_traer.configure(state="normal" if ns_ and org["orden"] else "disabled",
-                             text=f"← Copiar {ns_ or ''} al de la izquierda".replace("  ", " "))
-        o2_b_llevar.configure(state="normal" if nm_ else "disabled")
-        o2_b_mover.configure(state="normal" if nm_ and nm_ < len(org["orden"]) else "disabled")
-        o2_info.configure(text=f"{n} páginas · arrastrá de un lado al otro, o Ctrl+C / Ctrl+V."
-                          + ("  Cambios sin guardar: tocá ⇄ para guardarlo." if tiene_organizado(t_) else ""))
-
-    def o2_indice(x, y, hueco=False):
-        geo = o2["geo"]
-        t_ = o2_pest()
-        if not geo or not t_:
-            return None
-        tam, cw, ch, cols, mx = geo
-        n = len(o2_org(t_)["orden"])
-        f_ = max(0, int((y - 6) // ch))
-        if hueco:
-            c_ = max(0, min(cols, int(round((x - mx) / cw))))
-            return max(0, min(n, f_ * cols + c_))
-        c_ = int((x - mx) // cw)
-        if c_ < 0 or c_ >= cols:
-            return None
-        i = f_ * cols + c_
-        return i if i < n else None
-
-    def o2_cambiar_orden(t_, nuevo, sel_nueva):
-        o_ = o2_org(t_)
-        o_["pila"].append((list(o_["orden"]), set(o_.get("sel") or set())))
-        del o_["pila"][:-60]
-        o_["rehacer"] = []
-        o_["orden"] = nuevo
-        o2["sel"] = set(sel_nueva)
-        t_["orgver"] = max(t_.get("orgver", 0), vis["orgver"]) + 1
-        raiz.after_idle(dibujar_pestanas)
-        o2_dibujar()
-
-    def o2_insertar(t_, lista, pos=None):
-        """Mete en la otra pestana las paginas [(ruta, pag, giro)] en 'pos' (por defecto, tras lo elegido)."""
-        o_ = o2_org(t_)
-        if pos is None:
-            pos = (max(o2["sel"]) + 1) if o2["sel"] else len(o_["orden"])
-        fs = o_["fuentes"]
-        nuevos = []
-        for ruta_, p_, r_ in lista:
-            if ruta_ not in fs:
-                fs.append(ruta_)
-            nuevos.append((fs.index(ruta_), p_, r_))
-        orden_ = list(o_["orden"])
-        orden_[pos:pos] = nuevos
-        o2_cambiar_orden(t_, orden_, range(pos, pos + len(nuevos)))
-        return len(nuevos)
-
-    def org_insertar(lista, pos=None):
-        """Mete en el documento de la izquierda las paginas [(ruta, pag, giro)]."""
-        if not lista:
-            return 0
-        org_guardar_paso()
-        if pos is None:
-            pos = (max(org["sel"]) + 1) if org["sel"] else len(org["orden"])
-        nuevos = []
-        for ruta_, p_, r_ in lista:
-            if ruta_ not in org["fuentes"]:
-                org["fuentes"].append(ruta_)
-            nuevos.append((org["fuentes"].index(ruta_), p_, r_))
-        org["orden"][pos:pos] = nuevos
-        org["sel"] = set(range(pos, pos + len(nuevos)))
-        org_dibujar()
-        org_ver_indice(pos)
-        return len(nuevos)
-
-    def o2_lista_sel():
-        t_ = o2_pest()
-        if not t_:
-            return []
-        o_ = o2_org(t_)
-        return [(o_["fuentes"][f_], p_, r_) for f_, p_, r_ in (o_["orden"][i] for i in sorted(o2["sel"])
-                                                               if i < len(o_["orden"]))]
-
-    def org_lista_sel():
-        return [(org["fuentes"][f_], p_, r_) for f_, p_, r_ in (org["orden"][i] for i in sorted(org["sel"]))]
-
-    def o2_traer(pos=None):
-        n_ = org_insertar(o2_lista_sel(), pos)
-        if n_:
-            v_estado.set(f"{n_} página(s) copiadas desde «{o2_pest()['nombre']}». Guardá para que quede así.")
-        o2_dibujar()
-
-    def o2_llevar(mover=False, pos=None):
-        t_ = o2_pest()
-        lista = org_lista_sel()
-        if not t_ or not lista:
-            return
-        if mover and len(lista) >= len(org["orden"]):
-            messagebox.showinfo(NOMBRE, "El PDF tiene que quedar con al menos una página.")
-            return
-        n_ = o2_insertar(t_, lista, pos)
-        if mover:
-            org_eliminar()
-        v_estado.set(f"{n_} página(s) {'movidas' if mover else 'copiadas'} a «{t_['nombre']}». "
-                     "Tocá ⇄ para verlo y guardarlo.")
-
-    def o2_intercambiar():
-        t_ = o2_pest()
-        if not t_:
-            return
-        ant = pest_activa()
-        activar_pestana(pest.index(t_), mostrar_visor=False)
-        if ant is not None and pest_activa() is t_:
-            o2["tab"], o2["sel"], o2["ancla"] = ant["id"], set(), None
-            o2["gen"] += 1
-            o2_dibujar()
-
-    def o2_press(ev):
-        cv2.focus_set()
-        x, y = cv2.canvasx(ev.x), cv2.canvasy(ev.y)
-        i = o2_indice(x, y)
-        ctrl, shift = bool(ev.state & 0x4), bool(ev.state & 0x1)
-        if i is None:
-            o2["sel"] = set()
-            o2["arr"] = None
-            o2_dibujar()
-            return
-        if shift and o2["ancla"] is not None:
-            a, b = sorted((o2["ancla"], i))
-            o2["sel"] = set(range(a, b + 1))
-        elif ctrl:
-            o2["sel"] ^= {i}
-            o2["ancla"] = i
-        elif i not in o2["sel"]:
-            o2["sel"], o2["ancla"] = {i}, i
-        o2["arr"] = {"x": ev.x_root, "y": ev.y_root, "activo": False}
-        o2_dibujar()
-
-    def _guia_org(xr, yr):
-        """Raya que muestra donde caen las paginas en el documento de la izquierda (o None si no esta encima)."""
-        cv.delete("guia")
-        if not (cv.winfo_rootx() <= xr < cv.winfo_rootx() + cv.winfo_width() and
-                cv.winfo_rooty() <= yr < cv.winfo_rooty() + cv.winfo_height()) or not org["geo"]:
-            return None
-        ev_ = types.SimpleNamespace(x=xr - cv.winfo_rootx(), y=yr - cv.winfo_rooty())
-        h = org_hueco(ev_)
-        tam, cw, ch, cols, mx = org["geo"]
-        x = mx + (h % cols) * cw if h % cols or h == 0 else mx + cols * cw
-        y = 8 + (h // cols) * ch if h % cols or h == 0 else 8 + (h // cols - 1) * ch
-        cv.create_line(x - 2, y + 4, x - 2, y + ch - 10, fill=col("acento"), width=4, tags="guia")
-        return h
-
-    def _guia_o2(xr, yr):
-        cv2.delete("guia")
-        if not o2["vis"] or not (cv2.winfo_rootx() <= xr < cv2.winfo_rootx() + cv2.winfo_width() and
-                                 cv2.winfo_rooty() <= yr < cv2.winfo_rooty() + cv2.winfo_height()) or not o2["geo"]:
-            return None
-        h = o2_indice(cv2.canvasx(xr - cv2.winfo_rootx()), cv2.canvasy(yr - cv2.winfo_rooty()), hueco=True)
-        tam, cw, ch, cols, mx = o2["geo"]
-        x = mx + (h % cols) * cw if h % cols or h == 0 else mx + cols * cw
-        y = 6 + (h // cols) * ch if h % cols or h == 0 else 6 + (h // cols - 1) * ch
-        cv2.create_line(x, y + 3, x, y + ch - 8, fill=col("acento"), width=4, tags="guia")
-        return h
-
-    def o2_motion(ev):
-        a = o2["arr"]
-        if not a or not o2["sel"]:
-            return
-        if not a["activo"] and abs(ev.x_root - a["x"]) + abs(ev.y_root - a["y"]) < 8:
-            return
-        a["activo"] = True
-        cv2.configure(cursor="fleur")
-        _guia_org(ev.x_root, ev.y_root)
-
-    def o2_release(ev):
-        a = o2["arr"]
-        o2["arr"] = None
-        cv2.configure(cursor="")
-        if a and a["activo"]:
-            h = _guia_org(ev.x_root, ev.y_root)
-            cv.delete("guia")
-            if h is not None:
-                o2_traer(h)
-
-    def o2_teclas(ev):
-        ctrl = bool(ev.state & 0x4)
-        k_ = ev.keysym.lower()
-        t_ = o2_pest()
-        if not t_:
-            return
-        o_ = o2_org(t_)
-        if ctrl and k_ == "c" and o2["sel"]:
-            org["copiado"] = o2_lista_sel()
-            v_estado.set(f"{len(o2['sel'])} página(s) copiadas: elegí dónde y presioná Ctrl+V.")
-        elif ctrl and k_ == "v" and org.get("copiado"):
-            n_ = o2_insertar(t_, list(org["copiado"]))
-            v_estado.set(f"{n_} página(s) pegadas en «{t_['nombre']}».")
-        elif ctrl and k_ == "a":
-            o2["sel"] = set(range(len(o_["orden"])))
-            o2_dibujar()
-        elif k_ == "delete" and o2["sel"]:
-            if len(o2["sel"]) >= len(o_["orden"]):
-                messagebox.showinfo(NOMBRE, "El PDF tiene que quedar con al menos una página.")
-                return
-            o2_cambiar_orden(t_, [x for i, x in enumerate(o_["orden"]) if i not in o2["sel"]], set())
-        elif ctrl and k_ == "z" and o_["pila"]:
-            o_.setdefault("rehacer", []).append((list(o_["orden"]), set()))
-            o_["orden"] = o_["pila"].pop()[0]
-            o2["sel"] = set()
-            t_["orgver"] = max(t_.get("orgver", 0), vis["orgver"]) + 1
-            raiz.after_idle(dibujar_pestanas)
-            o2_dibujar()
-
-    def o2_menu_ctx(ev):
-        cv2.focus_set()
-        i = o2_indice(cv2.canvasx(ev.x), cv2.canvasy(ev.y))
-        if i is not None and i not in o2["sel"]:
-            o2["sel"], o2["ancla"] = {i}, i
-            o2_dibujar()
-        n_ = len(o2["sel"])
-        m_ = menu_contextual()
-        hay = "normal" if n_ else "disabled"
-        m_.add_command(label=f"← Copiar {n_} al de la izquierda", command=o2_traer, state=hay)
-        m_.add_separator()
-        m_.add_command(label=f"Copiar ({n_})", acelerador="Ctrl+C",
-                       command=lambda: o2_teclas(types.SimpleNamespace(state=0x4, keysym="c")), state=hay)
-        m_.add_command(label="Pegar después", acelerador="Ctrl+V",
-                       command=lambda: o2_teclas(types.SimpleNamespace(state=0x4, keysym="v")),
-                       state="normal" if org.get("copiado") else "disabled")
-        m_.add_separator()
-        m_.add_command(label="⇄ Pasar a editar este PDF", command=o2_intercambiar)
-        m_.add_command(label=f"Quitar ({n_})", acelerador="Supr",
-                       command=lambda: o2_teclas(types.SimpleNamespace(state=0, keysym="Delete")), state=hay,
-                       punto="#EF4444")
-        m_.tk_popup(ev.x_root, ev.y_root)
-
-    def o2_rueda(ev):
-        d = -1 if (getattr(ev, "delta", 0) > 0 or getattr(ev, "num", 0) == 4) else 1
-        cv2.yview_scroll(d * 2, "units")
-        o2_dibujar()
-
-    cv2.bind("<ButtonPress-1>", o2_press)
-    cv2.bind("<B1-Motion>", o2_motion)
-    cv2.bind("<ButtonRelease-1>", o2_release)
-    cv2.bind("<Button-3>", o2_menu_ctx)
-    cv2.bind("<Key>", o2_teclas)
-    cv2.bind("<Double-Button-1>", lambda e: o2_traer())
-    for ev_ in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-        cv2.bind(ev_, o2_rueda)
-    cv2.bind("<Configure>", lambda e: raiz.after_idle(o2_dibujar))
-    b_org["varios"].configure(command=lambda: o2_mostrar())
     raiz.after(300, org_recibir)
 
     # ================================================== VISOR (pestanas + miniaturas + documento)
@@ -6239,6 +5807,7 @@ def iniciar_interfaz():
         soltar_ayuda(ruta)
         for q_ in (q_pag, q_min, q_bus):
             q_.put(("cerrar", ruta))
+        org_pedidos.put(("cerrar", ruta, None, None))
 
     visor.grid_columnconfigure(0, weight=1)
     visor.grid_rowconfigure(1, weight=1)
@@ -7164,6 +6733,17 @@ def iniciar_interfaz():
                 if falta and trozos == [None]:
                     cv_.create_text(x + w_ // 2, y + min(h_ // 2, 120), text=f"Página {i + 1}…",
                                     fill="#9AA6B4", font=(FAM, 11))
+                if vis["comp"]:  # v3.5: comparando: numero de la hoja (se toma de ahi) y marco si esta elegida
+                    sel_p = i in (org_de(t_).get("sel") or ())
+                    if sel_p:
+                        cv_.create_rectangle(x - 4, y - 4, x + w_ + 4, y + h_ + 4, outline=col("acento"), width=4)
+                    etq_ = f"⠿  Pág. {i + 1}"
+                    bw_ = px(22) + px(7) * len(etq_)
+                    x0_ = x + w_ - 6 - bw_  # arriba a la derecha: casi nunca tapa el texto
+                    cv_.create_rectangle(x0_, y + 6, x0_ + bw_, y + 6 + px(24), outline="",
+                                         fill=col("acento") if sel_p else "#3B4656", tags=("ins", f"ins{i}"))
+                    cv_.create_text(x0_ + bw_ / 2, y + 6 + px(12), text=etq_, fill="#FFFFFF",
+                                    font=(FAM, 9, "bold"), tags=("ins", f"ins{i}"))
                 for s_ in vis.get("img_sel") or ():  # v3.4: imagenes elegidas para copiar
                     if s_["ruta"] == ruta and s_["pag"] == pag:
                         M_ = matriz_vista(lay["dims"][i][0], lay["dims"][i][1], z, rot, parar)
@@ -7248,6 +6828,18 @@ def iniciar_interfaz():
         def _press(self, ev):
             self.activar()
             self._ed = None
+            self._parr = None
+            if vis["comp"] and self.t is not None:  # v3.5: comparando, el numero de la hoja la elige
+                i_ins = insignia_en(self, ev)
+                if i_ins is not None:
+                    pagina_press(self, i_ins, ev)
+                    return
+                base_ = self._punto_pagina(self.cv.canvasx(ev.x), self.cv.canvasy(ev.y))
+                if base_:
+                    vis["pag_clic"] = (self.t["id"], base_[0])
+                    if org.get("sel") and not (ev.state & 0x5):
+                        org["sel"] = set()
+                        visor_pedir_dibujo()
             if app["pagina"] == "visor" and app.get("panel") in ("firmar", "texto") and not vis["modo_res"]:
                 if edicion_press(self, ev):  # v2.6: firmar, sellar y texto
                     if not getattr(self, "_ed", None):
@@ -7321,6 +6913,9 @@ def iniciar_interfaz():
                 self._trazo = {"base": base, "pts": [p_]}
 
         def _motion(self, ev):
+            if getattr(self, "_parr", None):
+                pagina_motion(self, ev)
+                return
             if getattr(self, "_ed", None):
                 edicion_motion(self, ev)
                 return
@@ -7360,6 +6955,13 @@ def iniciar_interfaz():
 
         def _mover_libre(self, ev):
             """Sin boton: la polilinea sigue al mouse; en modo Texto se lee el texto de la pagina de antemano."""
+            if vis["comp"]:  # v3.5: la manito sobre el numero de la hoja (se puede tomar y arrastrar)
+                sobre_ = insignia_en(self, ev) is not None
+                if sobre_ != getattr(self, "_sobre_ins", False):
+                    self._sobre_ins = sobre_
+                    self.cv.configure(cursor="hand2" if sobre_ else cursor_herramienta())
+                if sobre_:
+                    return
             if not vis["modo_res"]:
                 if v_herr.get() == "Seleccionar":
                     base = self._punto_pagina(self.cv.canvasx(ev.x), self.cv.canvasy(ev.y))
@@ -7375,6 +6977,9 @@ def iniciar_interfaz():
                     caracteres_de(base[1], base[2])
 
         def _release(self, ev):
+            if getattr(self, "_parr", None):
+                pagina_release(self, ev)
+                return
             if getattr(self, "_ed", None):
                 edicion_release(self, ev)
                 return
@@ -7490,6 +7095,28 @@ def iniciar_interfaz():
             if pp:
                 i, ruta, pag, M, x, y = pp
                 p_ = fitz.Point(cx_ - x, cy_ - y) * ~M
+                if vis["comp"] and org.get("orden"):  # v3.5: comparando, la hoja se copia, corta o pega
+                    if i not in org["sel"]:
+                        org["sel"], org["ancla"] = {i}, i
+                        visor_pedir_dibujo()
+                    vis["pag_clic"] = (self.t["id"], i)
+                    n_s = len(org["sel"])
+                    que_p = f"la página {i + 1}" if n_s == 1 else f"{n_s} páginas"
+                    m_.add_command(label=f"Copiar {que_p}", command=lambda: teclas_paginas("c"), acelerador="Ctrl+C",
+                                   punto="#0EA5E9")
+                    m_.add_command(label=f"Cortar {que_p}", command=lambda: teclas_paginas("x"), acelerador="Ctrl+X")
+                    n_c = len(org.get("copiado") or [])
+                    if n_c:
+                        m_.add_command(label=f"Pegar {n_c} página(s) después de la {max(org['sel']) + 1}",
+                                       command=lambda: teclas_paginas("v"), acelerador="Ctrl+V")
+                        m_.add_command(label=f"Pegar {n_c} página(s) antes de la {min(org['sel']) + 1}",
+                                       command=lambda: (org_insertar(list(org["copiado"]), min(org["sel"])),
+                                                        [setattr(w_, "lay_k", None) for w_ in vistas],
+                                                        visor_pedir_dibujo()))
+                    m_.add_command(label=f"Quitar {que_p}", acelerador="Supr", punto="#EF4444",
+                                   command=lambda: (org_eliminar(), [setattr(w_, "lay_k", None) for w_ in vistas],
+                                                    visor_pedir_dibujo()))
+                    m_.add_separator()
                 toco = [it for it in vis["res"].get(ruta, {}).get(pag, []) if item_contiene(it, p_)]
                 if toco:
                     que_ = {"firma": "Quitar esta firma o sello", "texto_n": "Quitar este texto",
@@ -7573,6 +7200,11 @@ def iniciar_interfaz():
                 seleccionar_pagina(self)
             elif ctrl and k_.lower() in ("c", "x", "v"):
                 teclas_paginas(k_.lower())
+            elif k_ == "Delete" and vis["comp"] and org.get("sel") and not vis.get("edit_item"):
+                org_eliminar()
+                for w_ in vistas:
+                    w_.lay_k = None
+                visor_pedir_dibujo()
             elif k_ in ("Prior", "Left") and not ctrl:
                 self.ir(self.pag - 1)
             elif k_ in ("Next", "Right") and not ctrl:
@@ -7865,11 +7497,154 @@ def iniciar_interfaz():
         m_.add_command(label=f"Eliminar ({n_})   Supr", command=org_eliminar)
         m_.tk_popup(ev.x_root, ev.y_root)
 
+    # ================= v3.5: COMPARANDO, PASAR PAGINAS DE UN PDF A OTRO
+    # Cada hoja muestra su numero arriba a la izquierda: clic ahi la elige (Ctrl/Shift: varias), arrastrarla
+    # la lleva al otro PDF (o la cambia de lugar en el mismo). Ctrl+C / Ctrl+X / Ctrl+V y Supr tambien sirven.
+    def org_lista_sel():
+        return [(org["fuentes"][f_], p_, r_) for f_, p_, r_ in (org["orden"][i] for i in sorted(org["sel"])
+                                                                if i < len(org["orden"]))]
+
+    def org_insertar(lista, pos=None):
+        """Mete en el documento activo las paginas [(ruta, pag, giro)] en 'pos' (por defecto, tras lo elegido)."""
+        if not lista:
+            return 0
+        org_guardar_paso()
+        if pos is None:
+            pos = (max(org["sel"]) + 1) if org["sel"] else len(org["orden"])
+        pos = max(0, min(pos, len(org["orden"])))
+        nuevos = []
+        for ruta_, p_, r_ in lista:
+            if ruta_ not in org["fuentes"]:
+                org["fuentes"].append(ruta_)
+            nuevos.append((org["fuentes"].index(ruta_), p_, r_))
+        org["orden"][pos:pos] = nuevos
+        org["sel"] = set(range(pos, pos + len(nuevos)))
+        org["ancla"] = pos
+        org_dibujar()
+        return len(nuevos)
+
+    def insignia_en(v_, ev):
+        cx_, cy_ = v_.cv.canvasx(ev.x), v_.cv.canvasy(ev.y)
+        for it_ in reversed(v_.cv.find_overlapping(cx_ - 1, cy_ - 1, cx_ + 1, cy_ + 1)):
+            for tg_ in v_.cv.gettags(it_):
+                if tg_.startswith("ins") and tg_ != "ins":
+                    return int(tg_[3:])
+        return None
+
+    def pagina_press(v_, i, ev):
+        ctrl, shift = bool(ev.state & 0x4), bool(ev.state & 0x1)
+        if shift and org.get("ancla") is not None:
+            a, b = sorted((org["ancla"], i))
+            org["sel"] = set(range(a, b + 1))
+        elif ctrl:
+            org["sel"] ^= {i}
+            org["ancla"] = i
+        elif i not in org["sel"]:
+            org["sel"], org["ancla"] = {i}, i
+        vis["pag_clic"] = (v_.t["id"], i)
+        v_._parr = {"i": i, "x": ev.x_root, "y": ev.y_root, "activo": False, "solo": not ctrl and not shift}
+        n_ = len(org["sel"])
+        v_estado.set(f"{n_} página(s) elegida(s) · arrastrala al otro PDF (copia; con Shift la mueve) · "
+                     "Ctrl+C copia · Ctrl+X corta · Ctrl+V pega · Supr quita.")
+        visor_pedir_dibujo()
+        mini_pedir_dibujo()
+
+    def vista_bajo(xr, yr):
+        for v_ in vistas:
+            c_ = v_.cv
+            if (v_.t is not None and c_.winfo_ismapped() and c_.winfo_rootx() <= xr < c_.winfo_rootx() + c_.winfo_width()
+                    and c_.winfo_rooty() <= yr < c_.winfo_rooty() + c_.winfo_height()):
+                return v_
+        return None
+
+    def hueco_vista(v_, xr, yr):
+        lay = v_.lay
+        if not lay or not lay["pags"]:
+            return 0
+        cx_ = v_.cv.canvasx(xr - v_.cv.winfo_rootx())
+        cy_ = v_.cv.canvasy(yr - v_.cv.winfo_rooty())
+        i = v_.pagina_en(cy_, cx_)
+        if cy_ > lay["ys"][i] + lay["hs"][i] / 2:
+            i += 1
+        return max(0, min(len(lay["pags"]), i))
+
+    def guia_paginas(v_, pos):
+        for w_ in vistas:
+            w_.cv.delete("guia_p")
+        if v_ is None or not v_.lay or not v_.lay["pags"]:
+            return
+        lay = v_.lay
+        n = len(lay["pags"])
+        k_ = min(pos, n - 1)
+        yl = lay["ys"][k_] - ESPACIO_V / 2 if pos < n else lay["ys"][n - 1] + lay["hs"][n - 1] + ESPACIO_V / 2
+        x0, x1 = lay["xs"][k_] - 10, lay["xs"][k_] + lay["ws"][k_] + 10
+        v_.cv.create_line(x0, yl, x1, yl, fill=col("acento"), width=5, capstyle="round", tags="guia_p")
+        v_.cv.create_text(x0 + 8, yl - 12, anchor="w", text=f"aquí  (antes de la {pos + 1})" if pos < n else "al final",
+                          fill=col("acento"), font=(FAM, 10, "bold"), tags="guia_p")
+
+    def pagina_motion(v_, ev):
+        a = v_._parr
+        if not a["activo"] and abs(ev.x_root - a["x"]) + abs(ev.y_root - a["y"]) < 8:
+            return
+        a["activo"] = True
+        v_.cv.configure(cursor="fleur")
+        dst = vista_bajo(ev.x_root, ev.y_root)
+        if dst is not None:
+            yy = ev.y_root - dst.cv.winfo_rooty()
+            if yy < 40:
+                dst.cv.yview_scroll(-1, "units")
+                dst.movido()
+            elif yy > dst.cv.winfo_height() - 40:
+                dst.cv.yview_scroll(1, "units")
+                dst.movido()
+        guia_paginas(dst, hueco_vista(dst, ev.x_root, ev.y_root) if dst else 0)
+
+    def pagina_release(v_, ev):
+        a = v_._parr
+        v_._parr = None
+        v_.cv.configure(cursor=cursor_herramienta())
+        for w_ in vistas:
+            w_.cv.delete("guia_p")
+        if not a["activo"]:
+            if a["solo"] and len(org["sel"]) > 1:
+                org["sel"] = {a["i"]}
+                visor_pedir_dibujo()
+            return
+        dst = vista_bajo(ev.x_root, ev.y_root)
+        if dst is None or not org["sel"]:
+            return
+        pos = hueco_vista(dst, ev.x_root, ev.y_root)
+        if dst is v_ or dst.t is v_.t:
+            antes = sum(1 for k_ in range(pos) if k_ not in org["sel"])
+            org_mover_a(antes)
+            v_estado.set("Páginas movidas · «Guardar» (Ctrl+S) deja el PDF así · Ctrl+Z deshace.")
+            return
+        mover = bool(ev.state & 0x1)
+        lista = org_lista_sel()
+        if mover:
+            if len(lista) >= len(org["orden"]):
+                messagebox.showinfo(NOMBRE, "El PDF tiene que quedar con al menos una página.")
+                return
+            org_eliminar()
+        org["sel"] = set()  # en el de origen ya no queda nada elegido
+        dst.activar()
+        n_ = org_insertar(lista, pos)
+        vis["pag_clic"] = (dst.t["id"], pos)
+        v_estado.set(f"{n_} página(s) {'movidas' if mover else 'copiadas'} a «{dst.t['nombre']}» · "
+                     "«Guardar» (Ctrl+S) lo deja así · Ctrl+Z deshace.")
+        for w_ in vistas:
+            w_.lay_k = None
+        visor_pedir_dibujo()
+        mini_pedir_dibujo()
+
     def teclas_paginas(k_):
         if not org.get("orden"):
             return
-        if not org["sel"]:  # sin seleccion: la pagina que se ve
-            p_ = vista_activa().pag
+        if not org["sel"]:  # sin seleccion: la pagina donde se hizo clic (o la que se ve)
+            v_ = vista_activa()
+            pc_ = vis.get("pag_clic")
+            p_ = pc_[1] if (pc_ and v_ and v_.t and pc_[0] == v_.t["id"]) else v_.pag
+            p_ = max(0, min(p_, len(org["orden"]) - 1))
             org["sel"], org["ancla"] = {p_}, p_
         if k_ == "c":
             org_copiar()
@@ -7877,6 +7652,14 @@ def iniciar_interfaz():
             org_copiar(True)
         elif k_ == "v":
             org_pegar()
+        if vis["comp"]:
+            n_ = len(org.get("copiado") or [])
+            v_estado.set({"c": f"{n_} página(s) copiadas: hacé clic en el otro PDF y Ctrl+V.",
+                          "x": f"{n_} página(s) cortadas: hacé clic en el otro PDF y Ctrl+V.",
+                          "v": "Páginas pegadas · «Guardar» (Ctrl+S) lo deja así · Ctrl+Z deshace."}[k_])
+            for w_ in vistas:
+                w_.lay_k = None
+            visor_pedir_dibujo()
 
     def mini_teclas(ev):
         ctrl = bool(ev.state & 0x4)
@@ -8927,14 +8710,19 @@ def iniciar_interfaz():
     def n_resaltes(rutas=None):
         return sum(len(l_) for r_, ps in vis["res"].items() if rutas is None or r_ in rutas for l_ in ps.values())
 
-    def actualizar_resaltes():
+    def refrescar_boton_guardar():
         n = n_resaltes()
-        if n:
-            b_guardar_res.configure(text=f"Guardar cambios ({n})")
+        t_ = pest_activa()
+        org_ = bool(t_ and tiene_organizado(t_))  # v3.5: tambien paginas copiadas, pegadas o movidas
+        if n or org_:
+            b_guardar_res.configure(text=f"Guardar cambios ({n})" if n else "Guardar cambios")
             if not b_guardar_res.winfo_ismapped():
                 b_guardar_res.pack(side="right", padx=(6, 0))
-        else:
+        elif b_guardar_res.winfo_ismapped():
             b_guardar_res.pack_forget()
+
+    def actualizar_resaltes():
+        refrescar_boton_guardar()
         visor_pedir_dibujo()
         mini_pedir_dibujo()
 
@@ -8945,7 +8733,136 @@ def iniciar_interfaz():
                 return o_["origen"][ruta]
         return ruta
 
+    # ---- v3.5: guardar las paginas organizadas (copiadas, pegadas, movidas) desde el visor
+    def dialogo_guardar_paginas(t_):
+        o_ = org_de(t_)
+        w = ctk.CTkToplevel(raiz)
+        w.title(f"{NOMBRE} · guardar")
+        w.configure(fg_color=C["fondo"])
+        w.resizable(False, False)
+        w.transient(raiz)
+        ctk.CTkLabel(w, text=f"Guardar «{t_['nombre']}»", font=F(15, "bold"), text_color=C["texto"],
+                     anchor="w").pack(fill="x", padx=22, pady=(18, 2))
+        n_p, n_f = len(o_.get("orden") or []), len(o_.get("fuentes") or [])
+        lin_ = f"Queda con {n_p} páginas" + (f" (con páginas de {n_f - 1} PDF más)" if n_f > 1 else "") + "."
+        n_r = n_resaltes(rutas_de(t_))
+        if n_r:
+            lin_ += f" También {n_r} resaltado(s), firma(s) o texto(s)."
+        ctk.CTkLabel(w, text=lin_ + "\n«En este PDF» lo reemplaza con las páginas como las ves. «Como copia» deja "
+                                    "el original sin tocar.", font=F(11), text_color=C["texto2"], anchor="w",
+                     justify="left", wraplength=430).pack(fill="x", padx=22, pady=(6, 0))
+        pie = ctk.CTkFrame(w, fg_color="transparent")
+        pie.pack(fill="x", padx=22, pady=16)
+        boton(pie, "En este PDF", primario=True, ancho=120,
+              command=lambda: (w.destroy(), guardar_paginas(t_, False))).pack(side="right", padx=(8, 0))
+        boton(pie, "Como copia…", ancho=120, command=lambda: (w.destroy(), guardar_paginas(t_, True))).pack(
+            side="right", padx=(8, 0))
+        boton(pie, "Cancelar", ancho=96, command=w.destroy).pack(side="right")
+        w.bind("<Escape>", lambda _e: w.destroy())
+        w.update_idletasks()
+        w.geometry(f"+{raiz.winfo_rootx() + (raiz.winfo_width() - w.winfo_reqwidth()) // 2}"
+                   f"+{raiz.winfo_rooty() + (raiz.winfo_height() - w.winfo_reqheight()) // 3}")
+        w.after(100, lambda: (w.grab_set(), w.focus_force()))
+        return "break"
+
+    def _armar_esperando(orden_, fuentes_, dest):
+        pr = mp.Process(target=armar_organizado, args=(orden_, fuentes_, dest), daemon=True)
+        pr.start()
+        while pr.is_alive():  # la ventana sigue respondiendo mientras se arma
+            raiz.update()
+            time.sleep(0.05)
+        return pr.exitcode == 0 and os.path.isfile(dest)
+
+    def guardar_paginas(t_, copia):
+        o_ = org_de(t_)
+        if not o_.get("orden"):
+            return
+        ruta = t_["ruta"]
+        if copia:
+            base_ = os.path.splitext(os.path.basename(original_de(ruta)))[0]
+            dest = filedialog.asksaveasfilename(title="Guardar copia", initialdir=os.path.dirname(ruta),
+                                                initialfile=base_ + "_copia.pdf", defaultextension=".pdf",
+                                                filetypes=[("PDF", "*.pdf")])
+            if not dest:
+                return
+            if os.path.normcase(os.path.abspath(dest)) in {os.path.normcase(os.path.abspath(f_)) for f_ in o_["fuentes"]}:
+                messagebox.showerror(NOMBRE, "Para reemplazar el mismo PDF usá «En este PDF».")
+                return
+            v_estado.set(f"Guardando {os.path.basename(dest)}…")
+            if _armar_esperando(list(o_["orden"]), list(o_["fuentes"]), dest):
+                v_estado.set(f"Copia guardada: {os.path.basename(dest)}")
+                v_detalle.set(dest)
+            else:
+                messagebox.showerror(NOMBRE, f"No se pudo guardar:\n{dest}")
+            return
+        rutas_t = rutas_de(t_)
+        if n_resaltes(rutas_t):  # primero lo dibujado (va en cada PDF de origen, en su pagina)
+            guardar_resaltados(False, rutas_t)
+            if n_resaltes(rutas_t):
+                return
+            o_ = org_de(t_)
+        orden_, fuentes_ = list(o_["orden"]), list(o_["fuentes"])
+        tmp = ruta + ".pdfol_tmp"
+        v_estado.set(f"Guardando {t_['nombre']}…")
+        if not _armar_esperando(orden_, fuentes_, tmp):
+            messagebox.showerror(NOMBRE, f"No se pudo guardar:\n{ruta}")
+            return
+        # otras pestanas (o lo copiado) que usan paginas de este PDF siguen viendo las de antes
+        usa_ = [x for x in pest if x is not t_ and ruta in (org_de(x).get("fuentes") or [])]
+        if usa_ or ruta in [c_[0] for c_ in org.get("copiado") or []]:
+            import tempfile
+            snap = os.path.join(tempfile.gettempdir(), "PdFOL_fuentes",
+                                time.strftime("%Y%m%d_%H%M%S_") + os.path.basename(ruta))
+            os.makedirs(os.path.dirname(snap), exist_ok=True)
+            shutil.copy2(ruta, snap)
+            for x in usa_:
+                fs_ = org_de(x)["fuentes"]
+                fs_[fs_.index(ruta)] = snap
+                org_de(x).setdefault("origen", {})[snap] = original_de(ruta)
+            org["copiado"] = [((snap if c_[0] == ruta else c_[0]),) + tuple(c_[1:]) for c_ in org.get("copiado") or []]
+        soltar_archivo(ruta)
+        for _ in range(60):  # Windows: esperar a que todos suelten el archivo
+            try:
+                os.replace(tmp, ruta)
+                break
+            except PermissionError:
+                raiz.update()
+                time.sleep(0.1)
+        else:
+            messagebox.showerror(NOMBRE, f"El PDF está abierto en otro programa; no se pudo reemplazar:\n{ruta}\n\n"
+                                         f"Quedó guardado como:\n{tmp}")
+            return
+        vis["ver_arch"][ruta] = ver_arch(ruta) + 1
+        vis["med"].pop(ruta, None)
+        vis["pedida"].discard(ruta)
+        cache_imgs.clear()
+        n_ = contar_paginas(ruta)
+        nuevo = [(0, k, 0) for k in range(n_)]
+        datos_ = {"fuentes": [ruta], "orden": nuevo, "sel": set(), "ancla": None, "pila": [], "rehacer": [],
+                  "ruta": ruta, "original": list(nuevo), "origen": {}}
+        vis["orgver"] += 1
+        if t_ is pest_activa():
+            org.update(datos_)
+            org_reiniciar_cache()
+            _abrir_documento(ruta)
+            org["ruta"] = ruta
+        else:
+            t_["org"] = datos_
+        t_["orgver"] = vis["orgver"]
+        vis["ult"] = vis["ult_mini"] = None
+        for w_ in vistas:
+            w_.lay_k = None
+        medidas_listas(t_)
+        dibujar_pestanas()
+        visor_pedir_dibujo()
+        mini_pedir_dibujo()
+        refrescar_boton_guardar()
+        v_estado.set(f"«{t_['nombre']}» guardado con {n_} páginas.")
+
     def guardar_resaltados_dialogo(*_):
+        t_g = pest_activa()
+        if t_g and tiene_organizado(t_g) and app["pagina"] == "visor":  # v3.5: paginas copiadas o movidas
+            return dialogo_guardar_paginas(t_g)
         if not n_resaltes():
             return "break"
         w = ctk.CTkToplevel(raiz)
@@ -9796,6 +9713,7 @@ def iniciar_interfaz():
         vis["ult"] = vis["ult_mini"] = None
         dibujar_pestanas()
         refrescar()
+        refrescar_boton_guardar()
         actualizar_ejemplo()
         if mostrar_visor and app["pagina"] != "visor":
             mostrar_pagina("visor")
