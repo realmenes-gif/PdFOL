@@ -2,9 +2,13 @@
 // Usa pdf.js (dibujo, texto, busqueda y marcas), pdf-lib (para estampar la firma al guardar)
 // y MuPDF (para cambiar el texto del PDF; se carga solo al usarlo).
 
-const VERSION = "1.5.4";
+const VERSION = "1.5.5";
 const REPO = "realmenes-gif/PdFOL";
 const CAMBIOS = [
+  ["1.5.5", [
+    "Desplazamiento rápido más ágil: mientras arrastrás, el globo dice a qué página vas y la hoja salta cuando parás o soltás. Ya no se dibujan todas las hojas que pasan, así la página donde parás aparece enseguida.",
+    "Al deslizar rápido, solo se piden las imágenes de las hojas que quedan a la vista.",
+  ]],
   ["1.5.4", [
     "Desplazamiento rápido: al deslizar aparece un pulgar a la derecha; arrastralo para recorrer todo el documento (un globo grande dice la página).",
     "Indicador de página más grande y siempre a la vista; tocalo para ir a una página.",
@@ -428,8 +432,20 @@ function urlNativa(t, n, w, recorte) {
   if (recorte) u += `&x=${recorte[0]}&y=${recorte[1]}&cw=${recorte[2]}&ch=${recorte[3]}`;
   return new URL(u, location.href).href;
 }
-function ponerImagenNativa(t, pv) {
+// v1.5.5: la imagen se pide solo si la hoja sigue a la vista (al pasar rapido, las hojas que se fueron no
+// llenan la cola de dibujo y la hoja donde paraste aparece enseguida)
+function hojaALaVista(t, pv) {
+  const cr = t.cont.getBoundingClientRect(), r = pv.div.getBoundingClientRect();
+  return r.bottom > cr.top - cr.height * 0.5 && r.top < cr.bottom + cr.height * 0.5;
+}
+function ponerImagenNativa(t, pv, ya = false) {
   if (!t.nativo || !pv?.viewport) return;
+  if (!ya) {
+    (t.pendNat ||= new Map()).set(pv.id, pv);
+    clearTimeout(t.tPendNat);
+    t.tPendNat = setTimeout(() => revisarPendNat(t), 60);
+    return;
+  }
   const wrap = pv.div.querySelector(".canvasWrapper");
   if (!wrap) return;
   const dpr = window.devicePixelRatio || 1;
@@ -456,6 +472,12 @@ function ponerImagenNativa(t, pv) {
   t.detalleK ||= {};
   t.detalleK[pv.id] = k < 1 ? [W, H] : null;
   if (k < 1) programarDetalle(t); else wrap.querySelector("img.detalle")?.remove();
+}
+function revisarPendNat(t) {
+  for (const [id, pv] of [...(t.pendNat || new Map())]) {
+    if (hojaALaVista(t, pv)) { t.pendNat.delete(id); ponerImagenNativa(t, pv, true); }
+    else if (!pv.div.isConnected || pv.renderingState === 0) t.pendNat.delete(id);
+  }
 }
 // zoom alto: la parte que se ve, a resolucion completa
 function programarDetalle(t) {
@@ -611,7 +633,6 @@ function conectarEventos(t) {
     setTimeout(() => ocrAlMoverse(t), 900);
   });
   eventBus.on("pagechanging", () => {
-    if (rapido.arrastra && t === tabAct()) $("rapido-globo").textContent = `${t.viewer.currentPageNumber} / ${t.pdf.numPages}`;
     if (t === tabAct()) { actualizarIndicador(true); marcarMiniAct(); clearTimeout(t.tOcrMov); t.tOcrMov = setTimeout(() => ocrAlMoverse(t), 400); }
   });
   eventBus.on("scalechanging", () => {
@@ -638,6 +659,7 @@ function conectarEventos(t) {
   let tScroll = 0;
   t.cont.addEventListener("scroll", () => {
     if (t.nativo && t.detalleK && Object.values(t.detalleK).some(Boolean)) programarDetalle(t);
+    if (t.pendNat?.size) { clearTimeout(t.tPendNat); t.tPendNat = setTimeout(() => revisarPendNat(t), 120); }
     if (t !== tabAct()) return;
     actualizarIndicador(true);
     ubicarRapido(t, true);
@@ -677,16 +699,27 @@ function ubicarRapido(t, mostrar) {
 (() => {
   const pulgar = $("rapido-pulgar"), caja = $("rapido"), globo = $("rapido-globo");
   let dy = 0, raf = 0, ultY = 0;
+  // v1.5.5: mientras arrastras, el globo dice a que pagina vas y la hoja salta cuando paras un instante o
+  // soltas (asi no se dibujan todas las hojas que pasan)
+  let destino = 0, tPausa = 0;
+  const paginaEn = (t, y) => {
+    const pvs = t.viewer._pages || [];
+    let n = 1;
+    for (const pv of pvs) { if (pv.div.offsetTop <= y) n = pv.id; else break; }
+    return n;
+  };
+  const saltar = () => { const t = tabAct(); if (t) t.cont.scrollTop = destino; };
   const mover = (y) => {
     const t = tabAct(); if (!t) return;
     const r = caja.getBoundingClientRect();
     const f = Math.max(0, Math.min(1, (y - dy - r.top - 26) / (r.height - 52)));
     const c = t.cont;
-    c.scrollTop = f * (c.scrollHeight - c.clientHeight);
+    destino = f * (c.scrollHeight - c.clientHeight);
     const top = 26 + (r.height - 52) * f;
     pulgar.style.top = globo.style.top = top + "px";
-    const n = Math.max(1, Math.min(t.pdf.numPages, Math.round(f * (t.pdf.numPages - 1)) + 1));
-    globo.textContent = `${t.viewer.currentPageNumber || n} / ${t.pdf.numPages}`;
+    globo.textContent = `${paginaEn(t, destino + c.clientHeight / 3)} / ${t.pdf.numPages}`;
+    clearTimeout(tPausa);
+    tPausa = setTimeout(saltar, 220);
   };
   pulgar.addEventListener("pointerdown", (e) => {
     e.preventDefault(); e.stopPropagation();
@@ -706,6 +739,8 @@ function ubicarRapido(t, mostrar) {
   });
   const soltar = () => {
     if (!rapido.arrastra) return;
+    clearTimeout(tPausa);
+    saltar();
     rapido.arrastra = false;
     caja.classList.remove("arrastra");
     globo.hidden = true;
