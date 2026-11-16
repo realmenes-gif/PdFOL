@@ -135,12 +135,30 @@ body.noche .visor .page canvas { filter: invert(.9) hue-rotate(180deg); }
 }
 
 /* indicador de pagina y zoom */
+/* v1.5.4: indicador de pagina grande y siempre a mano (tocarlo lleva a «Ir a la página») */
 #indicador {
-  position: absolute; left: 50%; bottom: calc(16px + var(--abajo, 0px)); transform: translateX(-50%);
-  background: rgba(30, 39, 48, .82); color: #fff; padding: 7px 14px; border-radius: 16px; font-size: 13px; font-weight: 600;
-  transition: opacity .35s; z-index: 3; white-space: nowrap;
+  position: absolute; left: 50%; bottom: calc(14px + var(--abajo, 0px)); transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 18px; border: 0;
+  background: rgba(30, 39, 48, .88); color: #fff; border-radius: 22px; font: inherit; font-size: 16px; font-weight: 700;
+  transition: opacity .35s; z-index: 3; white-space: nowrap; box-shadow: 0 3px 12px rgba(0, 0, 0, .25);
 }
-#indicador.oculto { opacity: 0; pointer-events: none; }
+#indicador svg { width: 18px; height: 18px; fill: none; stroke: #fff; stroke-width: 2; stroke-linejoin: round; }
+#indicador.oculto { opacity: .55; }
+/* v1.5.4: barra de desplazamiento rapido (arrastrar el pulgar de la derecha) */
+#rapido { position: absolute; top: 10px; right: 0; bottom: calc(70px + var(--abajo, 0px)); width: 40px; z-index: 4; pointer-events: none; }
+#rapido-pulgar {
+  position: absolute; right: 4px; width: 30px; height: 52px; margin-top: -26px; border-radius: 15px; pointer-events: auto;
+  background: var(--acento); box-shadow: 0 2px 10px rgba(0, 0, 0, .3); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 4px; touch-action: none; opacity: 0; transition: opacity .3s;
+}
+#rapido-pulgar span { width: 12px; height: 2px; border-radius: 1px; background: rgba(255, 255, 255, .9); }
+#rapido.ver #rapido-pulgar, #rapido.arrastra #rapido-pulgar { opacity: 1; }
+#rapido.arrastra #rapido-pulgar { width: 34px; right: 2px; }
+#rapido-globo {
+  position: absolute; right: 48px; margin-top: -26px; height: 52px; padding: 0 18px; border-radius: 26px 26px 4px 26px;
+  background: var(--acento); color: #fff; font-size: 22px; font-weight: 700; display: flex; align-items: center;
+  white-space: nowrap; box-shadow: 0 3px 14px rgba(0, 0, 0, .3); pointer-events: none;
+}
 #zoom-fab {
   position: absolute; right: 14px; bottom: calc(14px + var(--abajo, 0px)); display: flex; align-items: center; gap: 2px;
   background: var(--tarjeta); border: 1px solid var(--borde); border-radius: 24px; padding: 3px; box-shadow: var(--sombra); z-index: 3;

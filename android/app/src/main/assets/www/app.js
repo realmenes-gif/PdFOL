@@ -2,9 +2,13 @@
 // Usa pdf.js (dibujo, texto, busqueda y marcas), pdf-lib (para estampar la firma al guardar)
 // y MuPDF (para cambiar el texto del PDF; se carga solo al usarlo).
 
-const VERSION = "1.5.3";
+const VERSION = "1.5.4";
 const REPO = "realmenes-gif/PdFOL";
 const CAMBIOS = [
+  ["1.5.4", [
+    "Desplazamiento rápido: al deslizar aparece un pulgar a la derecha; arrastralo para recorrer todo el documento (un globo grande dice la página).",
+    "Indicador de página más grande y siempre a la vista; tocalo para ir a una página.",
+  ]],
   ["1.5.3", [
     "Tablet: al alejar y deslizar, la hoja ya no se corre de costado. Todas las hojas se ven del mismo ancho (los planos grandes se achican al ancho de las demás), como en PdFOL de Windows.",
     "Al deslizar derecho (arriba/abajo o de costado), la hoja sigue en esa dirección sin desviarse.",
@@ -607,6 +611,7 @@ function conectarEventos(t) {
     setTimeout(() => ocrAlMoverse(t), 900);
   });
   eventBus.on("pagechanging", () => {
+    if (rapido.arrastra && t === tabAct()) $("rapido-globo").textContent = `${t.viewer.currentPageNumber} / ${t.pdf.numPages}`;
     if (t === tabAct()) { actualizarIndicador(true); marcarMiniAct(); clearTimeout(t.tOcrMov); t.tOcrMov = setTimeout(() => ocrAlMoverse(t), 400); }
   });
   eventBus.on("scalechanging", () => {
@@ -635,8 +640,9 @@ function conectarEventos(t) {
     if (t.nativo && t.detalleK && Object.values(t.detalleK).some(Boolean)) programarDetalle(t);
     if (t !== tabAct()) return;
     actualizarIndicador(true);
+    ubicarRapido(t, true);
     clearTimeout(tScroll);
-    tScroll = setTimeout(() => $("indicador").classList.add("oculto"), 1400);
+    tScroll = setTimeout(() => { $("indicador").classList.add("oculto"); if (!rapido.arrastra) $("rapido").classList.remove("ver"); }, 1600);
   }, { passive: true });
 }
 
@@ -654,7 +660,61 @@ function actualizarIndicador(mostrar) {
   ind.hidden = false;
   $("ind-txt").textContent = `${t.viewer.currentPageNumber} / ${t.pdf.numPages}`;
   if (mostrar) ind.classList.remove("oculto");
+  $("rapido").hidden = t.pdf.numPages < 3;
 }
+
+// ---------------------------------------------------------------- v1.5.4: desplazamiento rapido
+// Aparece a la derecha al deslizar; arrastrando el pulgar se recorre todo el documento y un globo dice la pagina.
+const rapido = { arrastra: false };
+function ubicarRapido(t, mostrar) {
+  const c = t.cont, caja = $("rapido");
+  if (caja.hidden || rapido.arrastra) return;
+  const alto = caja.clientHeight, max = c.scrollHeight - c.clientHeight;
+  if (max <= 0) { caja.classList.remove("ver"); return; }
+  $("rapido-pulgar").style.top = 26 + (alto - 52) * (c.scrollTop / max) + "px";
+  if (mostrar) caja.classList.add("ver");
+}
+(() => {
+  const pulgar = $("rapido-pulgar"), caja = $("rapido"), globo = $("rapido-globo");
+  let dy = 0, raf = 0, ultY = 0;
+  const mover = (y) => {
+    const t = tabAct(); if (!t) return;
+    const r = caja.getBoundingClientRect();
+    const f = Math.max(0, Math.min(1, (y - dy - r.top - 26) / (r.height - 52)));
+    const c = t.cont;
+    c.scrollTop = f * (c.scrollHeight - c.clientHeight);
+    const top = 26 + (r.height - 52) * f;
+    pulgar.style.top = globo.style.top = top + "px";
+    const n = Math.max(1, Math.min(t.pdf.numPages, Math.round(f * (t.pdf.numPages - 1)) + 1));
+    globo.textContent = `${t.viewer.currentPageNumber || n} / ${t.pdf.numPages}`;
+  };
+  pulgar.addEventListener("pointerdown", (e) => {
+    e.preventDefault(); e.stopPropagation();
+    pulgar.setPointerCapture(e.pointerId);
+    const pr = pulgar.getBoundingClientRect();
+    dy = e.clientY - (pr.top + pr.height / 2);
+    rapido.arrastra = true;
+    caja.classList.add("arrastra", "ver");
+    globo.hidden = false;
+    ultY = e.clientY; mover(ultY);
+    try { navigator.vibrate?.(8); } catch (er) { /* nada */ }
+  });
+  pulgar.addEventListener("pointermove", (e) => {
+    if (!rapido.arrastra) return;
+    ultY = e.clientY;
+    if (!raf) raf = requestAnimationFrame(() => { raf = 0; mover(ultY); });
+  });
+  const soltar = () => {
+    if (!rapido.arrastra) return;
+    rapido.arrastra = false;
+    caja.classList.remove("arrastra");
+    globo.hidden = true;
+    setTimeout(() => { if (!rapido.arrastra) caja.classList.remove("ver"); }, 1400);
+  };
+  pulgar.addEventListener("pointerup", soltar);
+  pulgar.addEventListener("pointercancel", soltar);
+  pulgar.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+})();
 $("indicador").onclick = () => irAPagina();
 function actualizarZoomTxt() {
   const t = tabAct();
