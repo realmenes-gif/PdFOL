@@ -2,7 +2,7 @@
 // Usa pdf.js (dibujo, texto, busqueda y marcas), pdf-lib (para estampar la firma al guardar)
 // y MuPDF (para cambiar el texto del PDF; se carga solo al usarlo).
 
-const VERSION = "1.5.6";
+const VERSION = "1.6";
 const REPO = "realmenes-gif/PdFOL";
 const CAMBIOS = [
   ["1.5.6", [
@@ -371,12 +371,48 @@ async function cerrarPestana(i, { preguntar = true } = {}) {
 }
 
 // ---------------------------------------------------------------- abrir documentos
-async function cargarLibs() {
+// v1.6: un solo motor de pdf.js (worker) para todos los documentos, encendido apenas se carga la app.
+// Antes cada documento arrancaba su propio motor (leer 1,3 MB de codigo cada vez que se abria un PDF)
+let motorPdf = null;
+let cargandoLibs = null;
+function cargarLibs() {
+  if (V) return Promise.resolve();
+  return (cargandoLibs ||= cargarLibs0().finally(() => { cargandoLibs = null; }));
+}
+async function cargarLibs0() {
   if (V) return;
   pdfjsLib = await import("./lib/pdf.min.mjs");
   globalThis.pdfjsLib = pdfjsLib;
   pdfjsLib.GlobalWorkerOptions.workerSrc = new URL("lib/pdf.worker.min.mjs", location.href).href;
+  try { motorPdf = new pdfjsLib.PDFWorker({ name: "pdfol" }); } catch (e) { motorPdf = null; }
   V = await import("./lib/pdf_viewer.min.mjs");
+}
+
+// v1.6: la hoja aparece enseguida (la dibuja el telefono) mientras pdf.js termina de leer el documento
+function ponerPortada(f) {
+  if (!(NATIVO && f.idNativo)) return null;
+  const area = $("area"), docs = $("docs");
+  const W = Math.max(200, (docs.clientWidth || innerWidth) - 16);
+  const dpr = window.devicePixelRatio || 1;
+  const n = Math.max(0, (f.pagina || 1) - 1);
+  const div = document.createElement("div");
+  div.className = "portada";
+  const img = new Image();
+  img.alt = ""; img.decoding = "async";
+  img.style.width = W + "px";
+  img.src = new URL(`/render/${encodeURIComponent(f.idNativo)}/${n}?w=${Math.round(Math.min(4096, W * dpr))}&v=portada`, location.href).href;
+  img.onerror = () => div.remove();
+  div.append(img);
+  div.style.left = docs.offsetLeft + "px"; div.style.width = docs.clientWidth + "px";
+  area.append(div);
+  setTimeout(() => div.remove(), 15000); // por las dudas
+  return div;
+}
+function quitarPortada(t) {
+  if (!t?.portada) return;
+  const p = t.portada; t.portada = null;
+  p.classList.add("fuera");
+  setTimeout(() => p.remove(), 180);
 }
 
 function elegirArchivo() {
@@ -471,6 +507,7 @@ function ponerImagenNativa(t, pv, ya = false) {
       diag.ok++;
       const v = wrap.querySelector("img.nativa");
       if (v && v !== img) v.replaceWith(img); else if (!img.isConnected) wrap.prepend(img);
+      if (t.portada) requestAnimationFrame(() => quitarPortada(t));
       if (!t.revisadaBlanca) { t.revisadaBlanca = true; setTimeout(() => revisarBlanca(t, pv, img), 1500); }
     };
     img.onerror = () => { diag.err++; notaDiag(`error al dibujar pág. ${pv.id}`); fallarNativo(t); };
@@ -559,6 +596,7 @@ async function abrirDoc(f, { reemplazar = null } = {}) {
     const ya = pest.findIndex((t) => (f.uri && t.uri === f.uri) || (f.idNativo && t.idNativo === f.idNativo));
     if (ya >= 0) { activar(ya); return pest[ya]; }
   }
+  const portada = ponerPortada(f);
   await cargarLibs();
   const cont = document.createElement("div");
   cont.className = "visor";
@@ -579,11 +617,13 @@ async function abrirDoc(f, { reemplazar = null } = {}) {
     id: ++uidPest, nombre: f.nombre || "documento.pdf", idNativo: f.idNativo || null, uri: f.uri || null,
     escribible: f.escribible !== false, cont, eventBus, linkService, findController, viewer, pdf: null,
     firmas: [], cambios: [], modificado: false, editado: false, uiManager: null, pagIni: f.pagina || 1, escala: f.escala || null,
+    portada,
   };
   const src = {
     cMapUrl: "lib/cmaps/", cMapPacked: true, standardFontDataUrl: "lib/standard_fonts/", wasmUrl: "lib/wasm/",
     iccUrl: "lib/iccs/", useWorkerFetch: false, isEvalSupported: false, disableRange: true, enableXfa: false,
   };
+  if (motorPdf && !motorPdf.destroyed) src.worker = motorPdf;
   if (f.datos) src.data = f.datos;
   else src.url = new URL("/doc/" + encodeURIComponent(f.idNativo), location.href).href;
   const tarea = pdfjsLib.getDocument(src);
@@ -604,7 +644,7 @@ async function abrirDoc(f, { reemplazar = null } = {}) {
   try {
     t.pdf = await tarea.promise;
   } catch (e) {
-    cont.remove();
+    cont.remove(); portada?.remove();
     if (!/destroy/i.test(String(e))) aviso(`No se pudo abrir «${t.nombre}».`);
     return null;
   }
@@ -651,7 +691,7 @@ function conectarEventos(t) {
   eventBus.on("pagesloaded", () => { t.anchoRef = null; if (t.ajuste) aplicarAjuste(t, t.ajuste, t.ajusteTope); else igualarAnchos(t); });
   eventBus.on("rotationchanging", () => { t.anchoRef = null; igualarAnchos(t); });
   eventBus.on("updateviewarea", () => ubicarFirmas(t));
-  eventBus.on("pagerendered", (e) => { ubicarFirmas(t); ponerImagenNativa(t, e.source); });
+  eventBus.on("pagerendered", (e) => { ubicarFirmas(t); ponerImagenNativa(t, e.source); if (!t.nativo) quitarPortada(t); });
   eventBus.on("textlayerrendered", (e) => revisarTextoPagina(t, e.pageNumber));
   eventBus.on("updatefindmatchescount", (e) => cuentaBusqueda(t, e.matchesCount));
   eventBus.on("updatefindcontrolstate", (e) => cuentaBusqueda(t, e.matchesCount, e.state));
@@ -664,13 +704,20 @@ function conectarEventos(t) {
     if ("hasSomethingToRedo" in d) $("m-rehacer").disabled = !d.hasSomethingToRedo;
     if ("hasSelectedEditor" in d) $("m-borrar").disabled = !d.hasSelectedEditor;
   });
-  let tScroll = 0;
+  let tScroll = 0, cuadro = 0;
+  // v1.6: lo que cambia al desplazarse se hace UNA vez por cuadro (antes en cada evento, leyendo y
+  // escribiendo el diseño de la pagina: eso frenaba el deslizar)
+  const alCuadro = () => {
+    cuadro = 0;
+    if (t !== tabAct()) return;
+    actualizarIndicador(true);
+    ubicarRapido(t, true);
+  };
   t.cont.addEventListener("scroll", () => {
     if (t.nativo && t.detalleK && Object.values(t.detalleK).some(Boolean)) programarDetalle(t);
     if (t.pendNat?.size) { clearTimeout(t.tPendNat); t.tPendNat = setTimeout(() => revisarPendNat(t), 120); }
     if (t !== tabAct()) return;
-    actualizarIndicador(true);
-    ubicarRapido(t, true);
+    if (!cuadro) cuadro = requestAnimationFrame(alCuadro);
     clearTimeout(tScroll);
     tScroll = setTimeout(() => { $("indicador").classList.add("oculto"); if (!rapido.arrastra) $("rapido").classList.remove("ver"); }, 1600);
   }, { passive: true });
@@ -687,10 +734,12 @@ function actualizarIndicador(mostrar) {
   const t = tabAct();
   const ind = $("indicador");
   if (!t || !t.pdf) { ind.hidden = true; return; }
-  ind.hidden = false;
-  $("ind-txt").textContent = `${t.viewer.currentPageNumber} / ${t.pdf.numPages}`;
-  if (mostrar) ind.classList.remove("oculto");
-  $("rapido").hidden = t.pdf.numPages < 3;
+  if (ind.hidden) ind.hidden = false;
+  const txt = `${t.viewer.currentPageNumber} / ${t.pdf.numPages}`, it = $("ind-txt");
+  if (it.textContent !== txt) it.textContent = txt; // v1.6: solo si cambio (no rehacer el diseño)
+  if (mostrar && ind.classList.contains("oculto")) ind.classList.remove("oculto");
+  const sinRap = t.pdf.numPages < 3;
+  if ($("rapido").hidden !== sinRap) $("rapido").hidden = sinRap;
 }
 
 // ---------------------------------------------------------------- v1.5.4: desplazamiento rapido
@@ -701,8 +750,8 @@ function ubicarRapido(t, mostrar) {
   if (caja.hidden || rapido.arrastra) return;
   const alto = caja.clientHeight, max = c.scrollHeight - c.clientHeight;
   if (max <= 0) { caja.classList.remove("ver"); return; }
-  $("rapido-pulgar").style.top = 26 + (alto - 52) * (c.scrollTop / max) + "px";
-  if (mostrar) caja.classList.add("ver");
+  $("rapido-pulgar").style.top = Math.round(26 + (alto - 52) * (c.scrollTop / max)) + "px";
+  if (mostrar && !caja.classList.contains("ver")) caja.classList.add("ver");
 }
 (() => {
   const pulgar = $("rapido-pulgar"), caja = $("rapido"), globo = $("rapido-globo");
@@ -2658,8 +2707,10 @@ dibujarAcciones();
 dibujarRecientes();
 marcarNueva();
 (async () => {
-  try { await cargarLibs(); } catch (e) { aviso("No se pudo cargar el visor. Actualizá «Android System WebView» desde Play Store.", 15000); console.error(e); }
+  // v1.6: el documento que llego se empieza a mostrar mientras se carga el visor (no despues)
+  const libs = cargarLibs().catch((e) => { aviso("No se pudo cargar el visor. Actualizá «Android System WebView» desde Play Store.", 15000); console.error(e); });
   if (AN) { await window.pdfolNativo.nuevos(); try { AN.listo(); } catch (e) { /* nada */ } }
+  await libs;
   if (esAncho() && prefs.minis && tabAct()) alternarMinis();
   setTimeout(() => buscarActualizacion(false), 4000);
 })();

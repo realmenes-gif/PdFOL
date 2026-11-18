@@ -401,3 +401,10 @@ body.eligiendo .visor .textLayer, body.eligiendo .visor .textLayer span { -webki
   background: var(--tarjeta); border: 1px solid var(--borde); box-shadow: var(--sombra);
 }
 #b-girar svg, #z-girar svg { width: 22px; height: 22px; fill: none; stroke: var(--texto); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* v1.6: la primera hoja aparece enseguida (dibujada por el telefono) mientras se lee el documento */
+.portada { position: absolute; top: 0; bottom: 0; z-index: 8; overflow: hidden; background: var(--hoja-fondo);
+  display: flex; justify-content: center; align-items: flex-start; padding-top: 8px; pointer-events: none;
+  transition: opacity .16s; }
+.portada img { display: block; height: auto; box-shadow: 0 1px 4px rgba(0, 0, 0, .18); background: #fff; }
+.portada.fuera { opacity: 0; }
