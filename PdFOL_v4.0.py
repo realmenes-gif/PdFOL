@@ -363,12 +363,20 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v3.6"
-VERSION_INTERNA = "3.6"
+VERSION = "v4.0"
+VERSION_INTERNA = "4.0"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.0", [
+        "Más rápido y liviano: al abrir arma solo lo que se ve (de ~1.600 controles a ~450); cada panel se arma "
+        "la primera vez que lo abrís. «Herramientas» y las barras de desplazamiento ahora se dibujan.",
+        "Otro monitor: ya no se pone transparente ni se pega al pasar la ventana a una pantalla con otra escala; "
+        "se ajusta una sola vez cuando la soltás.",
+        "Organizar: las miniaturas se dibujan en un proceso aparte (la ventana ya no se traba mientras cargan).",
+        "Se corrigió un bloqueo ocasional de la ventana (la limpieza de memoria ahora se hace solo en la ventana).",
+    ]),
     ("v3.6", [
         "Comparar abre los dos PDF en miniaturas (todas del mismo tamaño, varias por fila). Arrastrá una hoja de "
         "cualquier parte al otro PDF. Ctrl+rueda o − / + las agranda o achica; doble clic ve una hoja grande y otro "
@@ -1805,6 +1813,48 @@ def _abrir_cache(docs, orden, ruta, maximo=8):
         except Exception:
             pass
     return d
+
+
+def _proceso_miniaturas_org(entrada, salida):
+    """v4.0: miniaturas de Organizar en un proceso aparte (antes un hilo: competia con la ventana y la trababa).
+    Recibe (clave, ruta, pag, ancho), ("gen", n) para descartar lo viejo, ("cerrar", ruta) o None.
+    Responde (clave, ancho, alto, bytes RGB) o (clave, None)."""
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
+    fitz.TOOLS.mupdf_display_errors(False)
+    abiertos, orden_ = {}, []
+    gen = None
+    while True:
+        msg = entrada.get()
+        if msg is None:
+            return
+        if msg[0] == "gen":
+            gen = msg[1]
+            continue
+        if msg[0] == "cerrar":
+            d = abiertos.pop(msg[1], None)
+            if d is not None:
+                orden_.remove(msg[1])
+                d.close()
+            continue
+        clave, ruta_f, pag, ancho = msg
+        if gen is not None and clave[0] != gen:
+            continue
+        try:
+            d = abiertos.get(ruta_f)
+            if d is None:
+                d = abiertos[ruta_f] = fitz.open(ruta_f)
+                orden_.append(ruta_f)
+                while len(orden_) > 8:
+                    abiertos.pop(orden_.pop(0)).close()
+            pg = d[pag]
+            z = ancho / max(pg.rect.width, pg.rect.height)
+            pix = pg.get_pixmap(matrix=fitz.Matrix(z, z), alpha=False)
+            salida.put((clave, pix.width, pix.height, pix.samples))
+        except Exception:
+            salida.put((clave, None))
 
 
 def _proceso_render(entrada, salida):
@@ -3321,6 +3371,10 @@ def iniciar_interfaz():
     import tkinter as tk
     from tkinter import filedialog, messagebox, colorchooser
     import customtkinter as ctk
+    # v4.0: customtkinter, al pasar la ventana a otro monitor con otra escala, la vuelve casi transparente y
+    # redibuja todo MIENTRAS se arrastra (se ve transparente y se pega). Ese control lo hace PdFOL: espera a
+    # que se suelte la ventana y ajusta una sola vez (ver revisar_monitor)
+    ctk.ScalingTracker.check_dpi_scaling = classmethod(lambda cls: None)
 
     pdfs_arg = [a_ for a_ in sys.argv[1:] if os.path.isfile(a_) and a_.lower().endswith(".pdf")]
     instancia = instancia_unica(pdfs_arg) if not os.environ.get("PDFOL_PRUEBA") else False
@@ -3363,9 +3417,14 @@ def iniciar_interfaz():
         S_UI = max(1.0, float(ctk.ScalingTracker.get_window_scaling(raiz)))
     except Exception:
         S_UI = 1.0
+    escala = {"s": S_UI, "s0": S_UI, "geo": {}, "quieta": {}}
+    try:
+        escala["ts0"] = float(raiz.tk.call("tk", "scaling"))
+    except Exception:
+        escala["ts0"] = None
 
     def px(n):
-        return int(round(n * S_UI))
+        return int(round(n * escala["s"]))
     if _INICIO is not None:
         raiz.withdraw()  # la ventana aparece recien cuando esta completa (mientras, el husky)
     raiz.title(f"{NOMBRE} {VERSION} · by {AUTOR}")
@@ -3519,7 +3578,7 @@ def iniciar_interfaz():
     def dibujar_superior(*_):
         superior.delete("all")
         w = max(superior.winfo_width(), 900)
-        h = ALTO_SUP
+        h = px(36)
         superior.configure(bg=col("lat_ini"))
         if caja_pest.cget("bg") != col("lat_ini"):
             try:
@@ -3671,7 +3730,7 @@ def iniciar_interfaz():
     def dibujar_cinta(*_):
         cinta.delete("all")
         w = max(cinta.winfo_width(), 900)
-        h = ALTO_CINTA
+        h = px(44)
         cinta.configure(bg=col("tarjeta"))
         try:
             izq, centro, der = cinta_items()
@@ -3933,6 +3992,111 @@ def iniciar_interfaz():
         px_ = (14, 14) if master in PAGINAS_PANEL else (36, 36)
         ctk.CTkLabel(master, text=texto, font=F(16, "bold"), text_color=C["texto"], anchor="w").grid(
             row=fila, column=col, sticky="ew", padx=px_, pady=pady)
+
+    # v4.0: barra de desplazamiento DIBUJADA (una raya redondeada). La de customtkinter se redibujaba entera en
+    # cada paso de la rueda: era parte de lo que hacia lento el desplazamiento
+    def _color_fondo(w_):
+        while w_ is not None:
+            try:
+                c_ = w_.cget("fg_color")
+            except Exception:
+                try:
+                    return w_.cget("bg")
+                except Exception:
+                    return col("fondo")
+            if c_ != "transparent":
+                return c_[1 if modo_oscuro() else 0] if isinstance(c_, (tuple, list)) else c_
+            w_ = w_.master
+        return col("fondo")
+
+    class Desliz(tk.Canvas):
+        todas = []
+
+        def __init__(self, master, command=None, orientation="vertical", button_color=None,
+                     button_hover_color=None, **_kw):
+            Desliz.todas.append(self)
+            self.vert = orientation != "horizontal"
+            g_ = px(12)
+            super().__init__(master, highlightthickness=0, bd=0, **({"width": g_} if self.vert else {"height": g_}))
+            self.cmd = command
+            self.c_n = button_color or C["suave_h"]
+            self.c_h = button_hover_color or C["borde"]
+            self.lo, self.hi = 0.0, 1.0
+            self._arr = None
+            self._sobre = False
+            self.raya = self.create_line(0, 0, 0, 0, width=px(8), capstyle="round")
+            self.bind("<Configure>", lambda e: self._pintar(True))
+            self.bind("<ButtonPress-1>", self._press)
+            self.bind("<B1-Motion>", self._mover)
+            self.bind("<ButtonRelease-1>", lambda e: setattr(self, "_arr", None))
+            self.bind("<Enter>", lambda e: (setattr(self, "_sobre", True), self._pintar(True)))
+            self.bind("<Leave>", lambda e: (setattr(self, "_sobre", False), self._pintar(True)))
+            self._tema = None
+
+        def configure(self, cnf=None, **kw):
+            if "command" in kw:
+                self.cmd = kw.pop("command")
+            if "button_color" in kw:
+                self.c_n = kw.pop("button_color")
+            if "button_hover_color" in kw:
+                self.c_h = kw.pop("button_hover_color")
+            kw.pop("fg_color", None)
+            if cnf or kw:
+                return super().configure(cnf, **kw)
+            self._pintar(True)
+        config = configure
+
+        def _largo(self):
+            return max(1, self.winfo_height() if self.vert else self.winfo_width())
+
+        def _pintar(self, colores=False):
+            L, g_ = self._largo(), px(12)
+            m_ = px(6)
+            a_, b_ = m_ + self.lo * (L - 2 * m_), m_ + self.hi * (L - 2 * m_)
+            if b_ - a_ < px(16):
+                b_ = a_ + px(16)
+            lleno = self.lo <= 0.0 and self.hi >= 1.0
+            if self.vert:
+                self.coords(self.raya, g_ / 2, a_, g_ / 2, b_)
+            else:
+                self.coords(self.raya, a_, g_ / 2, b_, g_ / 2)
+            tema = (modo_oscuro(), self._sobre, lleno)
+            if colores or tema != self._tema:
+                self._tema = tema
+                c_ = self.c_h if self._sobre else self.c_n
+                c_ = c_[1 if modo_oscuro() else 0] if isinstance(c_, (tuple, list)) else c_
+                super().configure(bg=_color_fondo(self.master))
+                self.itemconfigure(self.raya, fill=c_, state="hidden" if lleno else "normal")
+
+        def set(self, lo, hi):
+            lo, hi = float(lo), float(hi)
+            if (lo, hi) != (self.lo, self.hi):
+                self.lo, self.hi = lo, hi
+                self._pintar()
+
+        def get(self):
+            return self.lo, self.hi
+
+        def reescalar(self):
+            tk.Canvas.configure(self, **({"width": px(12)} if self.vert else {"height": px(12)}))
+            self.itemconfigure(self.raya, width=px(8))
+            self._pintar(True)
+
+        def _frac(self, ev):
+            m_ = px(6)
+            return ((ev.y if self.vert else ev.x) - m_) / max(1, self._largo() - 2 * m_)
+
+        def _press(self, ev):
+            f_ = self._frac(ev)
+            if self.lo <= f_ <= self.hi:
+                self._arr = (f_, self.lo)
+            elif self.cmd:
+                self.cmd("scroll", -1 if f_ < self.lo else 1, "pages")
+
+        def _mover(self, ev):
+            if self._arr and self.cmd:
+                f0, lo0 = self._arr
+                self.cmd("moveto", max(0.0, min(1.0, lo0 + self._frac(ev) - f0)))
 
     class Tarjeta(ctk.CTkFrame):
         def __init__(self, master, fila, col=0, colspan=1, padx=(36, 36)):
@@ -4521,14 +4685,38 @@ def iniciar_interfaz():
     def org_nombre(r_):
         return os.path.basename(org["origen"].get(r_, r_))
     org_cola = queue.Queue()
-    org_pedidos = queue.Queue()
+    # v4.0: las miniaturas las dibuja otro proceso (arranca la primera vez que se usa Organizar)
+    org_q_ent, org_q_sal = mp.Queue(), mp.Queue()
+    org_proc = {"p": None}
+
+    class _PedidosOrg:
+        def put(self, msg):
+            if msg[0] == "cerrar" and not org_proc["p"]:
+                org_pedidos_hilo.put(msg)
+                return
+            if org_proc["p"] is None:
+                try:
+                    org_proc["p"] = mp.Process(target=_proceso_miniaturas_org, args=(org_q_ent, org_q_sal),
+                                               daemon=True)
+                    org_proc["p"].start()
+                except Exception:
+                    org_proc["p"] = False
+            if org_proc["p"] is False:  # sin proceso: se dibuja aca (como antes)
+                org_pedidos_hilo.put(msg)
+                return
+            if msg[0] != "cerrar" and msg[0][0] != org_proc.get("gen"):
+                org_proc["gen"] = msg[0][0]
+                org_q_ent.put(("gen", msg[0][0]))
+            org_q_ent.put(msg)
+    org_pedidos = _PedidosOrg()
+    org_pedidos_hilo = queue.Queue()
     v_org_info = tk.StringVar(value="")
     v_org_tam = tk.StringVar(value="Medianas")
 
     def org_hilo_miniaturas():
         abiertos = {}
         while True:
-            clave, ruta_f, pag, ancho = org_pedidos.get()
+            clave, ruta_f, pag, ancho = org_pedidos_hilo.get()
             if clave == "cerrar":  # v3.5: soltar el archivo (se va a reemplazar)
                 try:
                     abiertos.pop(ruta_f).close()
@@ -4622,7 +4810,7 @@ def iniciar_interfaz():
     marco_cv.grid_rowconfigure(0, weight=1)
     cv = tk.Canvas(marco_cv, highlightthickness=0, bd=0, takefocus=1)
     cv.grid(row=0, column=0, sticky="nsew", padx=(8, 0), pady=8)
-    sb_org = ctk.CTkScrollbar(marco_cv, command=cv.yview, button_color=C["suave_h"],
+    sb_org = Desliz(marco_cv, command=cv.yview, button_color=C["suave_h"],
                               button_hover_color=C["borde"])
     sb_org.grid(row=0, column=1, sticky="ns", padx=(0, 4), pady=8)
     cv.configure(yscrollcommand=sb_org.set)
@@ -5418,6 +5606,15 @@ def iniciar_interfaz():
 
     def org_recibir():
         hubo = False
+        try:  # v4.0: lo que llega del proceso de miniaturas
+            for _ in range(60):
+                r_ = org_q_sal.get_nowait()
+                if len(r_) == 4:
+                    org_cola.put((r_[0], Image.frombytes("RGB", (r_[1], r_[2]), r_[3])))
+                else:
+                    org_cola.put((r_[0], None))
+        except Exception:
+            pass
         try:
             while True:
                 k, v = org_cola.get_nowait()
@@ -5800,6 +5997,12 @@ def iniciar_interfaz():
                 q_.put(None)
             except Exception:
                 pass
+        if org_proc["p"]:
+            try:
+                org_q_ent.put(None)
+                vis["procs"].append(org_proc["p"])
+            except Exception:
+                pass
         for pr in vis["procs"]:
             try:
                 pr.join(timeout=0.5)
@@ -5866,7 +6069,7 @@ def iniciar_interfaz():
     panel_min.grid_rowconfigure(0, weight=1)
     cvm = tk.Canvas(panel_min, width=ANCHO_IZQ - 30, highlightthickness=0, bd=0, takefocus=1)
     cvm.grid(row=0, column=0, sticky="ns", padx=(6, 0), pady=8)
-    sbm = ctk.CTkScrollbar(panel_min, command=lambda *a: (cvm.yview(*a), mini_pedir_dibujo()),
+    sbm = Desliz(panel_min, command=lambda *a: (cvm.yview(*a), mini_pedir_dibujo()),
                            button_color=C["suave_h"], button_hover_color=C["borde"])
     sbm.grid(row=0, column=1, sticky="ns", padx=(0, 4), pady=8)
     cvm.configure(yscrollcommand=sbm.set, yscrollincrement=MINI_CELDA // 3)
@@ -6040,17 +6243,20 @@ def iniciar_interfaz():
             if not herr_w.winfo_ismapped():
                 herr_w.place(relx=0, rely=0, relwidth=1, relheight=1)
             herr_w.lift()
+            raiz.after_idle(dibujar_herr)
         elif herr_w.winfo_ismapped():
             herr_w.place_forget()
 
     # ---------- v3.2: «Herramientas»: todas las herramientas en tarjetas (como Adobe)
-    herr_w = ctk.CTkFrame(area_doc, fg_color=C["fondo"], corner_radius=0)
-    herr_f = ctk.CTkScrollableFrame(herr_w, fg_color=C["fondo"], corner_radius=0)
-    herr_f.pack(fill="both", expand=True)
-    herr_caja = ctk.CTkFrame(herr_f, fg_color="transparent")
-    herr_caja.pack(pady=(26, 20), padx=30, anchor="n")
-    ctk.CTkLabel(herr_caja, text="Herramientas", font=F(24, "bold"), text_color=C["texto"], anchor="w").grid(
-        row=0, column=0, columnspan=3, sticky="ew", pady=(0, 14))
+    # v4.0: las tarjetas se DIBUJAN en un solo lienzo (antes eran ~140 controles armados al iniciar)
+    herr_w = tk.Frame(area_doc, bd=0, highlightthickness=0)
+    herr_cv = tk.Canvas(herr_w, highlightthickness=0, bd=0)
+    herr_sb = Desliz(herr_w, command=herr_cv.yview, button_color=C["suave_h"],
+                               button_hover_color=C["borde"])
+    herr_sb.pack(side="right", fill="y")
+    herr_cv.pack(side="left", fill="both", expand=True)
+    herr_cv.configure(yscrollcommand=herr_sb.set)
+    herr_est = {"sobre": None, "fotos": {}}
     HERRAMIENTAS = [
         ("agregar", "Agregar texto", "Escribir texto nuevo sobre la hoja", lambda: cinta_texto("Agregar")),
         ("cambiar", "Cambiar texto", "Reemplazar texto del PDF (párrafo o renglón)", lambda: cinta_texto("Cambiar")),
@@ -6073,23 +6279,77 @@ def iniciar_interfaz():
         dibujar_superior()
         f_()
 
-    for k_h, (cl_, tit_, desc_, f_) in enumerate(HERRAMIENTAS):
-        tarj_h = ctk.CTkFrame(herr_caja, fg_color=C["tarjeta"], corner_radius=12, border_width=1,
-                              border_color=C["borde"], width=250, height=74, cursor="hand2")
-        tarj_h.grid(row=1 + k_h // 3, column=k_h % 3, padx=6, pady=6, sticky="nsew")
-        tarj_h.grid_propagate(False)
-        ico_h = ctk.CTkLabel(tarj_h, text="", image=ctk.CTkImage(_icono(cl_, COLOR_ICONO.get(cl_, "#64748B"), 34),
-                                                                  size=(34, 34)))
-        ico_h.place(x=14, rely=0.5, anchor="w")
-        l1_h = ctk.CTkLabel(tarj_h, text=tit_, font=F(13, "bold"), text_color=C["texto"], anchor="w")
-        l1_h.place(x=60, y=14)
-        l2_h = ctk.CTkLabel(tarj_h, text=desc_, font=F(11), text_color=C["texto2"], anchor="w", wraplength=180,
-                            justify="left")
-        l2_h.place(x=60, y=36)
-        for w_ in (tarj_h, ico_h, l1_h, l2_h):
-            w_.bind("<Button-1>", lambda e, f__=f_: usar_herramienta(f__))
-            w_.bind("<Enter>", lambda e, t__=tarj_h: t__.configure(border_color=C["acento"]))
-            w_.bind("<Leave>", lambda e, t__=tarj_h: t__.configure(border_color=C["borde"]))
+    def _redondeado(cv_, x0, y0, x1, y1, r, **kw):
+        pts = [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1, x1 - r, y1, x0 + r, y1, x0, y1,
+               x0, y1 - r, x0, y0 + r, x0, y0]
+        return cv_.create_polygon(pts, smooth=True, **kw)
+
+    def herr_geo():
+        cw_, ch_, gap = px(250), px(74), px(12)
+        cols = max(1, min(3, (herr_cv.winfo_width() - px(60) + gap) // (cw_ + gap)))
+        x0 = max(px(30), (herr_cv.winfo_width() - cols * cw_ - (cols - 1) * gap) // 2)
+        return cw_, ch_, gap, cols, x0, px(80)
+
+    def dibujar_herr(*_):
+        if not herr_w.winfo_ismapped():
+            return
+        cv_ = herr_cv
+        fondo = col("fondo")
+        herr_w.configure(bg=fondo)
+        cv_.configure(bg=fondo)
+        cv_.delete("all")
+        cw_, ch_, gap, cols, x0, y0 = herr_geo()
+        cv_.create_text(x0 + 4, px(44), text="Herramientas", anchor="w", fill=col("texto"), font=(FAM, 18, "bold"))
+        for k_h, (cl_, tit_, desc_, f_) in enumerate(HERRAMIENTAS):
+            x = x0 + (k_h % cols) * (cw_ + gap)
+            y = y0 + (k_h // cols) * (ch_ + gap)
+            sobre = herr_est["sobre"] == k_h
+            _redondeado(cv_, x, y, x + cw_, y + ch_, px(12), fill=col("tarjeta"),
+                        outline=col("acento") if sobre else col("borde"), width=2 if sobre else 1,
+                        tags=("tarj", f"h{k_h}"))
+            kf = (cl_, px(34))
+            ft = herr_est["fotos"].get(kf)
+            if ft is None:
+                ft = herr_est["fotos"][kf] = foto_tk(_icono(cl_, COLOR_ICONO.get(cl_, "#64748B"), px(34)))
+            cv_.create_image(x + px(14) + px(17), y + ch_ / 2, image=ft, tags=("tarj", f"h{k_h}"))
+            cv_.create_text(x + px(60), y + px(22), text=tit_, anchor="w", fill=col("texto"),
+                            font=(FAM, 10, "bold"), tags=("tarj", f"h{k_h}"))
+            cv_.create_text(x + px(60), y + px(46), text=desc_, anchor="w", fill=col("texto2"), font=(FAM, 8),
+                            width=cw_ - px(72), tags=("tarj", f"h{k_h}"))
+        filas = (len(HERRAMIENTAS) + cols - 1) // cols
+        cv_.configure(scrollregion=(0, 0, cv_.winfo_width(), y0 + filas * (ch_ + gap) + px(20)))
+
+    def herr_indice(ev):
+        cw_, ch_, gap, cols, x0, y0 = herr_geo()
+        x, y = herr_cv.canvasx(ev.x) - x0, herr_cv.canvasy(ev.y) - y0
+        if x < 0 or y < 0:
+            return None
+        c_, f_ = int(x // (cw_ + gap)), int(y // (ch_ + gap))
+        if c_ >= cols or x - c_ * (cw_ + gap) > cw_ or y - f_ * (ch_ + gap) > ch_:
+            return None
+        k_ = f_ * cols + c_
+        return k_ if k_ < len(HERRAMIENTAS) else None
+
+    def herr_mover(ev):
+        k_ = herr_indice(ev)
+        if k_ != herr_est["sobre"]:
+            herr_est["sobre"] = k_
+            herr_cv.configure(cursor="hand2" if k_ is not None else "")
+            dibujar_herr()
+
+    def herr_clic(ev):
+        k_ = herr_indice(ev)
+        if k_ is not None:
+            herr_est["sobre"] = None
+            usar_herramienta(HERRAMIENTAS[k_][3])
+
+    herr_cv.bind("<Motion>", herr_mover)
+    herr_cv.bind("<Leave>", lambda e: (herr_est.update(sobre=None), dibujar_herr()))
+    herr_cv.bind("<Button-1>", herr_clic)
+    herr_cv.bind("<Configure>", lambda e: raiz.after_idle(dibujar_herr))
+    for ev_ in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+        herr_cv.bind(ev_, lambda e: herr_cv.yview_scroll(-1 if (getattr(e, "delta", 0) > 0 or
+                                                                 getattr(e, "num", 0) == 4) else 1, "units"))
 
     # ---------- v3.2: riel de herramientas a la derecha (iconos de color, como Adobe)
     RIEL_DER = [("agregar", "Agregar texto", lambda: cinta_texto("Agregar"), "texto:Agregar"),
@@ -6358,10 +6618,10 @@ def iniciar_interfaz():
             self.cv = tk.Canvas(self.marco, highlightthickness=0, bd=0, takefocus=1, yscrollincrement=24,
                                 xscrollincrement=24)
             self.cv.grid(row=2, column=0, sticky="nsew", padx=(6, 0), pady=(2, 0))
-            self.sbv = ctk.CTkScrollbar(self.marco, command=self._yview, button_color=C["suave_h"],
+            self.sbv = Desliz(self.marco, command=self._yview, button_color=C["suave_h"],
                                         button_hover_color=C["borde"])
             self.sbv.grid(row=2, column=1, sticky="ns", padx=(0, 4), pady=(2, 0))
-            self.sbh = ctk.CTkScrollbar(self.marco, orientation="horizontal", command=self._xview,
+            self.sbh = Desliz(self.marco, orientation="horizontal", command=self._xview,
                                         button_color=C["suave_h"], button_hover_color=C["borde"])
             self.sbh.grid(row=3, column=0, sticky="ew", padx=(6, 0), pady=(0, 4))
             self.cv.configure(yscrollcommand=self.sbv.set, xscrollcommand=self.sbh.set)
@@ -10158,7 +10418,7 @@ def iniciar_interfaz():
         for k_, t_ in enumerate(pest):
             if k_ != vis["act"]:
                 m_.add_command(label=f"Comparar con «{t_['nombre']}»", command=lambda k__=k_: comparar(vis["act"], k__))
-        m_.tk_popup(superior.winfo_rootx() + 600, superior.winfo_rooty() + ALTO_SUP - 6)
+        m_.tk_popup(superior.winfo_rootx() + 600, superior.winfo_rooty() + px(36) - 6)
 
     # ================= panel de herramienta (Aplanar / Foliar / Comprimir) a la derecha
     iconos_panel = {c_: ctk.CTkImage(_icono(c_, col_, 26 * 3), size=(26, 26)) for c_, _t, col_, *_r in ICONOS}
@@ -10576,7 +10836,7 @@ def iniciar_interfaz():
         m_.add_command(label="Acerca de PdFOL", command=acerca_de)
         app["menu_logo"] = True
         dibujar_lateral()
-        m_.tk_popup(superior.winfo_rootx() + 12, superior.winfo_rooty() + ALTO_SUP - 4)
+        m_.tk_popup(superior.winfo_rootx() + 12, superior.winfo_rooty() + px(36) - 4)
 
         def vigilar():  # se quita el resaltado del logo cuando se cierra el menu
             if MenuPdfol.abierto is m_:
@@ -10644,7 +10904,7 @@ def iniciar_interfaz():
                        ("Deshacer · Rehacer", "Ctrl+Z · Ctrl+Y"), ("Imprimir", "Ctrl+P"),
                        ("Más opciones", "clic derecho")):
             m_.add_command(label=t_, acelerador=a_)
-        m_.tk_popup(superior.winfo_rootx() + 12, superior.winfo_rooty() + ALTO_SUP - 4)
+        m_.tk_popup(superior.winfo_rootx() + 12, superior.winfo_rooty() + px(36) - 4)
         return "break"
 
     def acerca_de():
@@ -11417,7 +11677,7 @@ def iniciar_interfaz():
                 pct_ = v_.pct_actual()
                 v_pct_inf.set(f"{pct_:.0f} %")
                 v_pct_bar.set(f"{pct_:.0f} %")
-                if not zoom_inf["arrastrando"]:
+                if not zoom_inf["arrastrando"] and barra_inf.winfo_ismapped():  # v4.0: no redibujar lo oculto
                     s_zoom.set(max(0.0, min(1.0, math.log(max(10, min(800, pct_)) / 10) / math.log(80))))
             else:
                 v_tot_inf.set("")
@@ -11433,7 +11693,7 @@ def iniciar_interfaz():
                       app.get("vista_top"), v_tot_bar.get(), v_pct_bar.get(), bool(app.get("completa")))
             if firma_ != estado_ui["firma"]:
                 estado_ui["firma"] = firma_
-                for m_, b_ in b_modos.items():
+                for m_, b_ in (b_modos.items() if barra_inf.winfo_ismapped() else ()):
                     b_.configure(fg_color=C["lat_sel"] if m_ == modo_ else C["suave"])
                 for k_r, b_ in riel_b.items():
                     b_.configure(fg_color=C["suave"] if k_r == lado_ else "transparent")
@@ -11671,8 +11931,97 @@ def iniciar_interfaz():
             raiz.focus_force()
         raiz.after(350, cerrar_pantalla_de_inicio)
         raiz.after(250, arrancar_procesos)
-        raiz.after(700, armar_lo_que_falta)  # v2.5: las paginas que no se ven, despues
+        # v4.0: las paginas y paneles se arman recien cuando se abren por primera vez (no todos al iniciar)
     raiz.after(150, iniciar_dibujantes)  # primero se muestra la ventana
+
+    # v4.0: la basura de Python se junta SOLO aca, en el hilo de la ventana. Si el recolector corria en otro
+    # hilo y liberaba letras o imagenes de Tk, la ventana se podia quedar pegada para siempre
+    import gc
+    gc.disable()
+
+    def juntar_basura():
+        try:
+            gc.collect()
+        finally:
+            raiz.after(4000, juntar_basura)
+    raiz.after(4000, juntar_basura)
+
+    # ---- v4.0: cambio de monitor (otra escala: 100 % -> 150 %...). Se ajusta UNA vez, cuando la ventana ya
+    # se solto y quedo quieta, sin volverla transparente
+    def _boton_apretado():
+        if os.name != "nt":
+            return False
+        try:
+            import ctypes
+            return bool(ctypes.windll.user32.GetAsyncKeyState(0x01) & 0x8000)
+        except Exception:
+            return False
+
+    def ajustar_escala(w_, nueva):
+        T_ = ctk.ScalingTracker
+        T_.window_dpi_scaling_dict[w_] = nueva
+        try:
+            w_.block_update_dimensions_event()
+        except Exception:
+            pass
+        try:
+            T_.update_scaling_callbacks_for_window(w_)
+        finally:
+            try:
+                w_.unblock_update_dimensions_event()
+            except Exception:
+                pass
+        if w_ is not raiz:
+            return
+        escala["s"] = max(1.0, nueva * T_.widget_scaling)
+        if escala["ts0"]:  # letras de los dibujos propios (en puntos) al tamano de la nueva pantalla
+            try:
+                raiz.tk.call("tk", "scaling", escala["ts0"] * escala["s"] / escala["s0"])
+            except Exception:
+                pass
+        try:
+            superior.configure(height=px(36))
+            cinta.configure(height=px(44))
+            riel_der.configure(width=px(44))
+        except Exception:
+            pass
+        for d_ in Desliz.todas:
+            try:
+                d_.reescalar()
+            except Exception:
+                pass
+        for f_ in (dibujar_superior, dibujar_cinta, dibujar_riel_der, dibujar_herr, redibujar_todo):
+            try:
+                f_()
+            except Exception:
+                pass
+        if app["pagina"] == "organizar":
+            org_dibujar(True)
+
+    def revisar_monitor():
+        T_ = ctk.ScalingTracker
+        try:
+            ahora = time.monotonic()
+            for w_ in list(T_.window_widgets_dict):
+                try:
+                    if not w_.winfo_exists() or w_.state() == "iconic":
+                        continue
+                    nueva = T_.get_window_dpi_scaling(w_)
+                except Exception:
+                    continue
+                if nueva == T_.window_dpi_scaling_dict.get(w_):
+                    continue
+                geo_ = w_.winfo_geometry()
+                if escala["geo"].get(w_) != geo_ or _boton_apretado():  # todavia se esta moviendo
+                    escala["geo"][w_] = geo_
+                    escala["quieta"][w_] = ahora
+                    continue
+                if ahora - escala["quieta"].get(w_, ahora) >= 0.35:
+                    ajustar_escala(w_, nueva)
+                    escala["geo"].pop(w_, None)
+        finally:
+            raiz.after(200, revisar_monitor)
+    raiz.after(1500, revisar_monitor)
     raiz.bind("<Map>", lambda e: raiz.after(60, redibujar_todo) if e.widget is raiz else None, add="+")
     # ---- v2.4: arrastrar PDF a la ventana (visor: se abren; Organizar: las opciones de «Unir»)
     def soltar_pdf(datos):

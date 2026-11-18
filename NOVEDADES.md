@@ -1,9 +1,12 @@
-## PdFOL v3.6 · by Meneses999
+## PdFOL v4.0 · by Meneses999
 
-- **Comparar en miniaturas**: al comparar, los dos PDF se ven en **miniaturas del mismo tamaño, varias por fila**. Tomá una hoja de cualquier parte y **arrastrala al otro PDF** (se copia; con **Shift** se mueve) o a otro lugar del mismo. Una raya azul muestra dónde cae.
-- **Agrandar para ver cuál es**: **Ctrl+rueda** o los botones **− / +** agrandan o achican las miniaturas; **doble clic** en una hoja la muestra grande y otro doble clic vuelve a las miniaturas.
-- Siguen Ctrl+C / Ctrl+X / Ctrl+V, Supr y clic derecho. «Guardar» (Ctrl+S): en este PDF o como copia.
-- Al «Separar», cada PDF vuelve a como se veía antes.
-- Nuevo modo de vista **«Miniaturas»** también fuera de Comparar (menú de modos de la barra).
+Versión de fondo: el programa es más rápido y no se pega.
 
-**Descarga:** `PdFOL_v3.6_portable.zip` (sin instalar) o `PdFOL_v3.6_instalador.exe`.
+- **Abre más rápido y es más liviano**: antes armaba todo al iniciar (unos 1.600 controles); ahora arma solo lo que se ve (unos 450) y cada panel (Foliar, Aplanar, Firmar, Perfiles…) se arma la primera vez que lo abrís.
+- **Otro monitor**: al pasar la ventana a una pantalla con otra escala (por ejemplo de 100 % a 150 %) ya **no se pone transparente ni se pega**: PdFOL espera a que sueltes la ventana y se ajusta una sola vez (más de 4 veces más rápido que antes).
+- **«Herramientas»** y las **barras de desplazamiento** ahora se dibujan (antes eran muchos controles que se redibujaban en cada movimiento de la rueda).
+- **Organizar**: las miniaturas se dibujan en un proceso aparte; la ventana ya no se traba mientras cargan.
+- Se corrigió un **bloqueo ocasional** de la ventana.
+- Sigue todo lo anterior (comparar en miniaturas, copiar imágenes, girar páginas…).
+
+**Descarga:** `PdFOL_v4.0_portable.zip` (sin instalar) o `PdFOL_v4.0_instalador.exe`.
