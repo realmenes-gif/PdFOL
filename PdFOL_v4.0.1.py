@@ -363,12 +363,16 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.0"
-VERSION_INTERNA = "4.0"
+VERSION = "v4.0.1"
+VERSION_INTERNA = "4.0.1"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.0.1", [
+        "Inicio: al elegir un PDF reciente (o abrir uno) se ve enseguida; ya no hace falta tocar su pestaña.",
+        "Las barras de desplazamiento se vuelven a poder tomar y arrastrar (visor, miniaturas y Organizar).",
+    ]),
     ("v4.0", [
         "Más rápido y liviano: al abrir arma solo lo que se ve (de ~1.600 controles a ~450); cada panel se arma "
         "la primera vez que lo abrís. «Herramientas» y las barras de desplazamiento ahora se dibujan.",
@@ -4052,9 +4056,13 @@ def iniciar_interfaz():
         def _pintar(self, colores=False):
             L, g_ = self._largo(), px(12)
             m_ = px(6)
-            a_, b_ = m_ + self.lo * (L - 2 * m_), m_ + self.hi * (L - 2 * m_)
-            if b_ - a_ < px(16):
-                b_ = a_ + px(16)
+            pista = max(1, L - 2 * m_)
+            minimo = px(28)  # largo minimo de la raya (para poder tomarla)
+            real = (self.hi - self.lo) * pista
+            extra = max(0.0, minimo - real)
+            a_ = m_ + self.lo * (pista - extra)
+            b_ = a_ + real + extra
+            self._ab = (a_, b_, pista - extra)
             lleno = self.lo <= 0.0 and self.hi >= 1.0
             if self.vert:
                 self.coords(self.raya, g_ / 2, a_, g_ / 2, b_)
@@ -4082,21 +4090,21 @@ def iniciar_interfaz():
             self.itemconfigure(self.raya, width=px(8))
             self._pintar(True)
 
-        def _frac(self, ev):
-            m_ = px(6)
-            return ((ev.y if self.vert else ev.x) - m_) / max(1, self._largo() - 2 * m_)
-
         def _press(self, ev):
-            f_ = self._frac(ev)
-            if self.lo <= f_ <= self.hi:
-                self._arr = (f_, self.lo)
+            # v4.0.1: se toma la raya por donde se VE (antes se calculaba sin el largo minimo y casi nunca se
+            # podia agarrar en documentos largos)
+            pos = ev.y if self.vert else ev.x
+            a_, b_, util = getattr(self, "_ab", (0, 0, 1))
+            if a_ - px(4) <= pos <= b_ + px(4):
+                self._arr = (pos, self.lo, max(1.0, util))
             elif self.cmd:
-                self.cmd("scroll", -1 if f_ < self.lo else 1, "pages")
+                self.cmd("scroll", -1 if pos < a_ else 1, "pages")
 
         def _mover(self, ev):
             if self._arr and self.cmd:
-                f0, lo0 = self._arr
-                self.cmd("moveto", max(0.0, min(1.0, lo0 + self._frac(ev) - f0)))
+                p0, lo0, util = self._arr
+                pos = ev.y if self.vert else ev.x
+                self.cmd("moveto", max(0.0, min(1.0, lo0 + (pos - p0) / util)))
 
     class Tarjeta(ctk.CTkFrame):
         def __init__(self, master, fila, col=0, colspan=1, padx=(36, 36)):
@@ -10088,6 +10096,9 @@ def iniciar_interfaz():
         t_ant = pest_activa()
         if t_ant:
             guardar_estado(t_ant)
+        if mostrar_visor and app.get("vista_top"):  # v4.0.1: abierto desde Inicio (recientes): se ve enseguida
+            app["vista_top"] = None
+            raiz.after_idle(lambda: (mostrar_inicio(), dibujar_superior()))
         cont_pest["n"] += 1
         t_ = {"id": cont_pest["n"], "ruta": r_, "nombre": os.path.basename(r_), "pag": 0, "frac": 0.0,
               "org_y": 0, "zoom": almacen.datos.get("zoom_inicial", "Ajustar ancho"),

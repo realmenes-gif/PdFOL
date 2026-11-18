@@ -1,4 +1,9 @@
-## PdFOL v4.0 · by Meneses999
+## PdFOL v4.0.1 · by Meneses999
+
+- **Inicio**: al elegir un PDF del historial (o abrir uno) se muestra enseguida; ya no hace falta tocar su pestaña.
+- **Barras de desplazamiento**: se vuelven a poder tomar y arrastrar para subir y bajar (visor, miniaturas y Organizar).
+
+### De la v4.0
 
 Versión de fondo: el programa es más rápido y no se pega.
 
@@ -9,4 +14,4 @@ Versión de fondo: el programa es más rápido y no se pega.
 - Se corrigió un **bloqueo ocasional** de la ventana.
 - Sigue todo lo anterior (comparar en miniaturas, copiar imágenes, girar páginas…).
 
-**Descarga:** `PdFOL_v4.0_portable.zip` (sin instalar) o `PdFOL_v4.0_instalador.exe`.
+**Descarga:** `PdFOL_v4.0.1_portable.zip` (sin instalar) o `PdFOL_v4.0.1_instalador.exe`.
