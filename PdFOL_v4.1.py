@@ -363,12 +363,20 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.0.1"
-VERSION_INTERNA = "4.0.1"
+VERSION = "v4.1"
+VERSION_INTERNA = "4.1"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.1", [
+        "Editar texto directo en la hoja: al agregar o cambiar un texto se escribe ahí mismo, en un recuadro con "
+        "tiradores como en Word. El borde lo mueve y los costados cambian el ancho. Clic adentro para corregirlo.",
+        "Los párrafos cambiados del PDF ahora también se pueden mover.",
+        "Escaneos: el texto de la página en la que estás se reconoce solo (OCR, sin internet). Después se "
+        "selecciona, se copia y se cambia como cualquier texto. Clic derecho: «Copiar todo el texto reconocido».",
+        "Menú del clic derecho renovado: con sombra, íconos en color y atajos como teclas.",
+    ]),
     ("v4.0.1", [
         "Inicio: al elegir un PDF reciente (o abrir uno) se ve enseguida; ya no hace falta tocar su pestaña.",
         "Las barras de desplazamiento se vuelven a poder tomar y arrastrar (visor, miniaturas y Organizar).",
@@ -1819,6 +1827,108 @@ def _abrir_cache(docs, orden, ruta, maximo=8):
     return d
 
 
+def _carpeta_tessdata():
+    """Idiomas para reconocer texto (OCR): los que vienen con PdFOL; si no, los de Tesseract instalado."""
+    for c_ in (os.path.join(carpeta_recursos(), "tessdata"), os.environ.get("TESSDATA_PREFIX") or ""):
+        if c_ and os.path.isfile(os.path.join(c_, "spa.traineddata")):
+            return c_
+    try:
+        return fitz.get_tessdata()
+    except Exception:
+        return None
+
+
+def _colores_renglon(img, r_):
+    """(tinta, papel) de un renglon de la hoja escaneada: lo mas oscuro y lo mas claro de la zona."""
+    try:
+        caja = img.crop((max(0, int(r_.x0)), max(0, int(r_.y0)), min(img.width, int(r_.x1) + 1),
+                         min(img.height, int(r_.y1) + 1)))
+        px_ = list(caja.getdata())
+        if not px_:
+            return (0, 0, 0), (255, 255, 255)
+        px_.sort(key=lambda c: c[0] * 299 + c[1] * 587 + c[2] * 114)
+        n_ = len(px_)
+        osc = px_[: max(1, n_ // 12)]
+        cla = px_[int(n_ * 0.55): max(int(n_ * 0.55) + 1, int(n_ * 0.9))]
+        prom = lambda l_: tuple(int(sum(c[k] for c in l_) / len(l_)) for k in range(3))
+        return prom(osc), prom(cla)
+    except Exception:
+        return (0, 0, 0), (255, 255, 255)
+
+
+def _unir_parrafos(bloques):
+    """El OCR da un bloque por renglon: se juntan los renglones seguidos del mismo parrafo (mismo margen
+    izquierdo, letra parecida y poca separacion), como en un PDF de texto."""
+    lineas = sorted((ln for bl in bloques for ln in bl["lines"]), key=lambda l_: (l_["bbox"][1], l_["bbox"][0]))
+    out = []
+    for ln in lineas:
+        x0, y0, x1, y1 = ln["bbox"]
+        h_ = max(1.0, y1 - y0)
+        if out:
+            ult = out[-1]["lines"][-1]["bbox"]
+            hu = max(1.0, ult[3] - ult[1])
+            if (abs(x0 - out[-1]["bbox"][0]) < 1.5 * h_ and 0 <= y0 - ult[3] < 0.95 * max(h_, hu)
+                    and abs(h_ - hu) < 0.45 * max(h_, hu)):
+                b_ = out[-1]
+                b_["lines"].append(ln)
+                b_["bbox"] = (min(b_["bbox"][0], x0), b_["bbox"][1], max(b_["bbox"][2], x1), y1)
+                continue
+        out.append({"bbox": tuple(ln["bbox"]), "lines": [ln]})
+    return out
+
+
+def _proceso_ocr(entrada, salida):
+    """v4.1: reconoce el texto de paginas escaneadas (Tesseract dentro de MuPDF), fuera de la ventana.
+    Recibe (ruta, pag, ver); responde (ruta, pag, ver, letras, bloques) o (ruta, pag, ver, None, error)."""
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
+    fitz.TOOLS.mupdf_display_errors(False)
+    tess = _carpeta_tessdata()
+    while True:
+        msg = entrada.get()
+        if msg is None:
+            return
+        ruta, pag, ver_ = msg
+        try:
+            if not tess:
+                raise RuntimeError("faltan los idiomas del OCR (carpeta tessdata)")
+            with fitz.open(ruta) as d_:
+                pg = d_[pag]
+                idiomas = "+".join(l_ for l_ in ("spa", "eng") if os.path.isfile(os.path.join(tess, l_ + ".traineddata")))
+                tp = pg.get_textpage_ocr(language=idiomas or "eng", dpi=300, full=True, tessdata=tess)
+                m = pg.rotation_matrix
+                letras, lid = [], 0
+                for bl in pg.get_text("rawdict", textpage=tp)["blocks"]:
+                    for ln in bl.get("lines", []):
+                        lid += 1
+                        for sp in ln["spans"]:
+                            for ch in sp["chars"]:
+                                r_ = fitz.Rect(ch["bbox"]) * m
+                                letras.append((r_.x0, r_.y0, r_.x1, r_.y1, lid, ch["c"]))
+                esc = 2.0
+                pix = pg.get_pixmap(matrix=fitz.Matrix(esc, esc), alpha=False)
+                img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                bloques = []
+                for bl in pg.get_text("dict", textpage=tp)["blocks"]:
+                    if bl.get("type", 0) != 0:
+                        continue
+                    lineas = []
+                    for ln in bl.get("lines", []):
+                        spans = [{k_: sp[k_] for k_ in ("text", "size", "font", "flags", "color", "origin", "bbox")}
+                                 for sp in ln["spans"]]
+                        rv = fitz.Rect(ln["bbox"]) * m
+                        tinta, papel = _colores_renglon(img, rv * esc)
+                        lineas.append({"bbox": ln["bbox"], "dir": ln["dir"], "spans": spans, "tinta": tinta,
+                                       "papel": papel})
+                    bloques.append({"bbox": bl["bbox"], "lines": lineas})
+                bloques = _unir_parrafos(bloques)
+            salida.put((ruta, pag, ver_, letras, bloques))
+        except Exception as e:
+            salida.put((ruta, pag, ver_, None, str(e)))
+
+
 def _proceso_miniaturas_org(entrada, salida):
     """v4.0: miniaturas de Organizar en un proceso aparte (antes un hilo: competia con la ventana y la trababa).
     Recibe (clave, ruta, pag, ancho), ("gen", n) para descartar lo viejo, ("cerrar", ruta) o None.
@@ -3145,11 +3255,14 @@ def diseno_texto(it_):
         anchos = [ancho_texto(l_, it_) for l_, _f in lineas]
         caja = it_.get("ancho") or max(fitz.Rect(it_["rect_orig"]).x1 - x0, max(anchos + [0]))
     else:
-        lineas = [(l_, True) for l_ in it_["txt"].split("\n")]
         r_ = fitz.Rect(it_["rect"])
         x0, base0 = r_.x0 + tam * 0.3, r_.y0 + tam * 0.95
+        if it_.get("ancho"):  # v4.1: recuadro de ancho fijo (el texto se acomoda en renglones)
+            lineas = partir_renglones(it_["txt"], it_, it_["ancho"], con_fin=True)
+        else:
+            lineas = [(l_, True) for l_ in it_["txt"].split("\n")]
         anchos = [ancho_texto(l_, it_) for l_, _f in lineas]
-        caja = max(anchos + [0])
+        caja = it_.get("ancho") or max(anchos + [0])
     out = []
     for k_, ((l_, fin), w_) in enumerate(zip(lineas, anchos)):
         base = base0 + k_ * paso
@@ -6005,6 +6118,12 @@ def iniciar_interfaz():
                 q_.put(None)
             except Exception:
                 pass
+        if ocr_["p"]:
+            try:
+                ocr_q_ent.put(None)
+                vis["procs"].append(ocr_["p"])
+            except Exception:
+                pass
         if org_proc["p"]:
             try:
                 org_q_ent.put(None)
@@ -7067,11 +7186,18 @@ def iniciar_interfaz():
                 items_ = [it_ for it_ in vis["res"].get(ruta, {}).get(pag, []) if it_["tipo"] != "giro"]
                 if items_:
                     M = matriz_vista(lay["dims"][i][0], lay["dims"][i][1], z, rot, parar)
+                    ined_ = vis.get("ined")
                     for it_ in items_:
+                        if ined_ and ined_["it"] is it_:
+                            continue  # v4.1: se esta escribiendo encima
                         bx_, by_, ft_ = capa_item(it_, M, (round(z, 5), rot, parar))
                         cv_.create_image(x + bx_, y + by_, anchor="nw", image=ft_)
                     e_ = vis.get("edit_item")  # v2.6: la firma o el texto elegido, con su marco y tirador
-                    if e_ and e_[0] == ruta and e_[1] == pag and app.get("panel") in ("firmar", "texto"):
+                    if (e_ and e_[0] == ruta and e_[1] == pag and app.get("panel") in ("firmar", "texto") and not ined_
+                            and e_[2]["tipo"] in ("texto_n", "reemplazo")):  # v4.1: recuadro como Word
+                        q0_ = fitz.Rect(caja_texto(e_[2])) * M
+                        dibujar_marco_word(cv_, x + q0_.x0 - 3, y + q0_.y0 - 3, x + q0_.x1 + 3, y + q0_.y1 + 3, "marco")
+                    elif e_ and e_[0] == ruta and e_[1] == pag and app.get("panel") in ("firmar", "texto") and not ined_:
                         rr_ = fitz.Rect(e_[2]["rect"])
                         qs_ = [q_ * M for q_ in (rr_.tl, rr_.tr, rr_.br, rr_.bl)]
                         cv_.create_rectangle(x + min(q.x for q in qs_) - 2, y + min(q.y for q in qs_) - 2,
@@ -7116,6 +7242,8 @@ def iniciar_interfaz():
             enviar_pedidos()
             if vis["modo_res"]:
                 self._previa()
+            if vis.get("ined"):  # v4.1: el cuadro de escritura sobre la hoja
+                ined_colocar(self)
 
         # ---- raton: arrastrar desplaza; con el resaltador marca (Texto / Área o polilínea / Libre)
         def _punto_pagina(self, cx_, cy_, i=None):
@@ -7166,11 +7294,14 @@ def iniciar_interfaz():
                     cx_, cy_ = self.cv.canvasx(ev.x), self.cv.canvasy(ev.y)
                     base = self._punto_pagina(cx_, cy_)
                     chars = caracteres_de(base[1], base[2]) if base else None
+                    if base and chars == [] and ocr_pedir(base[1], base[2]):  # v4.1: escaneo: se reconoce
+                        chars = None
                     if base:  # v3.4: clic sobre una imagen (no sobre texto): se elige para copiarla
                         pi_ = fitz.Point(self._pt(ev, base))
                         sobre_txt = bool(chars) and any(c_[0] - 1 <= pi_.x <= c_[2] + 1 and c_[1] - 1 <= pi_.y <= c_[3] + 1
                                                         for c_ in chars)
-                        im_ = None if sobre_txt else imagen_en(base[1], base[2], pi_)
+                        im_ = None if (sobre_txt or es_escaneo(base[1], base[2])) else imagen_en(base[1], base[2], pi_,
+                                                                                                  sin_fondo=True)
                         if im_:
                             vis["seleccion"] = None
                             elegir_imagen(im_, bool(ev.state & 0x4))
@@ -7441,7 +7572,7 @@ def iniciar_interfaz():
                     m_.add_command(label=que_, command=lambda: quitar_resaltado(ruta, pag, toco[-1]),
                                    punto="#EF4444")
                     m_.add_separator()
-                im_ = imagen_en(ruta, pag, p_) if not toco else None
+                im_ = imagen_en(ruta, pag, p_, sin_fondo=True) if not toco and not es_escaneo(ruta, pag) else None
                 if im_ and not any(misma_img(im_, x_) for x_ in vis.get("img_sel") or []):
                     elegir_imagen(im_)
                 n_im = len(vis.get("img_sel") or [])
@@ -7456,6 +7587,15 @@ def iniciar_interfaz():
                     m_.add_command(label=f"Copiar todas las imágenes de esta página ({len(todas_)})",
                                    command=lambda: copiar_imagenes(list(todas_)))
                 if n_im or todas_:
+                    m_.add_separator()
+                oc_ = ocr_de(ruta, pag)  # v4.1: escaneos
+                if oc_ and oc_.get("letras"):
+                    m_.add_command(label="Copiar todo el texto reconocido de esta página", punto="#8B5CF6",
+                                   command=lambda: copiar_texto_ocr(ruta, pag))
+                    m_.add_separator()
+                elif not oc_ and (es_escaneo(ruta, pag) or caracteres_de(ruta, pag) == []):
+                    m_.add_command(label="Reconocer el texto de esta página (OCR)", punto="#8B5CF6",
+                                   command=lambda: ocr_pedir(ruta, pag, forzar=True))
                     m_.add_separator()
             punto = "#%02x%02x%02x" % tuple(vis["res_color"])
             if vis.get("seleccion"):
@@ -8067,6 +8207,12 @@ def iniciar_interfaz():
             self.items.append(("sub", label, menu, state != "disabled" and menu is not None and menu.items, "▸", None))
 
         def cerrar(self, *_):
+            for s_ in getattr(self, "sombras", None) or []:
+                try:
+                    s_.destroy()
+                except Exception:
+                    pass
+            self.sombras = []
             w = getattr(self, "w", None)
             if w is not None:
                 try:
@@ -8079,73 +8225,169 @@ def iniciar_interfaz():
                 MenuPdfol.abierto = None
 
         def tk_popup(self, x, y):
+            # v4.1: menu DIBUJADO (un solo lienzo): con sombra, iconos en chips de color, atajos como teclas y
+            # realce al pasar el mouse. Antes eran varios controles por renglon y se veia plano
             if MenuPdfol.abierto is not None:
                 MenuPdfol.abierto.cerrar()
             MenuPdfol.abierto = self
+            self.sombras = []
+            if os.name == "nt":  # sombra suave: dos capas semitransparentes debajo (se ubican despues)
+                for alfa in (0.10, 0.07):
+                    try:
+                        s_ = tk.Toplevel(raiz)
+                        s_.overrideredirect(True)
+                        s_.withdraw()
+                        s_.configure(bg="#000000")
+                        s_.attributes("-alpha", alfa)
+                        s_.attributes("-topmost", True)
+                        self.sombras.append(s_)
+                    except Exception:
+                        pass
             w = tk.Toplevel(raiz)
             self.w = w
             w.overrideredirect(True)
             w.attributes("-topmost", True)
             w.configure(bg=col("borde"))
-            caja = ctk.CTkFrame(w, fg_color=C["tarjeta"], corner_radius=0, border_width=0)
-            caja.pack(fill="both", expand=True, padx=1, pady=1)
-            filas = []
+
+            def hx(c_):
+                c_ = c_.lstrip("#")
+                return tuple(int(c_[k:k + 2], 16) for k in (0, 2, 4))
+
+            def mezcla(a_, b_, t_):
+                a_, b_ = hx(a_), hx(b_)
+                return "#%02X%02X%02X" % tuple(round(a_[k] * t_ + b_[k] * (1 - t_)) for k in range(3))
+            fondo, txt_c, txt2 = col("tarjeta"), col("texto"), col("texto2")
+            acento, suave, linea, campo, borde = col("acento"), col("suave"), col("linea"), col("campo"), col("borde")
+            f_txt = tkfont.Font(root=raiz, family=FAM, size=10)
+            f_ata = tkfont.Font(root=raiz, family=FAM, size=8)
+            f_tit = tkfont.Font(root=raiz, family=FAM, size=11, weight="bold")
+            ALTO, SEP, TIT, PAD = px(34), px(11), px(38), px(6)
+            filas, yy = [], PAD
+            ancho_txt = ancho_ata = 0
             for it in self.items:
                 if it[0] == "sep":
-                    ctk.CTkFrame(caja, height=1, fg_color=C["linea"]).pack(fill="x", padx=12, pady=4)
-                    continue
-                if it[0] == "tit":
-                    ctk.CTkLabel(caja, text=it[1], font=F(13, "bold"), text_color=C["texto"], anchor="w").pack(
-                        fill="x", padx=16, pady=(10, 4))
-                    ctk.CTkFrame(caja, height=1, fg_color=C["linea"]).pack(fill="x", padx=12, pady=(0, 4))
-                    continue
-                _t, texto, accion, activo, atajo, punto = it
-                f_ = ctk.CTkFrame(caja, fg_color="transparent", corner_radius=7, height=30)
-                f_.pack(fill="x", padx=6, pady=(4 if not filas else 0, 0))
-                ico = ctk.CTkLabel(f_, text="●" if punto else "", width=18, font=F(13),
-                                   text_color=punto if punto else C["texto2"])
-                ico.pack(side="left", padx=(8, 4))
-                lt = ctk.CTkLabel(f_, text=texto, font=F(12), anchor="w",
-                                  text_color=C["texto"] if activo else C["texto2"])
-                lt.pack(side="left", padx=(0, 18), pady=4)
-                la = ctk.CTkLabel(f_, text=atajo, font=F(11), text_color=C["texto2"])
-                la.pack(side="right", padx=(10, 10))
-                filas.append((f_, lt, accion, activo, _t))
+                    filas.append((it, yy, SEP))
+                    yy += SEP
+                elif it[0] == "tit":
+                    filas.append((it, yy, TIT))
+                    yy += TIT
+                    ancho_txt = max(ancho_txt, f_tit.measure(it[1]) - px(30))
+                else:
+                    filas.append((it, yy, ALTO))
+                    yy += ALTO
+                    ancho_txt = max(ancho_txt, f_txt.measure(it[1]))
+                    if it[4]:
+                        ancho_ata = max(ancho_ata, f_ata.measure(it[4]) + px(14))
+            W = max(px(230), px(50) + ancho_txt + px(28) + ancho_ata + px(16))
+            H = yy + PAD
+            cv_ = tk.Canvas(w, width=W, height=H, bg=fondo, highlightthickness=0, bd=0, cursor="arrow")
+            cv_.pack(padx=1, pady=1)
+            cv_.create_rectangle(0, 0, W, px(3), fill=mezcla(acento, fondo, 0.85), outline="")  # filo de color
+            estado = {"i": None}
+            activos = [k_ for k_, (it, _y, _h) in enumerate(filas) if it[0] in ("cmd", "sub") and it[3]]
 
-                def entrar(_e, f_=f_, lt=lt, activo=activo):
-                    if activo:
-                        f_.configure(fg_color=C["suave"])
-                        lt.configure(text_color=C["acento"])
+            def redondeado(x0, y0, x1, y1, r, **kw):
+                pts = [x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1, x1 - r, y1, x0 + r, y1,
+                       x0, y1, x0, y1 - r, x0, y0 + r, x0, y0]
+                return cv_.create_polygon(pts, smooth=True, **kw)
 
-                def salir(_e, f_=f_, lt=lt, activo=activo):
-                    if activo:
-                        f_.configure(fg_color="transparent")
-                        lt.configure(text_color=C["texto"])
+            def pintar():
+                cv_.delete("fila")
+                for k_, (it, y0, h_) in enumerate(filas):
+                    if it[0] == "sep":
+                        cv_.create_line(px(14), y0 + h_ / 2, W - px(14), y0 + h_ / 2, fill=linea, tags="fila")
+                        continue
+                    if it[0] == "tit":
+                        cv_.create_text(px(16), y0 + px(16), text=it[1], anchor="w", font=f_tit, fill=txt_c, tags="fila")
+                        cv_.create_line(px(14), y0 + h_ - px(5), W - px(14), y0 + h_ - px(5), fill=linea, tags="fila")
+                        continue
+                    _t, texto, _acc, activo, atajo, punto = it
+                    sobre = estado["i"] == k_ and activo
+                    if sobre:  # realce: pastilla suave con su barrita de color
+                        redondeado(px(6), y0 + px(2), W - px(6), y0 + h_ - px(2), px(9), fill=suave, outline="",
+                                   tags="fila")
+                        cv_.create_rectangle(px(6), y0 + px(9), px(9), y0 + h_ - px(9), fill=acento, outline="",
+                                             tags="fila")
+                    c_ico = punto or (acento if sobre else txt2)
+                    cx, cy = px(28), y0 + h_ / 2
+                    chip = mezcla(c_ico, fondo, 0.22 if activo else 0.1)
+                    redondeado(cx - px(11), cy - px(11), cx + px(11), cy + px(11), px(7), fill=chip, outline="",
+                               tags="fila")
+                    r_ = px(4) if punto else px(3)
+                    cv_.create_oval(cx - r_, cy - r_, cx + r_, cy + r_,
+                                    fill=c_ico if activo else mezcla(c_ico, fondo, 0.4), outline="", tags="fila")
+                    cv_.create_text(px(48), cy, text=texto, anchor="w", font=f_txt,
+                                    fill=(acento if sobre else txt_c) if activo else mezcla(txt2, fondo, 0.7), tags="fila")
+                    if atajo and _t == "cmd":
+                        aw = f_ata.measure(atajo) + px(12)
+                        redondeado(W - px(14) - aw, cy - px(10), W - px(14), cy + px(10), px(5), fill=campo,
+                                   outline=borde, tags="fila")
+                        cv_.create_line(W - px(14) - aw + px(4), cy + px(9), W - px(18), cy + px(9),
+                                        fill=mezcla(borde, campo, 0.9), tags="fila")  # teclita con relieve
+                        cv_.create_text(W - px(14) - aw / 2, cy - px(1), text=atajo, font=f_ata, fill=txt2, tags="fila")
+                    elif _t == "sub":
+                        cv_.create_text(W - px(20), cy, text="›", font=f_tit, fill=txt2, tags="fila")
+            pintar()
 
-                def clic(_e, accion=accion, activo=activo, tipo=_t, f_=f_):
-                    if not activo:
-                        return "break"
-                    if tipo == "sub":  # el submenu se abre en el mismo lugar
-                        xs, ys = f_.winfo_rootx() + f_.winfo_width() - 8, f_.winfo_rooty()
-                        self.cerrar()
-                        raiz.after(10, lambda: accion.tk_popup(xs, ys))
-                        return "break"
-                    self.cerrar()
-                    if accion:
-                        raiz.after(10, accion)
+            def indice(y_):
+                for k_, (it, y0, h_) in enumerate(filas):
+                    if y0 <= y_ < y0 + h_ and it[0] in ("cmd", "sub"):
+                        return k_
+                return None
+
+            def mover(ev):
+                k_ = indice(ev.y)
+                if k_ != estado["i"]:
+                    estado["i"] = k_
+                    cv_.configure(cursor="hand2" if k_ is not None and filas[k_][0][3] else "arrow")
+                    pintar()
+
+            def ejecutar(k_):
+                if k_ is None:
                     return "break"
-                for w_ in (f_, ico, lt, la) + tuple(getattr(x_, "_label", x_) for x_ in (ico, lt, la)) + (
-                        getattr(f_, "_canvas", f_),):
-                    w_.bind("<Enter>", entrar, add="+")
-                    w_.bind("<Leave>", salir, add="+")
-                    w_.bind("<ButtonRelease-1>", clic)
-            ctk.CTkFrame(caja, height=6, fg_color="transparent").pack()
+                it, y0, h_ = filas[k_]
+                _t, _texto, accion, activo, _a, _p = it
+                if not activo:
+                    return "break"
+                if _t == "sub":  # el submenu se abre al costado
+                    xs, ys = w.winfo_rootx() + W - px(10), w.winfo_rooty() + y0
+                    self.cerrar()
+                    raiz.after(10, lambda: accion.tk_popup(xs, ys))
+                    return "break"
+                self.cerrar()
+                if accion:
+                    raiz.after(10, accion)
+                return "break"
+
+            def teclas(ev):
+                if not activos:
+                    return
+                if ev.keysym in ("Down", "Up"):
+                    i_ = estado["i"]
+                    pos = activos.index(i_) if i_ in activos else -1
+                    pos = (pos + (1 if ev.keysym == "Down" else -1)) % len(activos)
+                    estado["i"] = activos[pos]
+                    pintar()
+                elif ev.keysym in ("Return", "KP_Enter", "space"):
+                    ejecutar(estado["i"])
+            cv_.bind("<Motion>", mover)
+            cv_.bind("<Leave>", lambda e: (estado.update(i=None), pintar()))
+            cv_.bind("<ButtonRelease-1>", lambda e: ejecutar(indice(e.y)))
+            w.bind("<Key>", teclas)
             w.update_idletasks()
-            ww, hh = w.winfo_reqwidth(), w.winfo_reqheight()
+            ww, hh = W + 2, H + 2
             sx, sy = w.winfo_screenwidth(), w.winfo_screenheight()
-            x = min(x, sx - ww - 4)
-            y = min(y, sy - hh - 4)
-            w.geometry(f"{ww}x{hh}+{max(0, x)}+{max(0, y)}")
+            x = max(0, min(x, sx - ww - 8))
+            y = max(0, min(y, sy - hh - 8))
+            for s_, (dx_, dy_, crece) in zip(self.sombras, ((1, 3, 3), (3, 7, 8))):
+                try:
+                    s_.geometry(f"{ww + crece}x{hh + crece}+{x + dx_ - crece // 2}+{y + dy_ - crece // 3}")
+                    s_.deiconify()
+                    esquinas_redondeadas(s_)
+                except Exception:
+                    pass
+            w.geometry(f"{ww}x{hh}+{x}+{y}")
+            w.lift()
             esquinas_redondeadas(w)  # Windows 11: esquinas redondeadas suaves (de Windows)
             w.bind("<Escape>", self.cerrar)
 
@@ -8589,7 +8831,7 @@ def iniciar_interfaz():
             return False
         p_ = fitz.Point(p_)
         if item["tipo"] in ("firma", "texto_n", "reemplazo"):
-            return fitz.Rect(item["rect"]).contains(p_)
+            return fitz.Rect(caja_texto(item)).contains(p_)
         if item["tipo"] in ("texto", "rect"):
             return any(fitz.Rect(r_).contains(p_) for r_ in item["rects"])
         xs_ = [q[0] for q in item["pts"]]
@@ -8766,9 +9008,16 @@ def iniciar_interfaz():
             cache_imgs[k_] = out
         return cache_imgs[k_]
 
-    def imagen_en(ruta, pag, p_):
+    def imagen_en(ruta, pag, p_, sin_fondo=False):
         p_ = fitz.Point(p_)
         dentro = [im_ for im_ in imagenes_de(ruta, pag) if fitz.Rect(im_["bbox"]).contains(p_)]
+        if sin_fondo and dentro:  # v4.1: la imagen de toda la hoja (escaneo) no se elige con un clic
+            try:
+                with fitz.open(ruta) as d_:
+                    area = abs(d_[pag].rect)
+                dentro = [im_ for im_ in dentro if abs(fitz.Rect(im_["bbox"])) < area * 0.85]
+            except Exception:
+                pass
         return dentro[-1] if dentro else None  # la de mas arriba
 
     def misma_img(a_, b_):
@@ -9211,6 +9460,8 @@ def iniciar_interfaz():
         v_estado.set(f"«{t_['nombre']}» guardado con {n_} páginas.")
 
     def guardar_resaltados_dialogo(*_):
+        if vis.get("ined"):  # v4.1: lo que se estaba escribiendo en la hoja queda puesto
+            ined_terminar(True)
         t_g = pest_activa()
         if t_g and tiene_organizado(t_g) and app["pagina"] == "visor":  # v3.5: paginas copiadas o movidas
             return dialogo_guardar_paginas(t_g)
@@ -9245,6 +9496,8 @@ def iniciar_interfaz():
 
     def guardar_resaltados(copia, rutas=None):
         """Agrega los resaltados como anotaciones de resaltado del PDF."""
+        if vis.get("ined"):  # v4.1: lo que se estaba escribiendo en la hoja queda puesto
+            ined_terminar(True)
         hechos, errores = 0, []
         for ruta, pags in list(vis["res"].items()):
             if rutas is not None and ruta not in rutas:
@@ -9517,12 +9770,13 @@ def iniciar_interfaz():
 
     # ---- texto
     def ayuda_texto():
-        v_texto_ayuda.set("Hacé clic en la hoja donde querés escribir. Después lo podés arrastrar; doble clic "
-                          "lo edita. Clic derecho o Supr lo quita." if v_tmodo.get() == "Agregar" else
+        v_texto_ayuda.set("Hacé clic en la hoja y escribí ahí mismo. El borde del recuadro lo mueve y los "
+                          "tiradores de los costados cambian el ancho. Clic adentro o doble clic para corregirlo; clic "
+                          "derecho o Supr lo quita." if v_tmodo.get() == "Agregar" else
                           ("Hacé clic sobre un texto del PDF para cambiarlo. Se toma el párrafo entero" if v_talc.get() == "Párrafo"
                            else "Hacé clic sobre un texto del PDF para cambiarlo. Se toma el renglón") +
                           " y se escribe con la misma fuente (o la más parecida). Después podés cambiarle la fuente, el "
-                          "tamaño o el color desde aquí; doble clic para corregir el texto. En escaneos no hay texto.")
+                          "tamaño o el color desde aquí; también se puede mover. En escaneos, el texto se reconoce solo (OCR).")
 
     def estilo_panel():
         return {"fam": v_tfuente.get(), "neg": bool(v_tneg.get()), "cur": bool(v_tcur.get()),
@@ -9562,6 +9816,28 @@ def iniciar_interfaz():
     def estilo_texto_cambio():
         if texto_col.get("sincro"):
             return
+        ed_i = vis.get("ined")
+        if ed_i:  # v4.1: escribiendo en la hoja: el estilo cambia ahi mismo
+            it_ = ed_i["it"]
+            nuevo_ = dict(estilo_panel(), tam=tam_texto(), color=texto_col["rgb"])
+            if not ed_i["nuevo"]:
+                guardar_historia("estilo", it_["id"])
+            it_.update(nuevo_)
+            if it_["tipo"] == "reemplazo":
+                ajustar_reemplazo(it_)
+            else:
+                almacen.datos.update(texto_fuente=v_tfuente.get(), texto_negrita=bool(v_tneg.get()),
+                                     texto_cursiva=bool(v_tcur.get()), texto_tam=tam_texto(),
+                                     texto_color=list(texto_col["rgb"]))
+            if not ed_i["nuevo"]:
+                tocar(it_)
+            ined_colocar(ed_i["vista"])
+            def _refoco():
+                f_ = raiz.focus_get()
+                if vis.get("ined") is ed_i and not (f_ is not None and f_.winfo_class() == "Entry"):
+                    ed_i["txt"].focus_set()
+            raiz.after(20, _refoco)
+            return
         e_ = vis.get("edit_item")
         if e_ and e_[2]["tipo"] in ("texto_n", "reemplazo"):  # cambia el texto elegido
             it_ = e_[2]
@@ -9585,12 +9861,26 @@ def iniciar_interfaz():
         visor_pedir_dibujo()
 
     def rect_texto(esq, txt, it_):
-        lineas = txt.split("\n") or [""]
         tam = it_["tam"]
-        ancho = max(ancho_texto(l_, it_) for l_ in lineas)
+        if it_.get("ancho"):  # v4.1: recuadro de ancho fijo
+            lineas = partir_renglones(txt, it_, it_["ancho"]) or [""]
+            ancho = it_["ancho"]
+        else:
+            lineas = txt.split("\n") or [""]
+            ancho = max(ancho_texto(l_, it_) for l_ in lineas)
         it_ = dict(it_, tipo="texto_n")
         return (esq[0], esq[1], esq[0] + ancho + tam * 0.6,
                 esq[1] + tam * 0.95 + (len(lineas) - 1) * paso_renglon(it_) + tam * 0.4)
+
+    def caja_texto(it_):
+        """v4.1: donde esta el texto ahora (un parrafo cambiado y movido ya no ocupa su lugar original)."""
+        if it_.get("tipo") != "reemplazo":
+            return tuple(it_["rect"])
+        r_ = None
+        for x_, base, _l, _p, w_ in diseno_texto(it_):
+            q_ = fitz.Rect(x_, base - it_["tam"], x_ + max(w_, 2) + 1, base + it_["tam"] * 0.3)
+            r_ = q_ if r_ is None else r_ | q_
+        return tuple(r_) if r_ is not None else tuple(it_["rect"])
 
     def ajustar_reemplazo(it_):
         """Renglones del texto nuevo y la caja que ocupa (crece si el texto nuevo es mas largo)."""
@@ -9648,7 +9938,13 @@ def iniciar_interfaz():
             pg = d_[pag]
             m_ = pg.rotation_matrix
             pt_ = fitz.Point(p_)
-            for bl in pg.get_text("dict")["blocks"]:
+            bloques_ = pg.get_text("dict")["blocks"]
+            ocr_r = None
+            if not any(sp["text"].strip() for bl in bloques_ for ln in bl.get("lines", []) for sp in ln["spans"]):
+                ocr_r = ocr_de(ruta, pag)  # v4.1: escaneo: el texto reconocido
+                if ocr_r:
+                    bloques_ = ocr_r["bloques"]
+            for bl in bloques_:
                 lineas = [ln for ln in bl.get("lines", []) if "".join(sp["text"] for sp in ln["spans"]).strip()]
                 if not lineas:
                     continue
@@ -9677,6 +9973,14 @@ def iniciar_interfaz():
                 bases = [(fitz.Point(ln["spans"][0]["origin"]) * m_) for ln in lineas]
                 inter = ((bases[-1].y - bases[0].y) / (len(bases) - 1)) if len(bases) > 1 else sp0["size"] * 1.2
                 n_ = sp0["font"]
+                if ocr_r:  # v4.1: texto de un escaneo: se tapa con el color del papel y se escribe con el de la tinta
+                    ln0 = lineas[0]
+                    return {"rect": tuple(caja), "rects_borrar": [tuple(fitz.Rect(r_) + (-1.2, -1.2, 1.2, 1.2)) for r_ in cajas],
+                            "txt": txt, "tam": round(sp0["size"], 2), "fam": "Arial" if "Arial" in fuentes_ed_disponibles()
+                            else "Helvetica (PDF)", "neg": False, "cur": False, "color": tuple(ln0.get("tinta", (0, 0, 0))),
+                            "fondo_borrar": tuple(ln0.get("papel", (255, 255, 255))), "ocr": True,
+                            "origen": (min(b_.x for b_ in bases), bases[0].y), "inter": max(1.0, inter),
+                            "ancho": caja.width + 1 if len(lineas) > 1 else None, "fuente_pdf": ""}
                 return {"rect": tuple(caja), "rects_borrar": [tuple(r_) for r_ in cajas], "txt": txt,
                         "tam": round(sp0["size"], 2), "fam": familia_de(n_, sp0["flags"]),
                         "neg": bool(sp0["flags"] & 16) or any(w_ in n_.lower() for w_ in ("bold", "black", "heavy")),
@@ -9702,8 +10006,398 @@ def iniciar_interfaz():
         actualizar_resaltes()
         v_estado.set(f"{n_resaltes()} cambio(s) sin guardar · Ctrl+Z deshace · Ctrl+Y rehace · Ctrl+S guarda en el PDF.")
 
+    # ================= v4.1: RECONOCER EL TEXTO DE PAGINAS ESCANEADAS (OCR)
+    # La pagina en la que estas, si es un escaneo, se reconoce sola (en otro proceso): despues su texto se
+    # selecciona, se copia y se cambia como cualquier texto del PDF
+    ocr_q_ent, ocr_q_sal = mp.Queue(), mp.Queue()
+    ocr_ = {"p": None, "pend": set(), "res": {}, "escaneo": {}, "visto": None}
+
+    def es_escaneo(ruta, pag):
+        k_ = (ruta, pag, ver_arch(ruta))
+        if k_ not in ocr_["escaneo"]:
+            r_ = False
+            try:
+                with fitz.open(ruta) as d_:
+                    pg = d_[pag]
+                    if not pg.get_text("text").strip():
+                        area = abs(pg.rect)
+                        cub = sum(abs(fitz.Rect(i_["bbox"]) & pg.rect) for i_ in pg.get_image_info())
+                        r_ = area > 0 and cub >= area * 0.25
+            except Exception:
+                r_ = False
+            if len(ocr_["escaneo"]) > 400:
+                ocr_["escaneo"].clear()
+            ocr_["escaneo"][k_] = r_
+        return ocr_["escaneo"][k_]
+
+    def ocr_de(ruta, pag):
+        return ocr_["res"].get((ruta, pag, ver_arch(ruta)))
+
+    def ocr_pedir(ruta, pag, avisar=True, forzar=False):
+        """Pide reconocer la pagina si es un escaneo. True si se esta reconociendo (hay que esperar)."""
+        k_ = (ruta, pag, ver_arch(ruta))
+        if k_ in ocr_["res"]:
+            return False
+        if k_ in ocr_["pend"]:
+            if avisar:
+                v_estado.set(f"Reconociendo el texto de la página {pag + 1} (OCR)… un momento.")
+            return True
+        if not forzar and not es_escaneo(ruta, pag):
+            return False
+        if ocr_["p"] is None:
+            try:
+                ocr_["p"] = mp.Process(target=_proceso_ocr, args=(ocr_q_ent, ocr_q_sal), daemon=True)
+                ocr_["p"].start()
+                raiz.after(300, ocr_recibir)
+            except Exception as e:
+                ocr_["p"] = False
+                v_estado.set(f"No se pudo reconocer el texto: {e}")
+                return False
+        if ocr_["p"] is False:
+            return False
+        ocr_["pend"].add(k_)
+        ocr_q_ent.put(k_)
+        v_estado.set(f"Reconociendo el texto de la página {pag + 1} (OCR)…" if avisar else
+                     f"Página {pag + 1} escaneada: reconociendo su texto (OCR)…")
+        return True
+
+    def ocr_recibir():
+        try:
+            while True:
+                ruta, pag, ver_, letras, bloques = ocr_q_sal.get_nowait()
+                k_ = (ruta, pag, ver_)
+                ocr_["pend"].discard(k_)
+                if letras is None:
+                    ocr_["res"][k_] = {"letras": [], "bloques": [], "error": bloques}
+                    v_estado.set(f"No se pudo reconocer el texto de la página {pag + 1}: {bloques}")
+                    continue
+                ocr_["res"][k_] = {"letras": [tuple(c_) for c_ in letras], "bloques": bloques}
+                vis["chars"][k_] = [tuple(c_) for c_ in letras]  # ya se puede seleccionar y copiar
+                vis["chars"].pop(("pedido",) + k_, None)
+                v_estado.set((f"Texto reconocido en la página {pag + 1}: ya podés seleccionarlo, copiarlo o "
+                              "cambiarlo (panel Texto › Cambiar).") if letras else
+                             f"En la página {pag + 1} no se encontró texto para reconocer.")
+                visor_pedir_dibujo()
+        except Exception:
+            pass
+        raiz.after(250, ocr_recibir)
+
+    def copiar_texto_ocr(ruta, pag):
+        oc_ = ocr_de(ruta, pag)
+        if not oc_:
+            return
+        renglones, ult = [], None
+        for c_ in oc_["letras"]:
+            if c_[4] != ult:
+                renglones.append("")
+                ult = c_[4]
+            renglones[-1] += c_[5]
+        raiz.clipboard_clear()
+        raiz.clipboard_append("\n".join(r_.rstrip() for r_ in renglones))
+        v_estado.set(f"Texto de la página {pag + 1} copiado ({len(renglones)} renglones).")
+
+    def ocr_pagina_actual():
+        """Cada tanto: si la pagina a la vista es un escaneo y te quedaste en ella, se reconoce sola."""
+        try:
+            v_ = vista_activa()
+            if app["pagina"] == "visor" and v_ and v_.lay and v_.lay["pags"] and not vis["comp"]:
+                ruta, pag, _r = v_.lay["pags"][min(v_.pag, len(v_.lay["pags"]) - 1)]
+                k_ = (ruta, pag, ver_arch(ruta))
+                if ocr_["visto"] == k_:
+                    if k_ not in ocr_["res"] and k_ not in ocr_["pend"]:
+                        ocr_pedir(ruta, pag, avisar=False)
+                ocr_["visto"] = k_
+        except Exception:
+            pass
+        raiz.after(900, ocr_pagina_actual)
+    raiz.after(3000, ocr_pagina_actual)
+
+    # ================= v4.1: EDITAR TEXTO DIRECTO EN LA HOJA (como un cuadro de texto de Word)
+    # El texto se escribe sobre la hoja, en su lugar, dentro de un recuadro con tiradores: arrastrando el borde
+    # se mueve; los tiradores de los costados cambian el ancho (el texto se acomoda en renglones).
+    NARANJA_W = "#F97316"
+    _fams_tk = {}
+
+    def familia_tk(fam):
+        if not _fams_tk:
+            try:
+                _fams_tk.update({f_.lower(): f_ for f_ in tkfont.families(raiz)})
+            except Exception:
+                pass
+        n_ = {"Helvetica (PDF)": "Arial", "Times (PDF)": "Times New Roman", "Courier (PDF)": "Courier New"}.get(fam, fam)
+        for c_ in (n_, n_.split(" (")[0], "Arial", "Helvetica", "Liberation Sans", "DejaVu Sans"):
+            if c_.lower() in _fams_tk:
+                return _fams_tk[c_.lower()]
+        return "Arial"
+
+    def ined_activo():
+        return vis.get("ined")
+
+    def _ined_escala(ed):
+        """Zoom (pixeles por punto) y matriz de la hoja en la vista; None si la hoja esta girada."""
+        v_ = ed["vista"]
+        if not v_.lay:
+            return None
+        for i_, (r_, p_, rot_) in enumerate(v_.lay["pags"]):
+            if r_ == ed["ruta"] and p_ == ed["pag"]:
+                z_ = v_.lay["zs"][i_]
+                M = matriz_vista(v_.lay["dims"][i_][0], v_.lay["dims"][i_][1], z_, rot_, v_.lay["parar"])
+                if abs(M.b) > 1e-6 or M.a <= 0:
+                    return None
+                return M, v_.lay["xs"][i_], v_.lay["ys"][i_], i_
+        return None
+
+    def _ined_fuente(ed, M):
+        it_ = ed["it"]
+        z_ = M.a
+        clave = (it_.get("fam"), bool(it_.get("neg")), bool(it_.get("cur")), bool(it_.get("sub")),
+                 bool(it_.get("tach")), round(it_["tam"] * z_, 1))
+        if ed.get("fk") != clave:
+            ed["fk"] = clave
+            ed["font"] = tkfont.Font(root=raiz, family=familia_tk(it_.get("fam", "Helvetica (PDF)")),
+                                     size=-max(4, round(it_["tam"] * z_)), weight="bold" if it_.get("neg") else "normal",
+                                     slant="italic" if it_.get("cur") else "roman", underline=bool(it_.get("sub")),
+                                     overstrike=bool(it_.get("tach")))
+        return ed["font"]
+
+    def _ined_origen(it_):
+        """Esquina del primer renglon: (x, base) en coordenadas de la hoja."""
+        if it_["tipo"] == "reemplazo":
+            return it_["origen"]
+        r_ = fitz.Rect(it_["rect"])
+        return r_.x0 + it_["tam"] * 0.3, r_.y0 + it_["tam"] * 0.95
+
+    def _ined_ancho_pt(ed):
+        it_ = ed["it"]
+        if it_.get("ancho"):
+            return it_["ancho"]
+        txt_ = ed["txt"].get("1.0", "end-1c") if ed.get("txt") else it_.get("txt", "")
+        w_ = max([ancho_texto(l_, it_) for l_ in txt_.split("\n")] + [it_["tam"] * 2])
+        if it_["tipo"] == "reemplazo":
+            w_ = max(w_, fitz.Rect(it_["rect_orig"]).x1 - it_["origen"][0])
+        return w_
+
+    def ined_colocar(vista):
+        """Pone (o vuelve a poner) el cuadro de escritura y su recuadro en la vista (se llama al dibujar)."""
+        ed = vis.get("ined")
+        if not ed or ed["vista"] is not vista:
+            return
+        g_ = _ined_escala(ed)
+        cv_ = vista.cv
+        if not g_:
+            ined_terminar(True)
+            return
+        M, x, y, _i = g_
+        it_ = ed["it"]
+        z_ = M.a
+        fnt = _ined_fuente(ed, M)
+        t_w = ed["txt"]
+        c_txt = "#%02X%02X%02X" % tuple(int(v_) for v_ in it_["color"])
+        fondo_ = "#%02X%02X%02X" % tuple(int(v_) for v_ in it_.get("fondo_borrar", (255, 255, 255)))
+        alin_ = {"centro": "center", "der": "right"}.get(it_.get("alin"), "left")
+        paso_px = paso_renglon(it_) * z_
+        extra = max(0, round(paso_px - fnt.metrics("linespace")))
+        t_w.configure(font=fnt, fg=c_txt, insertbackground=c_txt, bg=fondo_, spacing3=extra,
+                      wrap="word" if it_.get("ancho") else "none")
+        t_w.tag_configure("al", justify=alin_)
+        t_w.tag_add("al", "1.0", "end")
+        ox, base = _ined_origen(it_)
+        p0 = fitz.Point(ox, base) * M
+        W = max(px(24), round(_ined_ancho_pt(ed) * z_) + 4 + (0 if it_.get("ancho") else max(6, round(it_["tam"] * z_ * 0.6))))
+        X = x + p0.x - 2
+        Y = y + p0.y - fnt.metrics("ascent") - 2
+        txt_ = t_w.get("1.0", "end-1c")
+        n_lin = len(partir_renglones(txt_, it_, it_["ancho"])) if it_.get("ancho") else txt_.count("\n") + 1
+        try:  # lo que Tk acomoda (por si corta distinto que el PDF)
+            if it_.get("ancho") and t_w.winfo_ismapped():
+                n_lin = max(n_lin, int(t_w.count("1.0", "end", "displaylines")[0]))
+        except Exception:
+            pass
+        H = max(1, n_lin) * (fnt.metrics("linespace") + extra) + 4
+        cv_.delete("ined")
+        if it_["tipo"] == "reemplazo":  # tapa el texto original mientras se escribe
+            for rb_ in it_.get("rects_borrar") or [it_["rect_orig"]]:
+                q_ = fitz.Rect(rb_) * M
+                cv_.create_rectangle(x + q_.x0, y + q_.y0, x + q_.x1, y + q_.y1, fill=fondo_, outline="", tags="ined")
+        cv_.create_window(X, Y, window=t_w, anchor="nw", width=W, height=H, tags="ined")
+        ed["caja"] = (X, Y, X + W, Y + H)
+        dibujar_marco_word(cv_, X - 3, Y - 3, X + W + 3, Y + H + 3, "ined")
+
+    def dibujar_marco_word(cv_, x0, y0, x1, y1, tag):
+        """Recuadro punteado con 8 tiradores (como Word)."""
+        cv_.create_rectangle(x0, y0, x1, y1, outline=NARANJA_W, width=1, dash=(4, 3), tags=tag)
+        t_ = px(4)
+        xm, ym = (x0 + x1) / 2, (y0 + y1) / 2
+        for hx, hy in ((x0, y0), (xm, y0), (x1, y0), (x0, ym), (x1, ym), (x0, y1), (xm, y1), (x1, y1)):
+            cv_.create_rectangle(hx - t_, hy - t_, hx + t_, hy + t_, fill="#FFFFFF", outline=NARANJA_W, width=1.5,
+                                 tags=tag)
+
+    def tirador_en(caja, cx_, cy_):
+        """Que parte del recuadro esta bajo el puntero: 'izq', 'der' (ancho), 'borde' (mover) o None."""
+        x0, y0, x1, y1 = caja[0] - 3, caja[1] - 3, caja[2] + 3, caja[3] + 3
+        m_ = px(7)
+        if not (x0 - m_ <= cx_ <= x1 + m_ and y0 - m_ <= cy_ <= y1 + m_):
+            return None
+        if abs(cx_ - x0) <= m_:
+            return "izq"
+        if abs(cx_ - x1) <= m_:
+            return "der"
+        if abs(cy_ - y0) <= m_ or abs(cy_ - y1) <= m_:
+            return "borde"
+        return "dentro"
+
+    def caja_item_vista(vista, it_, base):
+        _i, ruta, pag, M, x, y = base
+        r_ = fitz.Rect(caja_texto(it_)) * M
+        return (x + r_.x0, y + r_.y0, x + r_.x1, y + r_.y1)
+
+    def ined_empezar(vista, ruta, pag, it_, nuevo):
+        """Abre el cuadro de escritura sobre el texto (nuevo o ya puesto)."""
+        ined_terminar(True)
+        ed = {"vista": vista, "ruta": ruta, "pag": pag, "it": it_, "nuevo": nuevo, "orig": it_.get("txt", "")}
+        if not _ined_escala(ed):  # hoja girada: se usa la ventanita
+            return False
+        t_w = tk.Text(vista.cv, bd=0, highlightthickness=0, relief="flat", padx=0, pady=0, undo=True,
+                      maxundo=-1, cursor="xterm", exportselection=True, selectbackground="#BFDBFE",
+                      selectforeground="#0F172A")
+        t_w.insert("1.0", it_.get("txt", ""))
+        t_w.edit_reset()
+        ed["txt"] = t_w
+        vis["ined"] = ed
+        vis["edit_item"] = None if nuevo else (ruta, pag, it_)
+        sincronizar_panel(it_)
+
+        def cambio(_e=None):
+            raiz.after_idle(lambda: ined_colocar(vista) if vis.get("ined") is ed else None)
+
+        def estilo_tecla(k_):
+            {"b": v_tneg, "i": v_tcur, "u": v_tsub}[k_].set(not {"b": v_tneg, "i": v_tcur, "u": v_tsub}[k_].get())
+            estilo_texto_cambio()
+            return "break"
+        t_w.bind("<KeyRelease>", cambio)
+        t_w.bind("<<Paste>>", lambda e: raiz.after(10, cambio))
+        t_w.bind("<Escape>", lambda e: (ined_terminar(False), "break")[1])
+        t_w.bind("<Control-Return>", lambda e: (ined_terminar(True), "break")[1])
+        for k_ in ("z", "Z"):
+            t_w.bind(f"<Control-{k_}>", lambda e: (t_w.edit_undo() if t_w.edit("canundo") else None, cambio(), "break")[2])
+        for k_ in ("y", "Y"):
+            t_w.bind(f"<Control-{k_}>", lambda e: (t_w.edit_redo() if t_w.edit("canredo") else None, cambio(), "break")[2])
+        for k_ in ("b", "i", "u"):
+            t_w.bind(f"<Control-{k_}>", lambda e, k_=k_: estilo_tecla(k_))
+            t_w.bind(f"<Control-{k_.upper()}>", lambda e, k_=k_: estilo_tecla(k_))
+        t_w.bind("<Control-a>", lambda e: (t_w.tag_add("sel", "1.0", "end-1c"), "break")[1])
+        t_w.bind("<Control-s>", lambda e: (ined_terminar(True), guardar_resaltados_dialogo(), "break")[2])
+        t_w.bind("<Control-f>", lambda e: "break")
+        t_w.bind("<MouseWheel>", lambda e: vista.cv.event_generate("<MouseWheel>", delta=e.delta, x=0, y=0))
+        visor_pedir_dibujo()
+        vista.dibujar()
+        t_w.focus_set()
+        t_w.mark_set("insert", "end-1c")
+        v_estado.set("Escribí directo en la hoja · arrastrá el borde para moverlo · los tiradores de los costados "
+                     "cambian el ancho · clic afuera o Ctrl+Enter: listo · Esc: cancelar.")
+        return True
+
+    def ined_terminar(guardar=True):
+        ed = vis.pop("ined", None)
+        if not ed:
+            return
+        t_w = ed["txt"]
+        txt = t_w.get("1.0", "end-1c")
+        try:
+            ed["vista"].cv.delete("ined")
+            t_w.destroy()
+        except Exception:
+            pass
+        it_ = ed["it"]
+        ruta, pag = ed["ruta"], ed["pag"]
+        if not guardar:
+            if ed["nuevo"]:
+                vis["edit_item"] = None
+            visor_pedir_dibujo()
+            return
+        if ed["nuevo"]:
+            if it_["tipo"] == "texto_n":
+                if txt.strip():
+                    it_["txt"] = txt
+                    it_["rect"] = rect_texto(it_["rect"][:2], txt, it_)
+                    agregar_item(ruta, pag, it_)
+            elif txt != ed["orig"] or ed.get("movido"):
+                it_["txt"] = txt
+                ajustar_reemplazo(it_)
+                agregar_item(ruta, pag, it_)
+            else:
+                vis["edit_item"] = None
+        elif txt != it_["txt"]:
+            if not txt.strip() and it_["tipo"] == "texto_n":
+                vis["edit_item"] = None
+                quitar_resaltado(ruta, pag, it_)
+                return
+            guardar_historia()
+            it_["txt"] = txt
+            if it_["tipo"] == "texto_n":
+                it_["rect"] = rect_texto(it_["rect"][:2], txt, it_)
+            else:
+                ajustar_reemplazo(it_)
+            tocar(it_)
+        visor_pedir_dibujo()
+        mini_pedir_dibujo()
+
+    def mover_texto(it_, dx, dy):
+        """Mueve un texto (nuevo o un parrafo cambiado del PDF) dx, dy puntos."""
+        if it_["tipo"] == "reemplazo":
+            ox, oy = it_["origen"]
+            it_["origen"] = (ox + dx, oy + dy)
+            ajustar_reemplazo(it_)
+        else:
+            it_["rect"] = tuple(fitz.Rect(it_["rect"]) + (dx, dy, dx, dy))
+
+    def ancho_texto_item(it_, lado, dx, r0):
+        """Cambia el ancho del recuadro desde un costado (r0: ancho y origen al empezar)."""
+        ancho0, ox0 = r0
+        if lado == "der":
+            nuevo_ = max(it_["tam"] * 2, ancho0 + dx)
+        else:
+            nuevo_ = max(it_["tam"] * 2, ancho0 - dx)
+            mov_ = ancho0 - nuevo_
+            if it_["tipo"] == "reemplazo":
+                it_["origen"] = (ox0 + mov_, it_["origen"][1])
+            else:
+                r_ = fitz.Rect(it_["rect"])
+                it_["rect"] = (ox0 + mov_ - it_["tam"] * 0.3, r_.y0, r_.x1, r_.y1)
+        it_["ancho"] = nuevo_
+        if it_["tipo"] == "reemplazo":
+            ajustar_reemplazo(it_)
+        else:
+            it_["rect"] = rect_texto(it_["rect"][:2], it_["txt"], it_)
+
+    def _foto_texto(it_):
+        return (tuple(it_["rect"]), it_.get("origen"), it_.get("ancho"), it_.get("lineas"))
+
+    def _volver_foto(it_, f_):
+        it_["rect"], org_, it_["ancho"], lin_ = f_
+        if org_ is not None:
+            it_["origen"] = org_
+        if lin_ is not None:
+            it_["lineas"] = lin_
+        if f_[2] is None:
+            it_.pop("ancho", None)
+
     def edicion_press(vista, ev):
         cx_, cy_ = vista.cv.canvasx(ev.x), vista.cv.canvasy(ev.y)
+        ed = vis.get("ined")
+        if ed:  # v4.1: escribiendo en la hoja: el borde mueve, los costados cambian el ancho, afuera termina
+            g_ = _ined_escala(ed) if ed["vista"] is vista else None
+            t_ = tirador_en(ed["caja"], cx_, cy_) if (g_ and ed.get("caja")) else None
+            if t_ in ("izq", "der", "borde"):
+                base_e = (g_[3], ed["ruta"], ed["pag"], g_[0], g_[1], g_[2])
+                it_ = ed["it"]
+                vista._ed = {"it": it_, "base": base_e, "p0": vista._pt(ev, base_e), "ined": True,
+                             "modo": "mover" if t_ == "borde" else t_, "foto": _foto_texto(it_),
+                             "r0": (_ined_ancho_pt(ed), _ined_origen(it_)[0])}
+                return True
+            ined_terminar(True)
+            vista._ed = {"modo": "nada"}
+            return True
         base = vista._punto_pagina(cx_, cy_)
         if not base:
             return False
@@ -9715,13 +10409,22 @@ def iniciar_interfaz():
             if abs(q_.x + x - cx_) < 11 and abs(q_.y + y - cy_) < 11:
                 vista._ed = {"it": e_[2], "base": base, "p0": p_, "r0": tuple(e_[2]["rect"]), "modo": "tam"}
                 return True
+        if e_ and e_[0] == ruta and e_[1] == pag and e_[2]["tipo"] in ("texto_n", "reemplazo"):
+            it_ = e_[2]  # v4.1: el texto elegido: costados = ancho, borde = mover, adentro = escribir
+            t_ = tirador_en(caja_item_vista(vista, it_, base), cx_, cy_)
+            if t_:
+                ed0 = {"it": it_, "txt": None}
+                vista._ed = {"it": it_, "base": base, "p0": p_, "foto": _foto_texto(it_),
+                             "modo": t_ if t_ in ("izq", "der") else "mover", "editar": t_ == "dentro",
+                             "r0": (_ined_ancho_pt(ed0), _ined_origen(it_)[0])}
+                return True
         for it_ in reversed(vis["res"].get(ruta, {}).get(pag, [])):
-            if it_["tipo"] in EDITABLES and fitz.Rect(it_["rect"]).contains(fitz.Point(p_)):
+            if it_["tipo"] in EDITABLES and fitz.Rect(caja_texto(it_)).contains(fitz.Point(p_)):
                 vis["edit_item"] = (ruta, pag, it_)
                 if it_["tipo"] in ("texto_n", "reemplazo"):
                     sincronizar_panel(it_)
-                vista._ed = {"it": it_, "base": base, "p0": p_, "r0": tuple(it_["rect"]),
-                             "modo": "mover" if it_["tipo"] != "reemplazo" else "nada"}
+                vista._ed = {"it": it_, "base": base, "p0": p_, "r0": tuple(it_["rect"]), "foto": _foto_texto(it_),
+                             "modo": "mover"}
                 visor_pedir_dibujo()
                 return True
         if vis.get("edit_item"):  # clic fuera: se suelta la que estaba elegida
@@ -9746,18 +10449,28 @@ def iniciar_interfaz():
             return True
         if app.get("panel") == "texto":
             if v_tmodo.get() == "Agregar":
+                it_ = dict(estilo_panel(), tipo="texto_n", txt="", tam=tam_texto(), color=texto_col["rgb"])
+                it_["rect"] = rect_texto((p_[0], p_[1] - it_["tam"] * 0.6), "", it_)
+                if ined_empezar(vista, ruta, pag, it_, True):  # v4.1: se escribe directo en la hoja
+                    return True
                 txt = pedir_texto("Escribí el texto")
                 if txt:
-                    it_ = dict(estilo_panel(), tipo="texto_n", txt=txt, tam=tam_texto(), color=texto_col["rgb"])
+                    it_["txt"] = txt
                     it_["rect"] = rect_texto((p_[0], p_[1] - it_["tam"] * 0.6), txt, it_)
                     agregar_item(ruta, pag, it_)
                 return True
             sp_ = texto_en(ruta, pag, p_, v_talc.get() == "Párrafo")
+            if sp_ is None and ocr_pedir(ruta, pag):  # v4.1: escaneo: primero se reconoce el texto
+                return True
             if sp_ == "girado":
                 v_estado.set("Ese texto está inclinado o vertical: por ahora solo se cambia texto horizontal.")
                 return True
             if not sp_:
-                v_estado.set("Ahí no hay texto del PDF para cambiar (si es un escaneo, usá «Agregar»).")
+                v_estado.set("Ahí no hay texto del PDF para cambiar.")
+                return True
+            it_n = dict(sp_, tipo="reemplazo", txt=sp_["txt"], orig=sp_["txt"], rect_orig=sp_["rect"])
+            ajustar_reemplazo(it_n)
+            if ined_empezar(vista, ruta, pag, it_n, True):  # v4.1: se corrige directo en la hoja
                 return True
             txt = pedir_texto("Cambiar el párrafo" if sp_["ancho"] else "Cambiar el texto", sp_["txt"],
                               f"Fuente: {sp_['fam']} {('%g' % sp_['tam']).replace('.', ',')} pt"
@@ -9775,6 +10488,28 @@ def iniciar_interfaz():
             return
         p_ = vista._pt(ev, ed["base"])
         dx, dy = p_[0] - ed["p0"][0], p_[1] - ed["p0"][1]
+        if abs(dx) + abs(dy) > 1.5:
+            ed["movio"] = True
+        if ed.get("foto") and ed["it"]["tipo"] in ("texto_n", "reemplazo"):  # v4.1: mover o cambiar el ancho
+            if not ed.get("movio"):
+                return
+            it_ = ed["it"]
+            pendiente = ed.get("ined") and vis.get("ined", {}).get("nuevo")
+            if not ed.get("hist") and not pendiente:
+                ed["hist"] = True
+                guardar_historia()
+            _volver_foto(it_, ed["foto"])
+            if ed["modo"] == "mover":
+                mover_texto(it_, dx, dy)
+            else:
+                ancho_texto_item(it_, ed["modo"], dx, ed["r0"])
+            if ed.get("ined"):
+                vis["ined"]["movido"] = True
+                ined_colocar(vista)
+                return
+            tocar(it_)
+            vista.dibujar()
+            return
         x0, y0, x1, y1 = ed["r0"]
         if ed["modo"] == "tam":  # misma proporcion
             ancho = max(8.0, (x1 - x0) + dx)
@@ -9788,7 +10523,13 @@ def iniciar_interfaz():
         vista.dibujar()
 
     def edicion_release(vista, ev):
+        ed = vista._ed
         vista._ed = None
+        if ed and ed.get("editar") and not ed.get("movio"):  # v4.1: clic adentro del texto elegido: a escribir
+            e_ = vis.get("edit_item")
+            if e_ and e_[2] is ed["it"]:
+                ined_empezar(vista, e_[0], e_[1], e_[2], False)
+                return
         mini_pedir_dibujo()
 
     def edicion_doble(vista, ev):
@@ -9796,6 +10537,8 @@ def iniciar_interfaz():
         if not e_ or e_[2]["tipo"] not in ("texto_n", "reemplazo"):
             return False
         it_ = e_[2]
+        if ined_empezar(vista, e_[0], e_[1], it_, False):  # v4.1: directo en la hoja
+            return True
         txt = pedir_texto("Editar el texto", it_["txt"])
         if txt and txt != it_["txt"]:
             guardar_historia()
@@ -9840,8 +10583,9 @@ def iniciar_interfaz():
             pg = d_.new_page(width=max(1.0, r_.width), height=max(1.0, r_.height))
             c_ = tuple(v_ / 255 for v_ in item["color"])
             if item["tipo"] == "reemplazo":
+                fb_ = tuple(v_ / 255 for v_ in item.get("fondo_borrar", (255, 255, 255)))
                 for rb_ in item.get("rects_borrar") or [item["rect_orig"]]:  # tapa el texto original en la vista
-                    pg.draw_rect(fitz.Rect(rb_) - (r_.x0, r_.y0, r_.x0, r_.y0), color=None, fill=(1, 1, 1))
+                    pg.draw_rect(fitz.Rect(rb_) - (r_.x0, r_.y0, r_.x0, r_.y0), color=None, fill=fb_)
             elif item.get("fondo"):
                 pg.draw_rect(pg.rect, color=None, fill=(1, 1, 1))
             dibujar_texto(pg, item, lambda q_: fitz.Point(q_) - r_.tl)
@@ -9855,7 +10599,12 @@ def iniciar_interfaz():
     def guardar_editables(pg, items_):
         """Escribe en la pagina las firmas, sellos y textos (quedan fijos en el PDF)."""
         dm = pg.derotation_matrix
-        reemplazos = [it_ for it_ in items_ if it_["tipo"] == "reemplazo"]
+        reemplazos = [it_ for it_ in items_ if it_["tipo"] == "reemplazo" and not it_.get("ocr")]
+        for it_ in [x_ for x_ in items_ if x_["tipo"] == "reemplazo" and x_.get("ocr")]:  # v4.1: escaneo
+            fb_ = tuple(v_ / 255 for v_ in it_.get("fondo_borrar", (255, 255, 255)))
+            for rb_ in it_.get("rects_borrar") or [it_["rect_orig"]]:
+                pg.draw_rect(fitz.Rect(rb_) * dm, color=None, fill=fb_, overlay=True)
+            dibujar_texto(pg, it_, lambda q_: fitz.Point(q_) * dm, pg.rotation)
         if reemplazos:  # se borra el texto original (sin tocar dibujos ni imagenes) y se escribe el nuevo
             for it_ in reemplazos:
                 for rb_ in it_.get("rects_borrar") or [it_["rect_orig"]]:  # renglon por renglon
@@ -9927,6 +10676,8 @@ def iniciar_interfaz():
                     continue
                 if msg[0] == "caracteres":
                     _, ruta, pag, ver_, chars = msg
+                    if not chars and (ruta, pag, ver_) in ocr_["res"]:  # v4.1: ya se reconocio (OCR)
+                        chars = ocr_["res"][(ruta, pag, ver_)]["letras"]
                     vis["chars"][(ruta, pag, ver_)] = [tuple(c_) for c_ in chars]
                     vis["chars"].pop(("pedido", ruta, pag, ver_), None)
                     if len(vis["chars"]) > 80:
@@ -10030,6 +10781,8 @@ def iniciar_interfaz():
         return False
 
     def activar_pestana(i, mostrar_visor=True):
+        if vis.get("ined"):  # v4.1: lo que se estaba escribiendo en la hoja queda puesto
+            ined_terminar(True)
         if app.get("vista_top") and mostrar_visor:  # v3.2: tocar un documento deja Inicio / Herramientas
             app["vista_top"] = None
             raiz.after_idle(lambda: (mostrar_inicio(), dibujar_superior()))
@@ -10241,6 +10994,8 @@ def iniciar_interfaz():
         return True
 
     def cerrar_pestana(i, preguntar=True):
+        if vis.get("ined"):  # v4.1: lo que se estaba escribiendo en la hoja queda puesto
+            ined_terminar(True)
         if i is None or not 0 <= i < len(pest):
             return
         t_ = pest[i]
@@ -10435,6 +11190,8 @@ def iniciar_interfaz():
     iconos_panel = {c_: ctk.CTkImage(_icono(c_, col_, 26 * 3), size=(26, 26)) for c_, _t, col_, *_r in ICONOS}
 
     def abrir_panel(clave):
+        if vis.get("ined"):  # v4.1: lo que se estaba escribiendo en la hoja queda puesto
+            ined_terminar(True)
         asegurar_pagina(clave)
         # Foliar, Aplanar y Comprimir tambien se abren al lado de Organizar; lo demas, en el visor
         if app["pagina"] != "visor" and not (app["pagina"] == "organizar" and clave in EN_PANEL):
@@ -10463,6 +11220,8 @@ def iniciar_interfaz():
         raiz.after(30, visor_pedir_dibujo)
 
     def cerrar_panel():
+        if vis.get("ined"):  # v4.1: lo que se estaba escribiendo en la hoja queda puesto
+            ined_terminar(True)
         panel_der.grid_forget()
         app["panel"] = None
         vis["edit_item"] = None
@@ -11083,6 +11842,8 @@ def iniciar_interfaz():
     TITULOS = {c: tt for c, tt, *_ in ICONOS}
 
     def mostrar_pagina(clave):
+        if vis.get("ined"):  # v4.1: lo que se estaba escribiendo en la hoja queda puesto
+            ined_terminar(True)
         asegurar_pagina(clave)
         if clave in EN_PANEL:  # Aplanar, Foliar y Comprimir van en el panel derecho del visor
             abrir_panel(clave)
@@ -12123,8 +12884,32 @@ def iniciar_interfaz():
         pasos_ += [lambda c_=c_: mostrar_pagina(c_) for c_ in claves_]
         pasos_ += [lambda: mostrar_pagina("visor"), lambda: alternar_resaltar(), lambda: alternar_resaltar(),
                    lambda: abrir_soltados([auto_]) if os.path.isfile(auto_) else None]
+        prueba_ocr = {}
+
+        def ocr_iniciar():  # v4.1: que el .exe traiga los idiomas del OCR y reconozca un escaneo
+            import tempfile
+            d_ = fitz.open()
+            pg_ = d_.new_page(width=420, height=200)
+            pg_.insert_text((30, 90), "PdFOL prueba OCR 2026", fontsize=26)
+            png_ = pg_.get_pixmap(dpi=150).tobytes("png")
+            e_ = fitz.open()
+            pe_ = e_.new_page(width=420, height=200)
+            pe_.insert_image(pe_.rect, stream=png_)
+            prueba_ocr["ruta"] = os.path.join(tempfile.gettempdir(), "pdfol_prueba_ocr.pdf")
+            e_.save(prueba_ocr["ruta"])
+            if not _carpeta_tessdata():
+                _fallo(RuntimeError, RuntimeError("Faltan los idiomas del OCR (tessdata)"), None)
+            ocr_pedir(prueba_ocr["ruta"], 0, avisar=False, forzar=True)
+
+        def ocr_revisar():
+            r_ = ocr_de(prueba_ocr.get("ruta", ""), 0)
+            txt_ = "".join(c_[5] for c_ in (r_ or {}).get("letras", []))
+            if "OCR" not in txt_:
+                _fallo(RuntimeError, RuntimeError(f"El OCR no reconocio el texto de prueba: {r_}"), None)
+        pasos_ = [ocr_iniciar] + pasos_
         for n_, f_ in enumerate(pasos_):
             raiz.after(3000 + 700 * n_, f_)
+        raiz.after(3000 + 700 * len(pasos_) + 1500, ocr_revisar)
         raiz.after(3000 + 700 * len(pasos_) + 2500, salir_del_todo)
     if not (os.environ.get("PDFOL_PRUEBA") or auto_):
         raiz.after(2500, buscar_actualizacion)  # al abrir: si no hay internet, no molesta

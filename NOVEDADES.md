@@ -1,17 +1,12 @@
-## PdFOL v4.0.1 · by Meneses999
+## PdFOL v4.1 · by Meneses999
 
-- **Inicio**: al elegir un PDF del historial (o abrir uno) se muestra enseguida; ya no hace falta tocar su pestaña.
-- **Barras de desplazamiento**: se vuelven a poder tomar y arrastrar para subir y bajar (visor, miniaturas y Organizar).
+- **Editar texto directo en la hoja**: al agregar un texto o cambiar uno del PDF, se escribe **ahí mismo**, en un recuadro con tiradores como en Word (ya no en una ventanita aparte).
+  - Arrastrá el **borde** para moverlo; los **tiradores de los costados** cambian el ancho (el texto se acomoda en renglones).
+  - **Clic adentro** (o doble clic) para corregirlo; **clic afuera** o **Ctrl+Enter** lo deja puesto; **Esc** cancela.
+  - Mientras escribís: **Ctrl+B / Ctrl+I / Ctrl+U** (negrita, cursiva, subrayado) y el panel cambia fuente, tamaño y color al instante.
+  - Los **párrafos cambiados del PDF ahora también se pueden mover**.
+- **Escaneos (OCR)**: si la página en la que estás es un escaneo, su texto **se reconoce solo** (sin internet, en español e inglés). Después se **selecciona, se copia y se cambia** como cualquier texto. Clic derecho: «Copiar todo el texto reconocido de esta página» o «Reconocer el texto de esta página».
+  - Al cambiar texto de un escaneo se tapa con el color del papel y se escribe con el color de la tinta.
+- **Menú del clic derecho renovado**: con sombra, íconos en color, atajos como teclas y realce al pasar el mouse (también se maneja con las flechas y Enter).
 
-### De la v4.0
-
-Versión de fondo: el programa es más rápido y no se pega.
-
-- **Abre más rápido y es más liviano**: antes armaba todo al iniciar (unos 1.600 controles); ahora arma solo lo que se ve (unos 450) y cada panel (Foliar, Aplanar, Firmar, Perfiles…) se arma la primera vez que lo abrís.
-- **Otro monitor**: al pasar la ventana a una pantalla con otra escala (por ejemplo de 100 % a 150 %) ya **no se pone transparente ni se pega**: PdFOL espera a que sueltes la ventana y se ajusta una sola vez (más de 4 veces más rápido que antes).
-- **«Herramientas»** y las **barras de desplazamiento** ahora se dibujan (antes eran muchos controles que se redibujaban en cada movimiento de la rueda).
-- **Organizar**: las miniaturas se dibujan en un proceso aparte; la ventana ya no se traba mientras cargan.
-- Se corrigió un **bloqueo ocasional** de la ventana.
-- Sigue todo lo anterior (comparar en miniaturas, copiar imágenes, girar páginas…).
-
-**Descarga:** `PdFOL_v4.0.1_portable.zip` (sin instalar) o `PdFOL_v4.0.1_instalador.exe`.
+**Descarga:** `PdFOL_v4.1_portable.zip` (sin instalar) o `PdFOL_v4.1_instalador.exe`.

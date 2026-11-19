@@ -74,7 +74,7 @@ jobs:
             --hidden-import PIL._tkinter_finder --hidden-import PIL.ImageTk --hidden-import PIL.JpegImagePlugin `
             --hidden-import PIL.PngImagePlugin --hidden-import PIL.IcoImagePlugin --hidden-import PIL.BmpImagePlugin `
             --exclude-module PIL._avif --exclude-module PIL.AvifImagePlugin `
-            --add-data "fuentes;fuentes" "${{ steps.ver.outputs.archivo }}"
+            --add-data "fuentes;fuentes" --add-data "tessdata;tessdata" "${{ steps.ver.outputs.archivo }}"
 
       - name: Comprimir y calcular SHA256
         if: steps.ver.outputs.existe == '0'
