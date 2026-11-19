@@ -363,12 +363,19 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.1"
-VERSION_INTERNA = "4.1"
+VERSION = "v4.1.1"
+VERSION_INTERNA = "4.1.1"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.1.1", [
+        "Texto en la hoja: botón «✓ Listo»; el clic afuera ya no se pierde ni crea otro recuadro; los textos "
+        "puestos se eligen con un clic (aunque el panel Texto esté cerrado).",
+        "Los recuadros cambian de tamaño como una autoforma de Word: 8 tiradores (ancho, alto o ambos) y el "
+        "puntero muestra qué hace cada uno.",
+        "Al borrar todo el texto de un recuadro, el recuadro se quita sin dejar marca.",
+    ]),
     ("v4.1", [
         "Editar texto directo en la hoja: al agregar o cambiar un texto se escribe ahí mismo, en un recuadro con "
         "tiradores como en Word. El borde lo mueve y los costados cambian el ancho. Clic adentro para corregirlo.",
@@ -7282,6 +7289,14 @@ def iniciar_interfaz():
                     if org.get("sel") and not (ev.state & 0x5):
                         org["sel"] = set()
                         visor_pedir_dibujo()
+            if (app["pagina"] == "visor" and app.get("panel") not in ("firmar", "texto") and not vis["modo_res"]
+                    and self.t is not None):  # v4.1.1: clic en un texto puesto: se elige (se abre el panel Texto)
+                b_t = self._punto_pagina(self.cv.canvasx(ev.x), self.cv.canvasy(ev.y))
+                if b_t:
+                    pt_t = fitz.Point(self._pt(ev, b_t))
+                    if any(it_["tipo"] in ("texto_n", "reemplazo") and fitz.Rect(caja_texto(it_)).contains(pt_t)
+                           for it_ in vis["res"].get(b_t[1], {}).get(b_t[2], [])):
+                        abrir_panel("texto")
             if app["pagina"] == "visor" and app.get("panel") in ("firmar", "texto") and not vis["modo_res"]:
                 if edicion_press(self, ev):  # v2.6: firmar, sellar y texto
                     if not getattr(self, "_ed", None):
@@ -7400,6 +7415,24 @@ def iniciar_interfaz():
 
         def _mover_libre(self, ev):
             """Sin boton: la polilinea sigue al mouse; en modo Texto se lee el texto de la pagina de antemano."""
+            if app.get("panel") == "texto" and (vis.get("ined") or vis.get("edit_item")):  # v4.1.1: tiradores
+                cx_, cy_ = self.cv.canvasx(ev.x), self.cv.canvasy(ev.y)
+                ed = vis.get("ined")
+                t_ = None
+                if ed and ed["vista"] is self and ed.get("caja"):
+                    t_ = tirador_en(ed["caja"], cx_, cy_)
+                    if t_ == "dentro":
+                        t_ = None
+                elif not ed:
+                    e_ = vis["edit_item"]
+                    b_ = self._punto_pagina(cx_, cy_)
+                    if b_ and e_[2]["tipo"] in ("texto_n", "reemplazo") and e_[0] == b_[1] and e_[1] == b_[2]:
+                        t_ = tirador_en(caja_item_vista(self, e_[2], b_), cx_, cy_)
+                if t_ != getattr(self, "_t_cursor", None):
+                    self._t_cursor = t_
+                    cursor_tirador(self.cv, t_)
+                if t_:
+                    return
             if vis["comp"]:  # v3.5: la manito sobre el numero de la hoja (se puede tomar y arrastrar)
                 sobre_ = insignia_en(self, ev) is not None
                 if sobre_ != getattr(self, "_sobre_ins", False):
@@ -9770,9 +9803,9 @@ def iniciar_interfaz():
 
     # ---- texto
     def ayuda_texto():
-        v_texto_ayuda.set("Hacé clic en la hoja y escribí ahí mismo. El borde del recuadro lo mueve y los "
-                          "tiradores de los costados cambian el ancho. Clic adentro o doble clic para corregirlo; clic "
-                          "derecho o Supr lo quita." if v_tmodo.get() == "Agregar" else
+        v_texto_ayuda.set("Hacé clic en la hoja y escribí ahí mismo; «✓ Listo» o clic afuera lo deja puesto. El "
+                          "borde lo mueve y los tiradores cambian el tamaño (como una autoforma de Word). Clic adentro "
+                          "para corregirlo; clic derecho o Supr lo quita." if v_tmodo.get() == "Agregar" else
                           ("Hacé clic sobre un texto del PDF para cambiarlo. Se toma el párrafo entero" if v_talc.get() == "Párrafo"
                            else "Hacé clic sobre un texto del PDF para cambiarlo. Se toma el renglón") +
                           " y se escribe con la misma fuente (o la más parecida). Después podés cambiarle la fuente, el "
@@ -9869,8 +9902,10 @@ def iniciar_interfaz():
             lineas = txt.split("\n") or [""]
             ancho = max(ancho_texto(l_, it_) for l_ in lineas)
         it_ = dict(it_, tipo="texto_n")
-        return (esq[0], esq[1], esq[0] + ancho + tam * 0.6,
-                esq[1] + tam * 0.95 + (len(lineas) - 1) * paso_renglon(it_) + tam * 0.4)
+        y1 = esq[1] + tam * 0.95 + (len(lineas) - 1) * paso_renglon(it_) + tam * 0.4
+        if it_.get("alto"):  # v4.1.1: recuadro mas alto que el texto (como una autoforma)
+            y1 = max(y1, esq[1] + it_["alto"])
+        return (esq[0], esq[1], esq[0] + ancho + tam * 0.6, y1)
 
     def caja_texto(it_):
         """v4.1: donde esta el texto ahora (un parrafo cambiado y movido ya no ocupa su lugar original)."""
@@ -9880,7 +9915,13 @@ def iniciar_interfaz():
         for x_, base, _l, _p, w_ in diseno_texto(it_):
             q_ = fitz.Rect(x_, base - it_["tam"], x_ + max(w_, 2) + 1, base + it_["tam"] * 0.3)
             r_ = q_ if r_ is None else r_ | q_
-        return tuple(r_) if r_ is not None else tuple(it_["rect"])
+        if r_ is None:
+            return tuple(it_["rect"])
+        if it_.get("ancho"):
+            r_.x1 = max(r_.x1, it_["origen"][0] + it_["ancho"])
+        if it_.get("alto"):
+            r_.y1 = max(r_.y1, r_.y0 + it_["alto"])
+        return tuple(r_)
 
     def ajustar_reemplazo(it_):
         """Renglones del texto nuevo y la caja que ocupa (crece si el texto nuevo es mas largo)."""
@@ -10177,6 +10218,12 @@ def iniciar_interfaz():
             w_ = max(w_, fitz.Rect(it_["rect_orig"]).x1 - it_["origen"][0])
         return w_
 
+    def caja_texto_ed(ed):
+        it_ = ed["it"]
+        if it_["tipo"] == "texto_n":
+            return rect_texto(it_["rect"][:2], ed["txt"].get("1.0", "end-1c"), it_)
+        return caja_texto(dict(it_, txt=ed["txt"].get("1.0", "end-1c")))
+
     def ined_colocar(vista):
         """Pone (o vuelve a poner) el cuadro de escritura y su recuadro en la vista (se llama al dibujar)."""
         ed = vis.get("ined")
@@ -10214,6 +10261,8 @@ def iniciar_interfaz():
         except Exception:
             pass
         H = max(1, n_lin) * (fnt.metrics("linespace") + extra) + 4
+        if it_.get("alto"):  # v4.1.1: recuadro mas alto que el texto
+            H = max(H, round(it_["alto"] * z_))
         cv_.delete("ined")
         if it_["tipo"] == "reemplazo":  # tapa el texto original mientras se escribe
             for rb_ in it_.get("rects_borrar") or [it_["rect_orig"]]:
@@ -10222,6 +10271,13 @@ def iniciar_interfaz():
         cv_.create_window(X, Y, window=t_w, anchor="nw", width=W, height=H, tags="ined")
         ed["caja"] = (X, Y, X + W, Y + H)
         dibujar_marco_word(cv_, X - 3, Y - 3, X + W + 3, Y + H + 3, "ined")
+        # v4.1.1: boton «Listo» debajo del recuadro (tambien: clic afuera o Ctrl+Enter)
+        bw_, bh_ = px(64), px(24)
+        bx_, by_ = X + W + 3 - bw_, Y + H + px(10)
+        cv_.create_rectangle(bx_, by_, bx_ + bw_, by_ + bh_, fill=NARANJA_W, outline="", tags=("ined", "ined_listo"))
+        cv_.create_text(bx_ + bw_ / 2, by_ + bh_ / 2, text="✓ Listo", fill="#FFFFFF", font=(FAM, 9, "bold"),
+                        tags=("ined", "ined_listo"))
+        ed["listo"] = (bx_, by_, bx_ + bw_, by_ + bh_)
 
     def dibujar_marco_word(cv_, x0, y0, x1, y1, tag):
         """Recuadro punteado con 8 tiradores (como Word)."""
@@ -10233,18 +10289,35 @@ def iniciar_interfaz():
                                  tags=tag)
 
     def tirador_en(caja, cx_, cy_):
-        """Que parte del recuadro esta bajo el puntero: 'izq', 'der' (ancho), 'borde' (mover) o None."""
+        """Que parte del recuadro esta bajo el puntero: un tirador ('n', 's', 'e', 'o', 'ne', 'no', 'se', 'so'),
+        'borde' (mover), 'dentro' o None."""
         x0, y0, x1, y1 = caja[0] - 3, caja[1] - 3, caja[2] + 3, caja[3] + 3
         m_ = px(7)
         if not (x0 - m_ <= cx_ <= x1 + m_ and y0 - m_ <= cy_ <= y1 + m_):
             return None
-        if abs(cx_ - x0) <= m_:
-            return "izq"
-        if abs(cx_ - x1) <= m_:
-            return "der"
-        if abs(cy_ - y0) <= m_ or abs(cy_ - y1) <= m_:
+        xm, ym = (x0 + x1) / 2, (y0 + y1) / 2
+        v_ = "n" if abs(cy_ - y0) <= m_ else ("s" if abs(cy_ - y1) <= m_ else "")
+        h_ = "o" if abs(cx_ - x0) <= m_ else ("e" if abs(cx_ - x1) <= m_ else "")
+        if v_ and h_:
+            return v_ + h_
+        if h_ and abs(cy_ - ym) <= m_ + 2:
+            return h_
+        if v_ and abs(cx_ - xm) <= m_ + 2:
+            return v_
+        if v_ or h_:
             return "borde"
         return "dentro"
+
+    CURSOR_TIRADOR = {"n": "sb_v_double_arrow", "s": "sb_v_double_arrow", "e": "sb_h_double_arrow",
+                      "o": "sb_h_double_arrow", "ne": "size_ne_sw", "so": "size_ne_sw", "no": "size_nw_se",
+                      "se": "size_nw_se", "borde": "fleur", "dentro": "xterm"}
+
+    def cursor_tirador(cv_, t_):
+        c_ = CURSOR_TIRADOR.get(t_, "")
+        try:
+            cv_.configure(cursor=c_ if c_ else cursor_herramienta())
+        except tk.TclError:  # en Linux no estan las flechas en diagonal
+            cv_.configure(cursor="fleur" if t_ else cursor_herramienta())
 
     def caja_item_vista(vista, it_, base):
         _i, ruta, pag, M, x, y = base
@@ -10331,6 +10404,7 @@ def iniciar_interfaz():
             if not txt.strip() and it_["tipo"] == "texto_n":
                 vis["edit_item"] = None
                 quitar_resaltado(ruta, pag, it_)
+                v_estado.set("Texto quitado · Ctrl+Z lo vuelve a poner.")
                 return
             guardar_historia()
             it_["txt"] = txt
@@ -10339,6 +10413,9 @@ def iniciar_interfaz():
             else:
                 ajustar_reemplazo(it_)
             tocar(it_)
+        n_c = n_resaltes()
+        v_estado.set(f"Texto listo · {n_c} cambio(s) sin guardar · «Guardar cambios» (Ctrl+S) lo deja en el PDF."
+                     if n_c else "Listo.")
         visor_pedir_dibujo()
         mini_pedir_dibujo()
 
@@ -10350,6 +10427,23 @@ def iniciar_interfaz():
             ajustar_reemplazo(it_)
         else:
             it_["rect"] = tuple(fitz.Rect(it_["rect"]) + (dx, dy, dx, dy))
+
+    def alto_minimo(it_):
+        n_ = max(1, len(partir_renglones(it_["txt"], it_, it_["ancho"])) if it_.get("ancho") else it_["txt"].count("\n") + 1)
+        return it_["tam"] * 1.25 + (n_ - 1) * paso_renglon(it_)
+
+    def redimensionar_texto(it_, t_, dx, dy, r0):
+        """Como una autoforma de Word: los costados cambian el ancho, arriba y abajo el alto, las esquinas ambos."""
+        if "e" in t_ or "o" in t_:
+            ancho_texto_item(it_, "der" if "e" in t_ else "izq", dx, r0[:2])
+        if "n" in t_ or "s" in t_:
+            alto0 = r0[2]
+            nuevo_ = max(alto_minimo(it_), alto0 + (dy if "s" in t_ else -dy))
+            if "n" in t_:
+                mover_texto(it_, 0, alto0 - nuevo_)
+            it_["alto"] = nuevo_
+            if it_["tipo"] == "texto_n":
+                it_["rect"] = rect_texto(it_["rect"][:2], it_["txt"], it_)
 
     def ancho_texto_item(it_, lado, dx, r0):
         """Cambia el ancho del recuadro desde un costado (r0: ancho y origen al empezar)."""
@@ -10371,36 +10465,47 @@ def iniciar_interfaz():
             it_["rect"] = rect_texto(it_["rect"][:2], it_["txt"], it_)
 
     def _foto_texto(it_):
-        return (tuple(it_["rect"]), it_.get("origen"), it_.get("ancho"), it_.get("lineas"))
+        return (tuple(it_["rect"]), it_.get("origen"), it_.get("ancho"), it_.get("lineas"), it_.get("alto"))
 
     def _volver_foto(it_, f_):
-        it_["rect"], org_, it_["ancho"], lin_ = f_
+        it_["rect"], org_, it_["ancho"], lin_, it_["alto"] = f_
         if org_ is not None:
             it_["origen"] = org_
         if lin_ is not None:
             it_["lineas"] = lin_
         if f_[2] is None:
             it_.pop("ancho", None)
+        if f_[4] is None:
+            it_.pop("alto", None)
 
     def edicion_press(vista, ev):
         cx_, cy_ = vista.cv.canvasx(ev.x), vista.cv.canvasy(ev.y)
         ed = vis.get("ined")
-        if ed:  # v4.1: escribiendo en la hoja: el borde mueve, los costados cambian el ancho, afuera termina
+        recien_cerrado = False
+        if ed and ed.get("listo") and ed["vista"] is vista:  # v4.1.1: boton «Listo»
+            bx0, by0, bx1, by1 = ed["listo"]
+            if bx0 <= cx_ <= bx1 and by0 <= cy_ <= by1:
+                ined_terminar(True)
+                vista._ed = {"modo": "nada"}
+                return True
+        if ed:  # v4.1: escribiendo en la hoja: el borde mueve, los tiradores cambian el tamaño, afuera termina
             g_ = _ined_escala(ed) if ed["vista"] is vista else None
             t_ = tirador_en(ed["caja"], cx_, cy_) if (g_ and ed.get("caja")) else None
-            if t_ in ("izq", "der", "borde"):
+            if t_ in ("n", "s", "e", "o", "ne", "no", "se", "so") or t_ == "borde":
                 base_e = (g_[3], ed["ruta"], ed["pag"], g_[0], g_[1], g_[2])
                 it_ = ed["it"]
                 vista._ed = {"it": it_, "base": base_e, "p0": vista._pt(ev, base_e), "ined": True,
                              "modo": "mover" if t_ == "borde" else t_, "foto": _foto_texto(it_),
-                             "r0": (_ined_ancho_pt(ed), _ined_origen(it_)[0])}
+                             "r0": (_ined_ancho_pt(ed), _ined_origen(it_)[0],
+                                    fitz.Rect(caja_texto_ed(ed)).height)}
                 return True
             ined_terminar(True)
-            vista._ed = {"modo": "nada"}
-            return True
+            recien_cerrado = True  # v4.1.1: el clic sigue (puede elegir otro texto), pero no crea uno nuevo
         base = vista._punto_pagina(cx_, cy_)
         if not base:
-            return False
+            if recien_cerrado:
+                vista._ed = {"modo": "nada"}
+            return recien_cerrado
         _i, ruta, pag, M, x, y = base
         p_ = vista._pt(ev, base)
         e_ = vis.get("edit_item")
@@ -10415,8 +10520,8 @@ def iniciar_interfaz():
             if t_:
                 ed0 = {"it": it_, "txt": None}
                 vista._ed = {"it": it_, "base": base, "p0": p_, "foto": _foto_texto(it_),
-                             "modo": t_ if t_ in ("izq", "der") else "mover", "editar": t_ == "dentro",
-                             "r0": (_ined_ancho_pt(ed0), _ined_origen(it_)[0])}
+                             "modo": t_ if t_ in ("n", "s", "e", "o", "ne", "no", "se", "so") else "mover", "editar": t_ == "dentro",
+                             "r0": (_ined_ancho_pt(ed0), _ined_origen(it_)[0], fitz.Rect(caja_texto(it_)).height)}
                 return True
         for it_ in reversed(vis["res"].get(ruta, {}).get(pag, [])):
             if it_["tipo"] in EDITABLES and fitz.Rect(caja_texto(it_)).contains(fitz.Point(p_)):
@@ -10428,8 +10533,14 @@ def iniciar_interfaz():
                 visor_pedir_dibujo()
                 return True
         if vis.get("edit_item"):  # clic fuera: se suelta la que estaba elegida
+            soltada = vis["edit_item"][2]["tipo"] in ("texto_n", "reemplazo")
             vis["edit_item"] = None
             visor_pedir_dibujo()
+            if soltada and app.get("panel") == "texto" and v_tmodo.get() == "Agregar":
+                return True  # v4.1.1: como en Word, el clic afuera solo suelta el recuadro (no crea otro)
+        if recien_cerrado and app.get("panel") == "texto" and v_tmodo.get() == "Agregar":
+            vista._ed = {"modo": "nada"}
+            return True
         if app.get("panel") == "firmar":
             nombre = firma_elegida()
             if not nombre:
@@ -10502,7 +10613,7 @@ def iniciar_interfaz():
             if ed["modo"] == "mover":
                 mover_texto(it_, dx, dy)
             else:
-                ancho_texto_item(it_, ed["modo"], dx, ed["r0"])
+                redimensionar_texto(it_, ed["modo"], dx, dy, ed["r0"])
             if ed.get("ined"):
                 vis["ined"]["movido"] = True
                 ined_colocar(vista)
