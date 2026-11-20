@@ -363,12 +363,18 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.1.1"
-VERSION_INTERNA = "4.1.1"
+VERSION = "v4.2"
+VERSION_INTERNA = "4.2"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.2", [
+        "Con dos monitores, el menú del clic derecho aparece en el monitor donde está el programa (antes saltaba a "
+        "la pantalla principal). También «ver página» de Organizar y la ventana al abrir (vuelve a su monitor).",
+        "Menú del clic derecho moderno, como Windows 11: íconos de línea por acción, realce en pastilla, "
+        "encabezado con la página, sombra de Windows y aparición suave.",
+    ]),
     ("v4.1.1", [
         "Texto en la hoja: botón «✓ Listo»; el clic afuera ya no se pierde ni crea otro recuadro; los textos "
         "puestos se eligen con un clic (aunque el panel Texto esté cerrado).",
@@ -3475,6 +3481,180 @@ def elegir_pdfol_para_pdf():
         return False
 
 
+def area_monitor(x, y, ventana=None):
+    """v4.2: (izq, arriba, der, abajo) del area util del monitor donde esta el punto (x, y). Antes los menus
+    y ventanitas se acomodaban solo a la pantalla principal y en un segundo monitor saltaban a la otra."""
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class _MONINFO(ctypes.Structure):
+                _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT), ("rcWork", wintypes.RECT),
+                            ("dwFlags", wintypes.DWORD)]
+            u32 = ctypes.windll.user32
+            u32.MonitorFromPoint.restype = ctypes.c_void_p
+            u32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+            u32.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+            hm = u32.MonitorFromPoint(wintypes.POINT(int(x), int(y)), 2)  # MONITOR_DEFAULTTONEAREST
+            mi = _MONINFO()
+            mi.cbSize = ctypes.sizeof(_MONINFO)
+            if hm and u32.GetMonitorInfoW(hm, ctypes.byref(mi)):
+                r_ = mi.rcWork
+                return r_.left, r_.top, r_.right, r_.bottom
+        except Exception:
+            pass
+    if ventana is not None:
+        try:
+            return 0, 0, ventana.winfo_screenwidth(), ventana.winfo_screenheight()
+        except Exception:
+            pass
+    return -100000, -100000, 100000, 100000
+
+
+def sombra_nativa(ventana):
+    """v4.2: sombra de Windows para una ventanita sin bordes (como los menus de Windows 11)."""
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+
+        class _MARGENES(ctypes.Structure):
+            _fields_ = [("l", ctypes.c_int), ("r", ctypes.c_int), ("t", ctypes.c_int), ("b", ctypes.c_int)]
+        ventana.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(ventana.winfo_id()) or ventana.winfo_id()
+        v_ = ctypes.c_int(2)  # DWMNCRP_ENABLED: que DWM dibuje el marco (y la sombra)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 2, ctypes.byref(v_), ctypes.sizeof(v_))
+        m_ = _MARGENES(1, 1, 1, 1)
+        return ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(m_)) == 0
+    except Exception:
+        return False
+
+
+def icono_menu(cv_, clave, cx, cy, s, color, w=1.6):
+    """v4.2: iconos de linea para los menus (dibujados en el lienzo: nitidos a cualquier escala)."""
+    L = lambda *p_, **k: cv_.create_line(*[cx + a * s if i % 2 == 0 else cy + a * s for i, a in enumerate(p_)],
+                                         fill=color, width=w, capstyle="round", joinstyle="round", tags="fila", **k)
+    R = lambda x0, y0, x1, y1: cv_.create_rectangle(cx + x0 * s, cy + y0 * s, cx + x1 * s, cy + y1 * s,
+                                                    outline=color, width=w, tags="fila")
+    O = lambda x0, y0, x1, y1, **k: cv_.create_oval(cx + x0 * s, cy + y0 * s, cx + x1 * s, cy + y1 * s,
+                                                    outline=color, width=w, tags="fila", **k)
+    A = lambda x0, y0, x1, y1, ini, ext: cv_.create_arc(cx + x0 * s, cy + y0 * s, cx + x1 * s, cy + y1 * s,
+                                                         start=ini, extent=ext, style="arc", outline=color, width=w,
+                                                         tags="fila")
+    if clave == "copiar":
+        R(-0.55, -0.25, 0.25, 0.75)
+        L(-0.25, -0.55, 0.55, -0.55, 0.55, 0.45)
+    elif clave == "cortar":
+        O(-0.75, 0.25, -0.25, 0.75)
+        O(0.25, 0.25, 0.75, 0.75)
+        L(-0.33, 0.33, 0.45, -0.75)
+        L(0.33, 0.33, -0.45, -0.75)
+    elif clave == "pegar":
+        R(-0.6, -0.55, 0.6, 0.8)
+        R(-0.28, -0.78, 0.28, -0.42)
+        L(-0.3, 0.05, 0.3, 0.05)
+        L(-0.3, 0.38, 0.15, 0.38)
+    elif clave == "borrar":
+        L(-0.7, -0.5, 0.7, -0.5)
+        L(-0.25, -0.5, -0.2, -0.75, 0.2, -0.75, 0.25, -0.5)
+        L(-0.5, -0.5, -0.4, 0.78, 0.4, 0.78, 0.5, -0.5)
+        L(-0.13, -0.2, -0.13, 0.5)
+        L(0.13, -0.2, 0.13, 0.5)
+    elif clave == "imagen":
+        R(-0.75, -0.6, 0.75, 0.6)
+        L(-0.75, 0.45, -0.25, -0.05, 0.1, 0.3, 0.35, 0.08, 0.75, 0.45)
+        O(0.2, -0.38, 0.45, -0.13)
+    elif clave == "guardar":
+        L(-0.65, -0.7, 0.4, -0.7, 0.7, -0.4, 0.7, 0.7, -0.65, 0.7, -0.65, -0.7)
+        R(-0.35, -0.7, 0.3, -0.3)
+        R(-0.4, 0.15, 0.4, 0.7)
+    elif clave == "ocr":
+        L(-0.75, -0.35, -0.75, -0.75, -0.35, -0.75)
+        L(0.35, -0.75, 0.75, -0.75, 0.75, -0.35)
+        L(-0.75, 0.35, -0.75, 0.75, -0.35, 0.75)
+        L(0.35, 0.75, 0.75, 0.75, 0.75, 0.35)
+        L(-0.4, -0.25, 0.4, -0.25)
+        L(-0.4, 0.05, 0.4, 0.05)
+        L(-0.4, 0.35, 0.15, 0.35)
+    elif clave == "texto":
+        L(-0.6, -0.65, 0.6, -0.65)
+        L(0, -0.65, 0, 0.7)
+        L(-0.25, 0.7, 0.25, 0.7)
+    elif clave == "girar":
+        A(-0.65, -0.65, 0.65, 0.65, 100, 270)
+        L(0.05, -0.95, -0.15, -0.65, 0.15, -0.42)
+    elif clave == "resaltar":
+        L(-0.35, 0.35, 0.35, -0.55, 0.65, -0.25, -0.05, 0.65, -0.35, 0.35)
+        L(-0.35, 0.35, -0.65, 0.65, -0.2, 0.65)
+        L(-0.75, 0.85, 0.75, 0.85)
+    elif clave == "pagina":
+        L(-0.55, -0.8, 0.2, -0.8, 0.6, -0.4, 0.6, 0.8, -0.55, 0.8, -0.55, -0.8)
+        L(0.2, -0.8, 0.2, -0.4, 0.6, -0.4)
+    elif clave in ("buscar", "zoom_mas", "zoom_menos"):
+        O(-0.7, -0.7, 0.35, 0.35)
+        L(0.25, 0.25, 0.75, 0.75)
+        if clave != "buscar":
+            L(-0.4, -0.17, 0.05, -0.17)
+            if clave == "zoom_mas":
+                L(-0.17, -0.4, -0.17, 0.05)
+    elif clave == "ancho":
+        L(-0.8, 0, 0.8, 0)
+        L(-0.5, -0.3, -0.8, 0, -0.5, 0.3)
+        L(0.5, -0.3, 0.8, 0, 0.5, 0.3)
+        L(-0.8, -0.75, -0.8, 0.75)
+        L(0.8, -0.75, 0.8, 0.75)
+    elif clave == "completa":
+        L(-0.75, -0.3, -0.75, -0.75, -0.3, -0.75)
+        L(0.3, -0.75, 0.75, -0.75, 0.75, -0.3)
+        L(-0.75, 0.3, -0.75, 0.75, -0.3, 0.75)
+        L(0.3, 0.75, 0.75, 0.75, 0.75, 0.3)
+    elif clave == "abrir":
+        L(-0.8, 0.6, -0.8, -0.6, -0.3, -0.6, -0.15, -0.4, 0.7, -0.4, 0.7, 0.6, -0.8, 0.6)
+    elif clave == "mover":
+        L(-0.75, 0, 0.75, 0)
+        L(0, -0.75, 0, 0.75)
+        L(-0.5, -0.25, -0.75, 0, -0.5, 0.25)
+        L(0.5, -0.25, 0.75, 0, 0.5, 0.25)
+    elif clave == "firma":
+        L(-0.8, 0.5, -0.4, 0.1, -0.1, 0.45, 0.25, -0.1, 0.5, 0.25)
+        L(-0.8, 0.8, 0.8, 0.8)
+    elif clave == "agregar":
+        L(-0.6, 0, 0.6, 0)
+        L(0, -0.6, 0, 0.6)
+    elif clave == "deshacer":
+        A(-0.55, -0.45, 0.75, 0.75, 90, 180)
+        L(-0.35, -0.75, -0.65, -0.45, -0.35, -0.15)
+    elif clave == "imprimir":
+        R(-0.75, -0.2, 0.75, 0.45)
+        R(-0.45, -0.75, 0.45, -0.2)
+        R(-0.45, 0.2, 0.45, 0.8)
+    elif clave == "elegir":
+        R(-0.7, -0.7, 0.7, 0.7)
+        L(-0.35, 0.0, -0.1, 0.3, 0.4, -0.3)
+    else:
+        cv_.create_oval(cx - s * 0.18, cy - s * 0.18, cx + s * 0.18, cy + s * 0.18, fill=color, outline="", tags="fila")
+
+
+def icono_para(texto):
+    """Elige el icono del menu segun lo que dice el renglon."""
+    t_ = texto.lower()
+    for palabras, clave in ((("acercar", "agrandar"), "zoom_mas"), (("alejar", "achicar"), "zoom_menos"),
+                            (("ajustar ancho", "ancho"), "ancho"), (("pantalla completa",), "completa"),
+                            (("guardar",), "guardar"), (("reconocer", "ocr"), "ocr"), (("cortar",), "cortar"),
+                            (("pegar",), "pegar"), (("imagen", "imágenes"), "imagen"),
+                            (("copiar",), "copiar"), (("quitar", "borrar", "eliminar"), "borrar"),
+                            (("girar", "rotar"), "girar"), (("resalt",), "resaltar"), (("buscar",), "buscar"),
+                            (("abrir",), "abrir"), (("mover",), "mover"), (("firma", "sello"), "firma"),
+                            (("deshacer",), "deshacer"), (("imprimir",), "imprimir"),
+                            (("texto", "palabra", "renglón"), "texto"), (("agregar", "nuevo", "nueva"), "agregar"),
+                            (("seleccionar", "elegir", "todo"), "elegir"),
+                            (("página", "pagina", "hoja", "documento", "pdf"), "pagina")):
+        if any(p_ in t_ for p_ in palabras):
+            return clave
+    return None
+
+
 def esquinas_redondeadas(ventana):
     """Windows 11 redondea las esquinas de la ventanita (sin bordes dentados)."""
     if os.name != "nt":
@@ -5485,9 +5665,11 @@ def iniciar_interfaz():
             return
         w = ctk.CTkToplevel(raiz)
         w.title(f"{NOMBRE} · ver página")
-        sw_, sh_ = raiz.winfo_screenwidth(), raiz.winfo_screenheight()
+        a0_, b0_, a1_, b1_ = area_monitor(raiz.winfo_rootx() + raiz.winfo_width() // 2,
+                                          raiz.winfo_rooty() + raiz.winfo_height() // 2, raiz)  # v4.2: su monitor
+        sw_, sh_ = a1_ - a0_, b1_ - b0_
         ww_, hh_ = int(min(1100, sw_ * 0.75)), int(min(1000, sh_ * 0.86))
-        w.geometry(f"{ww_}x{hh_}+{(sw_ - ww_) // 2}+{max(0, (sh_ - hh_) // 2 - 20)}")
+        w.geometry(f"{ww_}x{hh_}+{a0_ + (sw_ - ww_) // 2}+{b0_ + max(0, (sh_ - hh_) // 2 - 20)}")
         w.configure(fg_color=C["fondo"])
         w.transient(raiz)
         est = {"i": i, "zoom": 1.0, "foto": None, "doc": {}, "trabajo": 0}
@@ -7576,6 +7758,7 @@ def iniciar_interfaz():
             if pp:
                 i, ruta, pag, M, x, y = pp
                 p_ = fitz.Point(cx_ - x, cy_ - y) * ~M
+                m_.add_titulo(f"Página {i + 1}" + (f" de {len(self.lay['pags'])}" if self.lay else ""))  # v4.2
                 if vis["comp"] and org.get("orden"):  # v3.5: comparando, la hoja se copia, corta o pega
                     if i not in org["sel"]:
                         org["sel"], org["ancla"] = {i}, i
@@ -8258,29 +8441,17 @@ def iniciar_interfaz():
                 MenuPdfol.abierto = None
 
         def tk_popup(self, x, y):
-            # v4.1: menu DIBUJADO (un solo lienzo): con sombra, iconos en chips de color, atajos como teclas y
-            # realce al pasar el mouse. Antes eran varios controles por renglon y se veia plano
+            # v4.2: menu moderno (como Windows 11): iconos de linea, realce en pastilla, sombra de Windows,
+            # aparece con un fundido suave y se ubica en el MONITOR donde esta el programa
             if MenuPdfol.abierto is not None:
                 MenuPdfol.abierto.cerrar()
             MenuPdfol.abierto = self
             self.sombras = []
-            if os.name == "nt":  # sombra suave: dos capas semitransparentes debajo (se ubican despues)
-                for alfa in (0.10, 0.07):
-                    try:
-                        s_ = tk.Toplevel(raiz)
-                        s_.overrideredirect(True)
-                        s_.withdraw()
-                        s_.configure(bg="#000000")
-                        s_.attributes("-alpha", alfa)
-                        s_.attributes("-topmost", True)
-                        self.sombras.append(s_)
-                    except Exception:
-                        pass
             w = tk.Toplevel(raiz)
             self.w = w
+            w.withdraw()
             w.overrideredirect(True)
             w.attributes("-topmost", True)
-            w.configure(bg=col("borde"))
 
             def hx(c_):
                 c_ = c_.lstrip("#")
@@ -8289,12 +8460,19 @@ def iniciar_interfaz():
             def mezcla(a_, b_, t_):
                 a_, b_ = hx(a_), hx(b_)
                 return "#%02X%02X%02X" % tuple(round(a_[k] * t_ + b_[k] * (1 - t_)) for k in range(3))
-            fondo, txt_c, txt2 = col("tarjeta"), col("texto"), col("texto2")
-            acento, suave, linea, campo, borde = col("acento"), col("suave"), col("linea"), col("campo"), col("borde")
+            oscuro = modo_oscuro()
+            fondo = col("tarjeta")
+            if oscuro:  # en oscuro, el menu un poco mas claro que el programa (se ve "por encima")
+                fondo = mezcla("#FFFFFF", fondo, 0.05)
+            txt_c, txt2 = col("texto"), col("texto2")
+            acento, linea = col("acento"), col("linea")
+            borde = mezcla("#FFFFFF", fondo, 0.14) if oscuro else mezcla(col("borde"), fondo, 0.9)
+            w.configure(bg=borde)
+            rojo = "#F87171" if oscuro else "#DC2626"
             f_txt = tkfont.Font(root=raiz, family=FAM, size=10)
-            f_ata = tkfont.Font(root=raiz, family=FAM, size=8)
-            f_tit = tkfont.Font(root=raiz, family=FAM, size=11, weight="bold")
-            ALTO, SEP, TIT, PAD = px(34), px(11), px(38), px(6)
+            f_ata = tkfont.Font(root=raiz, family=FAM, size=9)
+            f_tit = tkfont.Font(root=raiz, family=FAM, size=9, weight="bold")
+            ALTO, SEP, TIT, PAD = px(34), px(9), px(30), px(5)
             filas, yy = [], PAD
             ancho_txt = ancho_ata = 0
             for it in self.items:
@@ -8304,18 +8482,17 @@ def iniciar_interfaz():
                 elif it[0] == "tit":
                     filas.append((it, yy, TIT))
                     yy += TIT
-                    ancho_txt = max(ancho_txt, f_tit.measure(it[1]) - px(30))
+                    ancho_txt = max(ancho_txt, f_tit.measure(it[1].upper()) - px(30))
                 else:
                     filas.append((it, yy, ALTO))
                     yy += ALTO
                     ancho_txt = max(ancho_txt, f_txt.measure(it[1]))
                     if it[4]:
-                        ancho_ata = max(ancho_ata, f_ata.measure(it[4]) + px(14))
-            W = max(px(230), px(50) + ancho_txt + px(28) + ancho_ata + px(16))
+                        ancho_ata = max(ancho_ata, f_ata.measure(it[4]))
+            W = max(px(248), px(46) + ancho_txt + px(30) + ancho_ata + px(16))
             H = yy + PAD
             cv_ = tk.Canvas(w, width=W, height=H, bg=fondo, highlightthickness=0, bd=0, cursor="arrow")
             cv_.pack(padx=1, pady=1)
-            cv_.create_rectangle(0, 0, W, px(3), fill=mezcla(acento, fondo, 0.85), outline="")  # filo de color
             estado = {"i": None}
             activos = [k_ for k_, (it, _y, _h) in enumerate(filas) if it[0] in ("cmd", "sub") and it[3]]
 
@@ -8328,38 +8505,38 @@ def iniciar_interfaz():
                 cv_.delete("fila")
                 for k_, (it, y0, h_) in enumerate(filas):
                     if it[0] == "sep":
-                        cv_.create_line(px(14), y0 + h_ / 2, W - px(14), y0 + h_ / 2, fill=linea, tags="fila")
+                        cv_.create_line(px(12), y0 + h_ / 2, W - px(12), y0 + h_ / 2, fill=linea, tags="fila")
                         continue
-                    if it[0] == "tit":
-                        cv_.create_text(px(16), y0 + px(16), text=it[1], anchor="w", font=f_tit, fill=txt_c, tags="fila")
-                        cv_.create_line(px(14), y0 + h_ - px(5), W - px(14), y0 + h_ - px(5), fill=linea, tags="fila")
+                    if it[0] == "tit":  # encabezado del grupo, en versalitas
+                        cv_.create_text(px(14), y0 + h_ / 2 + px(2), text=it[1].upper(), anchor="w", font=f_tit,
+                                        fill=txt2, tags="fila")
                         continue
                     _t, texto, _acc, activo, atajo, punto = it
                     sobre = estado["i"] == k_ and activo
-                    if sobre:  # realce: pastilla suave con su barrita de color
-                        redondeado(px(6), y0 + px(2), W - px(6), y0 + h_ - px(2), px(9), fill=suave, outline="",
-                                   tags="fila")
-                        cv_.create_rectangle(px(6), y0 + px(9), px(9), y0 + h_ - px(9), fill=acento, outline="",
-                                             tags="fila")
-                    c_ico = punto or (acento if sobre else txt2)
-                    cx, cy = px(28), y0 + h_ / 2
-                    chip = mezcla(c_ico, fondo, 0.22 if activo else 0.1)
-                    redondeado(cx - px(11), cy - px(11), cx + px(11), cy + px(11), px(7), fill=chip, outline="",
-                               tags="fila")
-                    r_ = px(4) if punto else px(3)
-                    cv_.create_oval(cx - r_, cy - r_, cx + r_, cy + r_,
-                                    fill=c_ico if activo else mezcla(c_ico, fondo, 0.4), outline="", tags="fila")
-                    cv_.create_text(px(48), cy, text=texto, anchor="w", font=f_txt,
-                                    fill=(acento if sobre else txt_c) if activo else mezcla(txt2, fondo, 0.7), tags="fila")
+                    peligro = punto in ("#EF4444", "#DC2626", "#F87171")
+                    c_tx = (rojo if peligro else txt_c) if activo else mezcla(txt2, fondo, 0.6)
+                    c_ic = (rojo if peligro else (acento if sobre else txt2)) if activo else mezcla(txt2, fondo, 0.45)
+                    if sobre:  # pastilla con un toque del color de acento
+                        redondeado(px(5), y0 + px(1), W - px(5), y0 + h_ - px(1), px(7),
+                                   fill=mezcla(rojo if peligro else acento, fondo, 0.16 if oscuro else 0.11),
+                                   outline="", tags="fila")
+                        if not peligro:
+                            c_tx = txt_c
+                    cy = y0 + h_ / 2
+                    clave = icono_para(texto) if not getattr(self, "_iconos", {}).get(texto) else self._iconos[texto]
+                    if punto and not peligro and clave is None:  # color propio de la opcion (resaltar con color)
+                        cv_.create_oval(px(20) - px(5), cy - px(5), px(20) + px(5), cy + px(5), fill=punto, outline="",
+                                        tags="fila")
+                    else:
+                        icono_menu(cv_, clave, px(20), cy, px(7), c_ic, w=max(1.2, px(1.5)))
+                    cv_.create_text(px(40), cy, text=texto, anchor="w", font=f_txt, fill=c_tx, tags="fila")
                     if atajo and _t == "cmd":
-                        aw = f_ata.measure(atajo) + px(12)
-                        redondeado(W - px(14) - aw, cy - px(10), W - px(14), cy + px(10), px(5), fill=campo,
-                                   outline=borde, tags="fila")
-                        cv_.create_line(W - px(14) - aw + px(4), cy + px(9), W - px(18), cy + px(9),
-                                        fill=mezcla(borde, campo, 0.9), tags="fila")  # teclita con relieve
-                        cv_.create_text(W - px(14) - aw / 2, cy - px(1), text=atajo, font=f_ata, fill=txt2, tags="fila")
+                        cv_.create_text(W - px(14), cy, text=atajo, anchor="e", font=f_ata,
+                                        fill=mezcla(txt2, fondo, 0.85), tags="fila")
                     elif _t == "sub":
-                        cv_.create_text(W - px(20), cy, text="›", font=f_tit, fill=txt2, tags="fila")
+                        icono_flecha = W - px(16)
+                        cv_.create_line(icono_flecha - px(3), cy - px(4), icono_flecha + px(1), cy, icono_flecha - px(3),
+                                        cy + px(4), fill=txt2, width=max(1.2, px(1.5)), capstyle="round", tags="fila")
             pintar()
 
             def indice(y_):
@@ -8383,7 +8560,7 @@ def iniciar_interfaz():
                 if not activo:
                     return "break"
                 if _t == "sub":  # el submenu se abre al costado
-                    xs, ys = w.winfo_rootx() + W - px(10), w.winfo_rooty() + y0
+                    xs, ys = w.winfo_rootx() + W - px(6), w.winfo_rooty() + y0 - PAD
                     self.cerrar()
                     raiz.after(10, lambda: accion.tk_popup(xs, ys))
                     return "break"
@@ -8409,19 +8586,47 @@ def iniciar_interfaz():
             w.bind("<Key>", teclas)
             w.update_idletasks()
             ww, hh = W + 2, H + 2
-            sx, sy = w.winfo_screenwidth(), w.winfo_screenheight()
-            x = max(0, min(x, sx - ww - 8))
-            y = max(0, min(y, sy - hh - 8))
-            for s_, (dx_, dy_, crece) in zip(self.sombras, ((1, 3, 3), (3, 7, 8))):
+            # en el monitor donde se hizo clic (no en la pantalla principal)
+            a0, b0, a1, b1 = area_monitor(x, y, w)
+            if x + ww > a1 - 4:
+                x = max(a0 + 4, x - ww)
+            if y + hh > b1 - 4:
+                y = max(b0 + 4, b1 - hh - 4)
+            x, y = max(a0 + 2, x), max(b0 + 2, y)
+            w.geometry(f"{ww}x{hh}+{x}+{y}")
+            alfa_ok = os.name == "nt"
+            if alfa_ok:
                 try:
-                    s_.geometry(f"{ww + crece}x{hh + crece}+{x + dx_ - crece // 2}+{y + dy_ - crece // 3}")
-                    s_.deiconify()
+                    w.attributes("-alpha", 0.0)
+                except Exception:
+                    alfa_ok = False
+            w.deiconify()
+            w.lift()
+            esquinas_redondeadas(w)  # Windows 11: esquinas redondeadas
+            if not sombra_nativa(w) and os.name == "nt":  # sin la sombra de Windows: una suave propia
+                try:
+                    s_ = tk.Toplevel(raiz)
+                    s_.overrideredirect(True)
+                    s_.configure(bg="#000000")
+                    s_.attributes("-alpha", 0.09)
+                    s_.geometry(f"{ww + 6}x{hh + 6}+{x - 2}+{y + 2}")
                     esquinas_redondeadas(s_)
+                    self.sombras.append(s_)
+                    w.lift()
                 except Exception:
                     pass
-            w.geometry(f"{ww}x{hh}+{x}+{y}")
-            w.lift()
-            esquinas_redondeadas(w)  # Windows 11: esquinas redondeadas suaves (de Windows)
+            if alfa_ok:  # aparece con un fundido corto (y baja un poquito)
+                def fundido(k_=1):
+                    if self.w is not w:
+                        return
+                    try:
+                        w.attributes("-alpha", min(1.0, k_ / 5))
+                        w.geometry(f"+{x}+{y - 5 + k_}")
+                    except Exception:
+                        return
+                    if k_ < 5:
+                        w.after(16, lambda: fundido(k_ + 1))
+                fundido()
             w.bind("<Escape>", self.cerrar)
 
             def afuera(ev):
@@ -12762,6 +12967,8 @@ def iniciar_interfaz():
                 pass  # v3.0: en pantalla completa o minimizada no se guarda un tamano raro
             else:
                 almacen.datos["ventana"] = "max" if maxi else raiz.geometry()
+                almacen.datos["ventana_monitor"] = [raiz.winfo_rootx() + raiz.winfo_width() // 2,
+                                                    raiz.winfo_rooty() + raiz.winfo_height() // 2]  # v4.2
             almacen.guardar()
         except Exception:
             pass
@@ -12803,8 +13010,12 @@ def iniciar_interfaz():
                 except Exception:
                     geo_ = "max"
             if geo_ == "max":  # v3.0: ya del tamano final, asi la hoja no aparece corrida y despues salta
-                try:
-                    raiz.geometry(f"{raiz.winfo_screenwidth()}x{raiz.winfo_screenheight() - 80}+0+0")
+                try:  # v4.2: en el monitor donde estaba la ultima vez
+                    mx_, my_ = almacen.datos.get("ventana_monitor") or (raiz.winfo_screenwidth() // 2, 300)
+                    a0_, b0_, a1_, b1_ = area_monitor(mx_, my_, raiz)
+                    if a1_ - a0_ > 100000:
+                        a0_, b0_, a1_, b1_ = 0, 0, raiz.winfo_screenwidth(), raiz.winfo_screenheight() - 80
+                    raiz.geometry(f"{a1_ - a0_}x{b1_ - b0_}+{a0_}+{b0_}")
                 except Exception:
                     pass
             raiz.deiconify()
