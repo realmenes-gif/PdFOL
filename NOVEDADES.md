@@ -1,7 +1,8 @@
-## PdFOL v4.2 · by Meneses999
+## PdFOL v4.3 · by Meneses999
 
-- **Dos monitores**: el menú del clic derecho ahora aparece en el monitor donde está el programa (antes saltaba a la pantalla principal). Lo mismo «ver página» de Organizar, y al abrir, PdFOL vuelve al monitor donde lo dejaste.
-- **Menú del clic derecho moderno** (estilo Windows 11): íconos de línea para cada acción (copiar, cortar, pegar, quitar, imagen, OCR, zoom…), realce en pastilla al pasar el mouse, encabezado con la página («PÁGINA 3 DE 40»), atajos a la derecha, las opciones de borrar en rojo, sombra de Windows y aparición suave. En tema oscuro se ve un poco más claro, «por encima» del programa.
-- Sigue todo lo de la v4.1.1 (texto directo en la hoja, OCR de escaneos).
+- **Cambiar texto como Acrobat o Nitro**: al cambiar un texto del PDF se **sacan sus letras** del documento y lo que hay debajo **queda intacto** (franjas de color, celdas de tablas, sombreados). Antes se tapaba con un rectángulo blanco y se notaba la edición.
+- **Mientras escribís**, el recuadro toma el color del fondo y debajo se ve la hoja real sin las letras viejas: lo que ves es lo que se guarda.
+- El texto nuevo conserva el color y la fuente del original (por ejemplo, blanco sobre una franja azul).
+- En **escaneos** (OCR) el texto es parte de la imagen: ahí se tapa con el color del papel de ese renglón.
 
-**Descarga:** `PdFOL_v4.2_portable.zip` (sin instalar) o `PdFOL_v4.2_instalador.exe`.
+**Descarga:** `PdFOL_v4.3_portable.zip` (sin instalar) o `PdFOL_v4.3_instalador.exe`.

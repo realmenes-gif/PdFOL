@@ -363,12 +363,17 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.2"
-VERSION_INTERNA = "4.2"
+VERSION = "v4.3"
+VERSION_INTERNA = "4.3"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.3", [
+        "Cambiar texto como Acrobat/Nitro: se sacan las letras originales del PDF y el fondo queda como estaba "
+        "(colores, celdas, sombreados). Antes se tapaba con blanco y se notaba la edición.",
+        "Mientras escribís, el recuadro toma el color del fondo y debajo se ve la hoja real sin las letras viejas.",
+    ]),
     ("v4.2", [
         "Con dos monitores, el menú del clic derecho aparece en el monitor donde está el programa (antes saltaba a "
         "la pantalla principal). También «ver página» de Organizar y la ventana al abrir (vuelve a su monitor).",
@@ -10469,7 +10474,16 @@ def iniciar_interfaz():
         if it_.get("alto"):  # v4.1.1: recuadro mas alto que el texto
             H = max(H, round(it_["alto"] * z_))
         cv_.delete("ined")
-        if it_["tipo"] == "reemplazo":  # tapa el texto original mientras se escribe
+        fsin = fondo_sin_texto(dict(it_, rect=it_["rect_orig"]), z_) if it_["tipo"] == "reemplazo" else None
+        if fsin is not None:  # v4.3: la hoja real sin las letras (no un parche blanco)
+            ed["foto_fondo"] = foto_tk(fsin)
+            q0_ = fitz.Rect(it_["rect_orig"]) * M
+            cv_.create_image(x + q0_.x0, y + q0_.y0, image=ed["foto_fondo"], anchor="nw", tags="ined")
+            if "fondo_vivo" not in ed:
+                ed["fondo_vivo"] = "#%02X%02X%02X" % color_dominante(fsin)
+            fondo_ = ed["fondo_vivo"]
+            t_w.configure(bg=fondo_)
+        elif it_["tipo"] == "reemplazo":  # tapa el texto original mientras se escribe
             for rb_ in it_.get("rects_borrar") or [it_["rect_orig"]]:
                 q_ = fitz.Rect(rb_) * M
                 cv_.create_rectangle(x + q_.x0, y + q_.y0, x + q_.x1, y + q_.y1, fill=fondo_, outline="", tags="ined")
@@ -10784,7 +10798,7 @@ def iniciar_interfaz():
             if not sp_:
                 v_estado.set("Ahí no hay texto del PDF para cambiar.")
                 return True
-            it_n = dict(sp_, tipo="reemplazo", txt=sp_["txt"], orig=sp_["txt"], rect_orig=sp_["rect"])
+            it_n = dict(sp_, tipo="reemplazo", txt=sp_["txt"], orig=sp_["txt"], rect_orig=sp_["rect"], ruta=ruta, pag=pag)
             ajustar_reemplazo(it_n)
             if ined_empezar(vista, ruta, pag, it_n, True):  # v4.1: se corrige directo en la hoja
                 return True
@@ -10792,7 +10806,7 @@ def iniciar_interfaz():
                               f"Fuente: {sp_['fam']} {('%g' % sp_['tam']).replace('.', ',')} pt"
                               + (f"  (en el PDF: {sp_['fuente_pdf'].split('+')[-1]})" if sp_["fuente_pdf"] else ""))
             if txt is not None and txt != sp_["txt"]:
-                it_ = dict(sp_, tipo="reemplazo", txt=txt, orig=sp_["txt"], rect_orig=sp_["rect"])
+                it_ = dict(sp_, tipo="reemplazo", txt=txt, orig=sp_["txt"], rect_orig=sp_["rect"], ruta=ruta, pag=pag)
                 ajustar_reemplazo(it_)
                 agregar_item(ruta, pag, it_)
             return True
@@ -10878,6 +10892,62 @@ def iniciar_interfaz():
         quitar_resaltado(*e_)
         return "break"
 
+    # ---- v4.3: como Acrobat/Nitro: al cambiar un texto se SACAN sus letras del PDF y queda lo que hay debajo
+    # (color de fondo, celdas, sombreados). En pantalla se muestra la hoja real sin esas letras
+    cache_fondo = {}
+
+    def _rects_quitar(item):
+        out = []
+        for rb_ in item.get("rects_borrar") or [item["rect_orig"]]:
+            r_ = fitz.Rect(rb_)
+            corto = r_.height * 0.18  # solo el renglon (no los de arriba y abajo)
+            out.append(fitz.Rect(r_.x0, r_.y0 + corto, r_.x1, r_.y1 - corto))
+        return out
+
+    def quitar_letras(pg, item):
+        """Saca del PDF las letras del texto original (sin pintar nada: el fondo queda como estaba)."""
+        dm = pg.derotation_matrix
+        for r_ in _rects_quitar(item):
+            pg.add_redact_annot(r_ * dm, fill=False)
+
+    def fondo_sin_texto(item, z):
+        """Imagen (RGB) de la zona del texto, con la hoja tal cual pero sin las letras originales."""
+        ruta, pag = item.get("ruta"), item.get("pag")
+        if ruta is None or pag is None or item.get("ocr"):
+            return None
+        r_ = fitz.Rect(item["rect"])
+        k_ = (ruta, pag, ver_arch(ruta), tuple(tuple(round(v_, 2) for v_ in q_) for q_ in _rects_quitar(item)),
+              tuple(round(v_, 2) for v_ in r_), round(z, 4))
+        if k_ in cache_fondo:
+            return cache_fondo[k_]
+        img = None
+        try:
+            with fitz.open(ruta) as d_:
+                d2 = fitz.open()
+                d2.insert_pdf(d_, from_page=pag, to_page=pag)
+                p2 = d2[0]
+                quitar_letras(p2, item)
+                p2.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=fitz.PDF_REDACT_LINE_ART_NONE,
+                                    text=fitz.PDF_REDACT_TEXT_REMOVE)
+                pix = p2.get_pixmap(matrix=fitz.Matrix(z, z), clip=r_, alpha=False, annots=False)
+                img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                d2.close()
+        except Exception:
+            img = None
+        if len(cache_fondo) > 40:
+            cache_fondo.clear()
+        cache_fondo[k_] = img
+        return img
+
+    def color_dominante(img):
+        """El color que mas hay (el fondo de la zona): para el cuadro mientras se escribe."""
+        try:
+            chico = img.convert("RGB").resize((max(1, img.width // 6), max(1, img.height // 6)))
+            cols_ = chico.getcolors(chico.width * chico.height) or []
+            return max(cols_)[1] if cols_ else (255, 255, 255)
+        except Exception:
+            return (255, 255, 255)
+
     def imagen_edicion(item, M):
         """Firma, sello o texto como imagen en pantalla (y su esquina relativa a la pagina)."""
         r_ = fitz.Rect(item["rect"])
@@ -10898,16 +10968,19 @@ def iniciar_interfaz():
             d_ = fitz.open()
             pg = d_.new_page(width=max(1.0, r_.width), height=max(1.0, r_.height))
             c_ = tuple(v_ / 255 for v_ in item["color"])
-            if item["tipo"] == "reemplazo":
+            fondo_ = fondo_sin_texto(item, z) if item["tipo"] == "reemplazo" else None
+            if item["tipo"] == "reemplazo" and fondo_ is None:  # escaneo (o sin datos): color del papel
                 fb_ = tuple(v_ / 255 for v_ in item.get("fondo_borrar", (255, 255, 255)))
                 for rb_ in item.get("rects_borrar") or [item["rect_orig"]]:  # tapa el texto original en la vista
                     pg.draw_rect(fitz.Rect(rb_) - (r_.x0, r_.y0, r_.x0, r_.y0), color=None, fill=fb_)
-            elif item.get("fondo"):
+            elif item.get("fondo") and item["tipo"] != "reemplazo":
                 pg.draw_rect(pg.rect, color=None, fill=(1, 1, 1))
             dibujar_texto(pg, item, lambda q_: fitz.Point(q_) - r_.tl)
             pix = pg.get_pixmap(matrix=fitz.Matrix(z, z), alpha=True)
             img = Image.frombytes("RGBa", (pix.width, pix.height), pix.samples).convert("RGBA")  # MuPDF da alfa premultiplicado
             d_.close()
+            if fondo_ is not None:  # v4.3: debajo, la hoja real sin las letras originales
+                img = Image.alpha_composite(fondo_.resize(img.size).convert("RGBA"), img)
         if ang:
             img = img.rotate(-ang, expand=True)
         return int(bx), int(by), img
@@ -10922,11 +10995,8 @@ def iniciar_interfaz():
                 pg.draw_rect(fitz.Rect(rb_) * dm, color=None, fill=fb_, overlay=True)
             dibujar_texto(pg, it_, lambda q_: fitz.Point(q_) * dm, pg.rotation)
         if reemplazos:  # se borra el texto original (sin tocar dibujos ni imagenes) y se escribe el nuevo
-            for it_ in reemplazos:
-                for rb_ in it_.get("rects_borrar") or [it_["rect_orig"]]:  # renglon por renglon
-                    r_ = fitz.Rect(rb_)
-                    corto = r_.height * 0.18
-                    pg.add_redact_annot(fitz.Rect(r_.x0, r_.y0 + corto, r_.x1, r_.y1 - corto) * dm)
+            for it_ in reemplazos:  # v4.3: sin relleno (antes quedaba un rectangulo blanco)
+                quitar_letras(pg, it_)
             pg.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=fitz.PDF_REDACT_LINE_ART_NONE,
                                 text=fitz.PDF_REDACT_TEXT_REMOVE)
             for it_ in reemplazos:
