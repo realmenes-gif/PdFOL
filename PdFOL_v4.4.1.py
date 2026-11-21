@@ -363,12 +363,19 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.4"
-VERSION_INTERNA = "4.4"
+VERSION = "v4.4.1"
+VERSION_INTERNA = "4.4.1"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.4.1", [
+        "Escaneos: las firmas con trazos sueltos (rúbricas, firmas cortadas) se reconocen ENTERAS, aunque crucen "
+        "un sello o una raya.",
+        "Sellos negros o azul oscuro, redondos u ovalados: ahora se reconocen por su forma de anillo, aunque tengan "
+        "una firma encima o toquen el texto.",
+        "Firmas en tinta negra en escaneos: se reconocen sin confundirlas con el texto ni con las líneas.",
+    ]),
     ("v4.4", [
         "Firmas y sellos: PdFOL los reconoce (pegados como imagen, dibujados o en un escaneo). Al pasar el mouse se "
         "marcan y con un clic se eligen ENTEROS, como una imagen.",
@@ -1881,6 +1888,233 @@ def _colores_renglon(img, r_):
         return (0, 0, 0), (255, 255, 255)
 
 
+def _sellos_redondos(pg):
+    """Sellos redondos u ovalados (negros o de color) de un escaneo, por su forma de anillo: cada borde de tinta
+    vota por los centros posibles en la direccion de su gradiente (transformada de Hough), y se confirma que haya
+    tinta alrededor de casi todo el circulo. No depende del color ni de que el sello este separado del texto."""
+    import math
+    from PIL import ImageFilter
+    z = min(48 / 72, (1.0e6 / max(1.0, abs(pg.rect))) ** 0.5)  # paginas enormes (planos): menos puntos
+    pix = pg.get_pixmap(matrix=fitz.Matrix(z, z), alpha=False, annots=False)
+    g = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L").filter(ImageFilter.GaussianBlur(1.2))
+    W, H = g.size
+    p = g.tobytes()
+    r_min, r_max = round(20 * z), round(75 * z)  # radios de 20 a 75 pt (sellos de 1,4 a 5,3 cm)
+    bordes = []
+    hyp = math.hypot
+    for y in range(1, H - 1):
+        b = y * W
+        for x in range(1, W - 1):
+            i = b + x
+            if p[i] > 200:
+                continue
+            gx = (p[i + 1] - p[i - 1]) * 2 + p[i - W + 1] - p[i - W - 1] + p[i + W + 1] - p[i + W - 1]
+            gy = (p[i + W] - p[i - W]) * 2 + p[i + W - 1] - p[i - W - 1] + p[i + W + 1] - p[i - W + 1]
+            m = hyp(gx, gy)
+            if m >= 60:
+                bordes.append((x, y, gx / m, gy / m))
+    # tope de trabajo: en paginas muy cargadas (planos, fotos) se usa una muestra de los bordes
+    paso = max(1, math.ceil(len(bordes) * (r_max - r_min + 1) * 2 / 1.5e6))
+    votos = {}
+    for x, y, ux, uy in bordes[::paso]:
+        for r in range(r_min, r_max + 1):
+            for sg in (1, -1):
+                k = (int(x + sg * ux * r) // 2, int(y + sg * uy * r) // 2, r // 2)
+                votos[k] = votos.get(k, 0) + 1
+    tinta = g.point(lambda v: 255 if v < 170 else 0).tobytes()
+    out = []
+    for (cx2, cy2, r2), n_ in sorted(votos.items(), key=lambda kv: -kv[1])[:80]:
+        cx, cy, r = cx2 * 2 + 1, cy2 * 2 + 1, r2 * 2 + 1
+        if n_ * paso < 2 * math.pi * r * 0.5:
+            break
+        llenos, gruesos = 0, []
+        for a in range(48):
+            an = a * math.pi / 24
+            ca, sa = math.cos(an), math.sin(an)
+
+            def _t(d_):
+                px_, py_ = round(cx + d_ * ca), round(cy + d_ * sa)
+                return 0 <= px_ < W and 0 <= py_ < H and tinta[py_ * W + px_]
+            for dr in (0, -1, 1, -2, 2, -3, 3):
+                if _t(r + dr):
+                    d0 = d1 = r + dr
+                    while d0 > r * 0.5 and _t(d0 - 1):
+                        d0 -= 1
+                    while d1 < r * 1.5 and _t(d1 + 1):
+                        d1 += 1
+                    llenos += 1
+                    gruesos.append(d1 - d0 + 1)
+                    break
+        if llenos < 40:
+            continue  # no hay un anillo casi completo
+        gruesos.sort()
+        if gruesos[len(gruesos) // 2] > r * 0.25:
+            continue  # trazo grueso: una letra grande (O, C), no el borde fino de un sello
+        rr = fitz.Rect((cx - r - 4) / z, (cy - r - 4) / z, (cx + r + 4) / z, (cy + r + 4) / z) & pg.rect
+        if any(abs(rr & fitz.Rect(o_["bbox"])) > abs(rr) * 0.4 for o_ in out):
+            continue  # el mismo sello (otro radio o centro cercano)
+        out.append({"bbox": tuple(round(c_, 2) for c_ in rr), "tipo": "sello", "color": None})
+    return out
+
+
+def _letras_de_texto(letras):
+    """Las letras del OCR que forman renglones de verdad. Las letras curvas de un sello el OCR las lee a pedazos,
+    y sobre un garabato inventa signos raros: eso no es texto."""
+    por_renglon = {}
+    for c_ in letras or ():
+        if c_[5].strip():
+            por_renglon.setdefault(c_[4], []).append(c_)
+    out = []
+    for cs_ in por_renglon.values():
+        altos = sorted(c_[3] - c_[1] for c_ in cs_)
+        alto = altos[len(altos) // 2]
+        alfa = sum(1 for c_ in cs_ if c_[5].isalnum())
+        if len(cs_) >= 5 and 4 <= alto <= 40 and alfa >= len(cs_) * 0.6:
+            out += cs_
+    return out
+
+
+def _mascaras_escaneo(pg, letras, dpi):
+    """Tinta de color (azul, morado, rojo, verde: firmas y sellos) y tinta oscura que no es texto."""
+    from PIL import ImageChops, ImageDraw
+    z = dpi / 72
+    pix = pg.get_pixmap(matrix=fitz.Matrix(z, z), alpha=False, annots=False)
+    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    r_, g_, b_ = img.split()
+    mx = ImageChops.lighter(ImageChops.lighter(r_, g_), b_)
+    mn = ImageChops.darker(ImageChops.darker(r_, g_), b_)
+    croma = ImageChops.subtract(mx, mn)
+    # tinta de color: bastante color (aunque sea un trazo fino y claro) y que no sea papel
+    m_col = ImageChops.multiply(croma.point(lambda x: 255 if x > 38 else 0), mn.point(lambda x: 255 if x < 215 else 0))
+    # el amarillo o crema del papel no es tinta: azul/morado/rojo/verde si
+    azul = ImageChops.subtract(b_, ImageChops.lighter(r_, g_)).point(lambda x: 255 if x > 8 else 0)
+    rojo = ImageChops.subtract(r_, ImageChops.lighter(g_, b_)).point(lambda x: 255 if x > 30 else 0)
+    verde = ImageChops.subtract(g_, ImageChops.lighter(r_, b_)).point(lambda x: 255 if x > 25 else 0)
+    morado = ImageChops.multiply(ImageChops.subtract(r_, g_).point(lambda x: 255 if x > 20 else 0),
+                                 ImageChops.subtract(b_, g_).point(lambda x: 255 if x > 20 else 0))
+    tono = ImageChops.lighter(ImageChops.lighter(azul, rojo), ImageChops.lighter(verde, morado))
+    m_col = ImageChops.multiply(m_col, tono)
+    m_osc = ImageChops.multiply(mx.point(lambda x: 255 if x < 150 else 0), croma.point(lambda x: 255 if x <= 38 else 0))
+    if letras:
+        tapar = ImageDraw.Draw(m_osc)
+        for c_ in _letras_de_texto(letras):
+            tapar.rectangle([c_[0] * z - 1, c_[1] * z - 1, c_[2] * z + 1, c_[3] * z + 1], fill=0)
+        m_osc = _sin_rayas(m_osc, round(55 * z))
+    else:
+        m_osc = Image.new("L", img.size, 0)
+    return m_col, m_osc, z
+
+
+def _sin_rayas(mascara, largo):
+    """Borra las rayas rectas largas (lineas de firma, tablas, subrayados): no son firmas ni sellos."""
+    W, H = mascara.size
+    d_ = bytearray(mascara.tobytes())
+    for y in range(H):  # horizontales
+        fila = y * W
+        x = 0
+        while x < W:
+            if d_[fila + x]:
+                x1 = x
+                while x1 < W and (d_[fila + x1] or (x1 + 1 < W and d_[fila + x1 + 1])):
+                    x1 += 1
+                if x1 - x >= largo:
+                    for k in range(x, x1):
+                        d_[fila + k] = 0
+                x = x1 + 1
+            else:
+                x += 1
+    for x in range(W):  # verticales
+        y = 0
+        while y < H:
+            if d_[y * W + x]:
+                y1 = y
+                while y1 < H and (d_[y1 * W + x] or (y1 + 1 < H and d_[(y1 + 1) * W + x])):
+                    y1 += 1
+                if y1 - y >= largo:
+                    for k in range(y, y1):
+                        d_[k * W + x] = 0
+                y = y1 + 1
+            else:
+                y += 1
+    return Image.frombytes("L", (W, H), bytes(d_))
+
+
+def _grupos(mascara, z, radio):
+    """Grupos de tinta: los trazos a menos de 'radio' pixeles quedan juntos. -> [(x0, y0, x1, y1, n_tinta, puntos)]"""
+    from PIL import ImageFilter
+    W, H = mascara.size
+    unida = mascara.filter(ImageFilter.MaxFilter(radio * 2 + 1))
+    dat_u, dat_t = bytearray(unida.tobytes()), mascara.tobytes()
+    out = []
+    for i0 in range(W * H):
+        if dat_u[i0] != 255:
+            continue
+        pila, x0, y0, x1, y1 = [i0], W, H, 0, 0
+        dat_u[i0] = 1
+        puntos = []
+        while pila:
+            i_ = pila.pop()
+            yy, xx = divmod(i_, W)
+            if xx < x0: x0 = xx
+            if xx > x1: x1 = xx
+            if yy < y0: y0 = yy
+            if yy > y1: y1 = yy
+            if dat_t[i_]:
+                puntos.append((xx, yy))
+            for j_ in (i_ - 1 if xx else -1, i_ + 1 if xx < W - 1 else -1, i_ - W, i_ + W):
+                if 0 <= j_ < W * H and dat_u[j_] == 255:
+                    dat_u[j_] = 1
+                    pila.append(j_)
+        if puntos:
+            xs_ = [p_[0] for p_ in puntos]
+            ys_ = [p_[1] for p_ in puntos]
+            out.append((min(xs_), min(ys_), max(xs_), max(ys_), len(puntos), puntos))
+    return out
+
+
+def _detectar_escaneo(pg, letras):
+    dpi = min(72, 72 * (1.6e6 / max(1.0, abs(pg.rect))) ** 0.5)  # paginas enormes: menos puntos
+    m_col, m_osc, z = _mascaras_escaneo(pg, letras, dpi)
+    out = []
+    # 1) tinta de color: los trazos sueltos de una misma firma (hasta ~10 pt de separacion) van juntos
+    for x0, y0, x1, y1, n_, pts in _grupos(m_col, z, max(3, round(5 * z))):
+        w_pt, h_pt = (x1 - x0 + 1) / z, (y1 - y0 + 1) / z
+        grande, chico = max(w_pt, h_pt), min(w_pt, h_pt)
+        relleno = n_ / max(1, (x1 - x0 + 1) * (y1 - y0 + 1))
+        if not (20 <= grande <= 460 and chico >= 8 and grande / max(chico, 1) <= 12 and n_ >= 40
+                and relleno <= 0.55):
+            continue
+        cuadrado = 0.72 <= w_pt / max(h_pt, 1) <= 1.4
+        tipo = "sello" if (cuadrado and grande >= 40) else "firma"
+        out.append({"bbox": (x0 / z - 2, y0 / z - 2, (x1 + 1) / z + 2, (y1 + 1) / z + 2), "tipo": tipo, "color": True})
+    # 2) sellos redondos u ovalados (tambien los negros): por su forma de anillo
+    for o_ in _sellos_redondos(pg):
+        r_ = fitz.Rect(o_["bbox"])
+        if not any(abs(r_ & fitz.Rect(c_["bbox"])) > abs(r_) * 0.8 and c_["tipo"] == "sello" for c_ in out):
+            out.append(o_)
+    # 3) firmas en tinta negra: lo oscuro que no es texto reconocido, ni raya, ni parte de lo ya encontrado
+    oscuros = []
+    centros = [((l_[0] + l_[2]) / 2, (l_[1] + l_[3]) / 2) for l_ in _letras_de_texto(letras)]
+    for x0, y0, x1, y1, n_, pts in _grupos(m_osc, z, max(2, round(4 * z))):
+        w_pt, h_pt = (x1 - x0 + 1) / z, (y1 - y0 + 1) / z
+        grande, chico = max(w_pt, h_pt), min(w_pt, h_pt)
+        relleno = n_ / max(1, (x1 - x0 + 1) * (y1 - y0 + 1))
+        if not (40 <= grande <= 320 and chico >= 14 and grande / max(chico, 1) <= 8 and n_ >= 80
+                and 0.03 <= relleno <= 0.3):
+            continue
+        r_ = fitz.Rect(x0 / z - 2, y0 / z - 2, (x1 + 1) / z + 2, (y1 + 1) / z + 2)
+        if any(abs(r_ & fitz.Rect(c_["bbox"])) > abs(r_) * 0.3 for c_ in out):
+            continue
+        if sum(1 for cx_, cy_ in centros if r_.contains(fitz.Point(cx_, cy_))) > 4:
+            continue  # tiene texto reconocido adentro: es un renglon (negrita, subrayado), no una firma
+        oscuros.append({"bbox": tuple(r_), "tipo": "firma", "color": False})
+    if len(oscuros) <= 4:  # muchas manchas oscuras = pagina sucia o dibujo: mejor no adivinar
+        out += oscuros
+    for o_ in out:
+        o_["bbox"] = tuple(round(c_, 2) for c_ in (fitz.Rect(o_["bbox"]) & pg.rect))
+    return out
+
+
 def _componentes_tinta(tinta, m_col, z, pg):
     """Grupos de tinta (pixeles juntos) que parecen firma o sello."""
     from PIL import ImageFilter
@@ -1932,9 +2166,12 @@ def _juntar_cercanos(out):
         for a_ in range(len(out)):
             for b_ in range(a_ + 1, len(out)):
                 ra, rb = fitz.Rect(out[a_]["bbox"]), fitz.Rect(out[b_]["bbox"])
+                if (out[a_].get("color") != out[b_].get("color") or "imagen" in (out[a_]["tipo"], out[b_]["tipo"])
+                        or out[a_].get("color") is None):
+                    continue  # firma azul encima de un sello negro: cada uno por su lado
                 if (ra + (-6, -6, 6, 6)).intersects(rb):
                     u_ = ra | rb
-                    if max(u_.width, u_.height) <= 340:
+                    if max(u_.width, u_.height) <= 460:
                         out[a_]["bbox"] = tuple(u_)
                         out[a_]["tipo"] = "sello" if "sello" in (out[a_]["tipo"], out[b_]["tipo"]) else "firma"
                         del out[b_]
@@ -2013,26 +2250,9 @@ def detectar_firmas_sellos(pg, letras=None, escaneo=False):
                 out.append({"bbox": tuple(round(c_, 2) for c_ in (r_ + (-3, -3, 3, 3))), "tipo": "firma", "color": False})
         return _juntar_cercanos(out)
     # 3) escaneo: por la tinta
-    dpi = 50
-    z = dpi / 72
-    pix = pg.get_pixmap(matrix=fitz.Matrix(z, z), alpha=False, annots=False)
-    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-    _h, s, v = img.convert("HSV").split()
-    m_col = ImageChops.multiply(s.point(lambda x: 255 if x > 70 else 0), v.point(lambda x: 255 if 40 < x < 238 else 0))
-    if letras:
-        m_osc = v.point(lambda x: 255 if x < 110 else 0)
-        tapar = ImageDraw.Draw(m_osc)
-        for c_ in letras:  # lo reconocido como texto no es firma
-            if c_[5].strip():
-                tapar.rectangle([c_[0] * z - 1, c_[1] * z - 1, c_[2] * z + 1, c_[3] * z + 1], fill=0)
-        tinta = ImageChops.lighter(m_col, m_osc)
-    else:
-        tinta = m_col
-    out = _componentes_tinta(tinta, m_col, z, pg)
-    if len(out) > 10:  # demasiados: es un dibujo o un fondo con trama, no firmas
-        out = [o_ for o_ in out if o_["color"]]
-        if len(out) > 10:
-            out = []
+    out = _detectar_escaneo(pg, letras)
+    if len(out) > 10:  # demasiados: es un dibujo o un fondo con trama, no firmas; quedan solo los sellos redondos
+        out = [o_ for o_ in out if o_.get("color") is None]
     return _juntar_cercanos(out)
 
 
@@ -10568,11 +10788,36 @@ def iniciar_interfaz():
 
     def sello_en(ruta, pag, p_):
         p_ = fitz.Point(p_)
-        for s_ in sellos_de(ruta, pag) or []:
-            if fitz.Rect(s_["bbox"]).contains(p_):
-                return {"ruta": ruta, "pag": pag, "bbox": tuple(s_["bbox"]), "xref": 0, "tr": (1, 0, 0, 1, 0, 0),
-                        "sello": s_["tipo"]}
-        return None
+
+        def _lejos(s_):  # firma encima de un sello: gana aquel a cuyo centro esta mas cerca el clic (segun su tamano)
+            r_ = fitz.Rect(s_["bbox"])
+            return max(abs(p_.x - (r_.x0 + r_.x1) / 2) / max(r_.width / 2, 1),
+                       abs(p_.y - (r_.y0 + r_.y1) / 2) / max(r_.height / 2, 1))
+        cands = [s_ for s_ in sellos_de(ruta, pag) or [] if fitz.Rect(s_["bbox"]).contains(p_)]
+        if not cands:
+            return None
+        if len(cands) > 1 and len({c_.get("color") for c_ in cands}) > 1:
+            # firma de color encima de un sello negro (o al reves): manda el color de la tinta bajo el clic
+            try:
+                with fitz.open(ruta) as d_:
+                    pix_ = d_[pag].get_pixmap(clip=fitz.Rect(p_.x - 4, p_.y - 4, p_.x + 4, p_.y + 4), dpi=72,
+                                              alpha=False, annots=False)
+                n_col = n_osc = 0
+                for i_ in range(0, len(pix_.samples), 3):
+                    r_, g_, b_ = pix_.samples[i_:i_ + 3]
+                    if max(r_, g_, b_) - min(r_, g_, b_) > 38 and min(r_, g_, b_) < 215:
+                        n_col += 1
+                    elif max(r_, g_, b_) < 150:
+                        n_osc += 1
+                if n_col or n_osc:
+                    quiero = bool(n_col >= n_osc)
+                    mejor = [c_ for c_ in cands if bool(c_.get("color")) == quiero]
+                    cands = mejor or cands
+            except Exception:
+                pass
+        s_ = min(cands, key=_lejos)
+        return {"ruta": ruta, "pag": pag, "bbox": tuple(s_["bbox"]), "xref": 0, "tr": (1, 0, 0, 1, 0, 0),
+                "sello": s_["tipo"]}
 
     def recibir_sellos(ruta, pag, ver_, regiones):
         k_ = (ruta, pag, ver_)
