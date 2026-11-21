@@ -1,3 +1,12 @@
+## PdFOL v4.6 · by Meneses999
+
+- **Cambiar texto como Acrobat**: se escribe con la **misma fuente** del PDF (la instalada con ese nombre o la que trae el PDF adentro). Si la fuente del PDF no trae alguna letra nueva, solo esa letra va con la más parecida.
+- **Mismo formato**: se respetan el ancho del párrafo, la sangría, los cortes de renglón y la alineación (justificado, centrado, derecha).
+- **Negritas, cursivas y colores** dentro del párrafo se conservan; lo que escribís toma el estilo de la letra de antes (como en Word).
+- **Lo que ves es lo que queda**: mientras escribís, el texto se muestra exactamente como va a quedar en el PDF, con cursor, selección con el mouse o Shift, doble clic para la palabra y ↑ ↓ Inicio Fin por renglón.
+
+**Descarga:** `PdFOL_v4.6_portable.zip` (sin instalar) o `PdFOL_v4.6_instalador.exe`.
+
 ## PdFOL v4.5 · by Meneses999
 
 - **Abre más rápido**: la ventana arma solo lo que se ve al empezar. Organizar, el resaltador, los marcadores y la barra de comparar se arman la primera vez que los usás (la ventana aparece en un tercio menos de tiempo).

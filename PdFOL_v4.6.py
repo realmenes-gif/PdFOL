@@ -363,12 +363,22 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.5"
-VERSION_INTERNA = "4.5"
+VERSION = "v4.6"
+VERSION_INTERNA = "4.6"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.6", [
+        "Cambiar texto como Acrobat: se escribe con la MISMA fuente del PDF (la instalada con ese nombre o la que "
+        "trae el PDF adentro); solo una letra que la fuente no tenga va con la más parecida.",
+        "Se respetan el ancho del párrafo, la sangría, los cortes de renglón y la alineación (justificado, "
+        "centrado, derecha).",
+        "Negritas, cursivas y colores dentro del párrafo se conservan; lo que escribís toma el estilo de la letra "
+        "de antes, como en Word.",
+        "Mientras escribís ves el texto tal como va a quedar en el PDF (no una aproximación): mismo motor, cursor, "
+        "elegir con el mouse o Shift, doble clic elige la palabra, ↑ ↓ Inicio Fin por renglón.",
+    ]),
     ("v4.5", [
         "Abre más rápido: la ventana arma solo lo que se ve; Organizar, el resaltador, los marcadores y la barra "
         "de comparar se arman la primera vez que los usás.",
@@ -3585,7 +3595,9 @@ ALIAS_FUENTE = {"helvetica": "Arial", "arialmt": "Arial", "timesroman": "Times N
                 "timesnewromanpsmt": "Times New Roman", "courier": "Courier New", "couriernewpsmt": "Courier New",
                 "segoe": "Segoe UI", "gillsans": "Gill Sans MT", "franklingothic": "Franklin Gothic",
                 "bookantiqua": "Book Antiqua", "palatino": "Palatino Linotype", "centuryschoolbook": "Century Schoolbook",
-                "comicsans": "Comic Sans MS"}
+                "comicsans": "Comic Sans MS", "carlito": "Calibri", "caladea": "Cambria", "liberationsans": "Arial",
+                "arimo": "Arial", "liberationserif": "Times New Roman", "tinos": "Times New Roman",
+                "liberationmono": "Courier New", "cousine": "Courier New", "dejavusans": "Verdana"}
 _INTERNAS = {"helv": ("helv", "hebo", "heit", "hebi"), "tiro": ("tiro", "tibo", "tiit", "tibi"),
              "cour": ("cour", "cobo", "coit", "cobi")}
 _LISTA_FUENTES = {}
@@ -3634,18 +3646,284 @@ def fuente_ed(fam, neg=False, cur=False):
     return _CACHE_FUENTE_ED[clave]
 
 
+# ---------------------------------------------------------------- v4.6: cambiar texto como Acrobat
+# 1) Se escribe con la MISMA fuente del PDF: la instalada con ese nombre o, si no esta, la que viene adentro del
+#    PDF (se le agrega el mapa de letras, que el PDF guarda aparte). Solo si falta alguna letra, la mas parecida.
+# 2) Se respetan el ancho del parrafo, la sangria y la alineacion (justificado, centrado, derecha) del original.
+_FUENTES_PDF = {}      # clave -> {"buf": bytes, "font": fitz.Font, "nom": nombre para insert_font}
+_FUENTES_SIS = {}      # (familia, negrita, cursiva) -> archivo
+_FONT_ARCH = {}        # archivo -> fitz.Font
+_PALABRAS_ESTILO = {"bold": "b", "italic": "i", "oblique": "i", "regular": "", "normal": "",
+                    "book": "", "bolditalic": "bi", "boldoblique": "bi", "it": "i", "bd": "b"}
+
+
+def nombre_visible_fuente(nombre_pdf):
+    """v4.6: «Times New Roman» de «ABCDEF+TimesNewRomanPS-BoldMT» (para mostrarlo en el panel)."""
+    import re
+    n_ = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", (nombre_pdf or "").split("+")[-1])
+    pal = [w_ for w_ in re.split(r"[-,_ ]+", n_) if w_ and w_.lower() not in _PALABRAS_ESTILO
+           and w_.lower() not in ("mt", "ps", "psmt")]
+    return " ".join(pal) or "Fuente del PDF"
+
+
+def _clave_fuente(nombre, neg=False, cur=False):
+    """('familia sin espacios', negrita, cursiva) de un nombre de fuente del PDF o de Windows."""
+    import re
+    n_ = (nombre or "").split("+")[-1]
+    for q_ in ("(TrueType)", "(OpenType)", "(All res)"):
+        n_ = n_.replace(q_, "")
+    n_ = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", n_.strip())
+    fam, b_, i_ = [], bool(neg), bool(cur)
+    for w_ in [w_ for w_ in re.split(r"[-,_ ]+", n_) if w_]:
+        wl = w_.lower()
+        if wl in ("mt", "ps", "psmt"):
+            continue
+        if wl in _PALABRAS_ESTILO:
+            b_ = b_ or "b" in _PALABRAS_ESTILO[wl]
+            i_ = i_ or "i" in _PALABRAS_ESTILO[wl]
+            continue
+        fam.append(wl)
+    k_ = "".join(ch for ch in "".join(fam) if ch.isalnum())
+    for suf in ("psmt", "mt", "ps"):
+        if k_.endswith(suf) and len(k_) > len(suf) + 2:
+            k_ = k_[: -len(suf)]
+    return k_, b_, i_
+
+
+def _indice_fuentes_sistema():
+    """Las fuentes instaladas, por familia y estilo (en Windows, del registro: es instantaneo)."""
+    if _FUENTES_SIS:
+        return _FUENTES_SIS
+    hallado = {}
+    if os.name == "nt":
+        try:
+            import winreg
+            for raiz_, carpeta_ in ((winreg.HKEY_LOCAL_MACHINE, _carpeta_fuentes()),
+                                    (winreg.HKEY_CURRENT_USER, os.path.join(os.environ.get("LOCALAPPDATA", ""),
+                                                                            "Microsoft", "Windows", "Fonts"))):
+                try:
+                    k_ = winreg.OpenKey(raiz_, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts")
+                except OSError:
+                    continue
+                for n_ in range(winreg.QueryInfoKey(k_)[1]):
+                    nom, arch, _t = winreg.EnumValue(k_, n_)
+                    if not str(arch).lower().endswith((".ttf", ".otf")) or "&" in nom:
+                        continue
+                    ruta_ = arch if os.path.isabs(arch) else os.path.join(carpeta_, arch)
+                    hallado.setdefault(_clave_fuente(nom), ruta_)
+        except Exception:
+            pass
+    else:  # Linux (pruebas)
+        for c_ in ("/usr/share/fonts", os.path.expanduser("~/.fonts")):
+            for d_, _s, fs_ in os.walk(c_):
+                for f_ in fs_:
+                    if f_.lower().endswith((".ttf", ".otf")):
+                        try:
+                            ft_ = fitz.Font(fontfile=os.path.join(d_, f_))
+                            hallado.setdefault(_clave_fuente(ft_.name, ft_.is_bold, ft_.is_italic), os.path.join(d_, f_))
+                        except Exception:
+                            pass
+    _FUENTES_SIS.update(hallado or {("", False, False): None})
+    return _FUENTES_SIS
+
+
+def archivo_fuente_sistema(nombre_pdf, neg=False, cur=False):
+    """El archivo de la fuente instalada que se llama igual que la del PDF (o None)."""
+    k_ = _clave_fuente(nombre_pdf, neg, cur)
+    if not k_[0] or os.environ.get("PDFOL_PRUEBA_SIN_SIS"):  # (la prueba usa solo la fuente que trae el PDF)
+        return None
+    ind_ = _indice_fuentes_sistema()
+    r_ = ind_.get(k_)
+    if not r_:  # fuentes con las mismas medidas (la letra queda en el mismo lugar)
+        otra = _MISMAS_MEDIDAS.get(k_[0])
+        if otra:
+            r_ = ind_.get((otra, k_[1], k_[2]))
+    return r_ if r_ and os.path.isfile(r_) else None
+
+
+_MISMAS_MEDIDAS = {"carlito": "calibri", "calibri": "carlito", "caladea": "cambria", "cambria": "caladea",
+                   "liberationsans": "arial", "arimo": "arial", "helvetica": "arial", "arial": "liberationsans",
+                   "liberationserif": "timesnewroman", "tinos": "timesnewroman", "times": "timesnewroman",
+                   "timesroman": "timesnewroman", "timesnewroman": "liberationserif",
+                   "liberationmono": "couriernew", "cousine": "couriernew", "courier": "couriernew",
+                   "couriernew": "liberationmono", "liberationsansnarrow": "arialnarrow"}
+
+
+def _font_de_archivo(arch):
+    if arch not in _FONT_ARCH:
+        _FONT_ARCH[arch] = fitz.Font(fontfile=arch)
+    return _FONT_ARCH[arch]
+
+
+def agregar_mapa_letras(buf, mapa):
+    """v4.6: le pone a una fuente TrueType/OpenType el mapa letra -> dibujo (cmap) que el PDF guarda aparte."""
+    import logging
+    logging.getLogger("fontTools").setLevel(logging.ERROR)
+    from fontTools.ttLib import TTFont, newTable
+    from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
+    tt_ = TTFont(io.BytesIO(buf), lazy=False)
+    orden = tt_.getGlyphOrder()
+    grande = max(mapa) > 0xFFFF
+    sub_ = CmapSubtable.newSubtable(12 if grande else 4)
+    sub_.platformID, sub_.platEncID, sub_.language = 3, (10 if grande else 1), 0
+    sub_.cmap = {u_: orden[g_] for u_, g_ in mapa.items() if g_ < len(orden)}
+    if "cmap" not in tt_:
+        tt_["cmap"] = newTable("cmap")
+        tt_["cmap"].tableVersion = 0
+    tt_["cmap"].tables = [sub_]
+    sal_ = io.BytesIO()
+    tt_.save(sal_)
+    return sal_.getvalue()
+
+
+def fuente_original_pdf(doc, pag, nombre_span):
+    """La fuente que trae el PDF (la de ese texto), lista para escribir con ella: clave en _FUENTES_PDF o None.
+    Los PDF guardan solo las letras que usan y casi nunca dicen que letra es cada dibujo; eso se saca de como
+    las usa el documento (get_texttrace) y se le agrega a la fuente."""
+    try:
+        base_ = (nombre_span or "").split("+")[-1]
+        xref = None
+        for f_ in doc[pag].get_fonts(full=True):
+            if f_[3].split("+")[-1] == base_ and f_[1] in ("ttf", "otf"):
+                xref = f_[0]
+                break
+        if not xref:
+            return None
+        clave = f"{doc.name}:{xref}:{base_}"
+        if clave in _FUENTES_PDF:
+            return clave if _FUENTES_PDF[clave] else None
+        _FUENTES_PDF[clave] = None
+        _n, ext, _t, buf = doc.extract_font(xref)
+        if not buf or ext not in ("ttf", "otf"):
+            return None
+        votos = {}
+        for k_ in [pag] + [k_ for k_ in range(len(doc)) if k_ != pag][:40]:
+            pg_ = doc[k_]
+            if k_ != pag and not any(f_[0] == xref for f_ in pg_.get_fonts(full=True)):
+                continue
+            for sp_ in pg_.get_texttrace():
+                if sp_["font"].split("+")[-1] != base_:
+                    continue
+                cs_ = sp_["chars"]
+                for n_, c_ in enumerate(cs_):
+                    u_, g_ = c_[0], c_[1]
+                    if g_ <= 0 or u_ < 32 or (n_ + 1 < len(cs_) and cs_[n_ + 1][1] <= 0):
+                        continue  # sin dibujo, o una ligadura (fi, ti...): esa letra sola no se sabe
+                    votos.setdefault(u_, {}).setdefault(g_, 0)
+                    votos[u_][g_] += 1
+        mapa = {u_: max(gs_, key=gs_.get) for u_, gs_ in votos.items()}
+        if not mapa:
+            return None
+        ft_ = fitz.Font(fontbuffer=buf)
+        if not all(ft_.has_glyph(u_) == g_ for u_, g_ in mapa.items()):
+            buf = agregar_mapa_letras(buf, mapa)
+            ft_ = fitz.Font(fontbuffer=buf)
+        _FUENTES_PDF[clave] = {"buf": buf, "font": ft_, "nom": "PdO%X" % (zlib.crc32(buf) & 0xFFFFFF)}
+        return clave
+    except Exception:
+        return None
+
+
+def _cubre(font, txt):
+    return all(ch in " \n\t" or font.has_glyph(ord(ch)) for ch in txt)
+
+
+def _letras_del_tramo(it_):
+    """Las letras que se escriben con el estilo de este tramo (las otras van con su propia fuente)."""
+    txt = it_.get("txt", "")
+    runs = it_.get("runs")
+    if not runs or len(runs) != len(txt):
+        return txt
+    rid = it_.get("_tramo")
+    k_ = (id(runs), rid, txt)
+    if k_ not in _CACHE_TRAMO:
+        if len(_CACHE_TRAMO) > 200:
+            _CACHE_TRAMO.clear()
+        _CACHE_TRAMO[k_] = "".join(ch for ch, r_ in zip(txt, runs) if r_ == rid)
+    return _CACHE_TRAMO[k_]
+
+
+_CACHE_TRAMO = {}
+
+
+def _es_original(it_):
+    return bool(it_.get("forig")) and not it_.get("_sin_orig") and \
+        tuple(it_["forig"]) == (it_.get("fam"), bool(it_.get("neg")), bool(it_.get("cur")))
+
+
+def _fuente_original_de(it_):
+    """(kw, fitz.Font) de la fuente original del estilo (la instalada o la del PDF), o None."""
+    if not _es_original(it_):
+        return None
+    arch = it_.get("fsis")
+    if arch:
+        try:
+            return ({"fontname": "PdS%X" % (zlib.crc32(arch.lower().encode()) & 0xFFFFFF), "fontfile": arch},
+                    _font_de_archivo(arch))
+        except Exception:
+            pass
+    fp_ = _FUENTES_PDF.get(it_.get("fpdf") or "")
+    if fp_:
+        return {"fontname": fp_["nom"], "fontbuffer": fp_["buf"]}, fp_["font"]
+    return None
+
+
+def fuente_de_item(it_):
+    """(argumentos para insert_text, fitz.Font) con los que se escribe el texto del item: la fuente original
+    (instalada o la del PDF) mientras no se cambie la fuente en el panel. Las letras que la fuente del PDF no
+    trae (los PDF guardan solo las que usan) van con la mas parecida: ver tramos_texto."""
+    o_ = _fuente_original_de(it_)
+    if o_:
+        return o_
+    fam_ = it_.get("fam", "Helvetica (PDF)")
+    if fam_ not in FUENTES_ED:  # el nombre de la fuente del PDF: si no se puede usar, la mas parecida
+        fam_ = it_.get("fam_parecida") or "Helvetica (PDF)"
+    archivo, interna, ft_ = fuente_ed(fam_, it_.get("neg"), it_.get("cur"))
+    if not archivo:
+        return {"fontname": interna}, ft_
+    return {"fontname": "PdF%X" % (zlib.crc32(archivo.lower().encode()) & 0xFFFFFF), "fontfile": archivo}, ft_
+
+
+def usa_fuente_original(it_):
+    return fuente_de_item(it_)[0].get("fontname", "")[:3] in ("PdO", "PdS")
+
+
 def kw_fuente(it_):
     """Argumentos de fuente para insert_text / insert_textbox de PyMuPDF."""
-    archivo, interna, _f = fuente_ed(it_.get("fam", "Helvetica (PDF)"), it_.get("neg"), it_.get("cur"))
-    if not archivo:
-        return {"fontname": interna}
-    import zlib
-    return {"fontname": "PdF%X" % (zlib.crc32(archivo.lower().encode()) & 0xFFFFFF), "fontfile": archivo}
+    return fuente_de_item(it_)[0]
+
+
+_ANCHO_LETRA = {}
+_TIENE_LETRA = {}
+
+
+def ancho_con(font, txt, tam):
+    """v4.6: ancho de un texto con una fuente (las letras se miden una sola vez: escribir no se traba)."""
+    f_ = id(font)
+    tot = 0.0
+    for ch in txt:
+        k_ = (f_, ch)
+        w_ = _ANCHO_LETRA.get(k_)
+        if w_ is None:
+            if len(_ANCHO_LETRA) > 200000:
+                _ANCHO_LETRA.clear()
+            w_ = _ANCHO_LETRA[k_] = font.text_length(ch, fontsize=1)
+        tot += w_
+    return tot * tam
+
+
+def tiene_letra(font, ch):
+    k_ = (id(font), ch)
+    r_ = _TIENE_LETRA.get(k_)
+    if r_ is None:
+        if len(_TIENE_LETRA) > 200000:
+            _TIENE_LETRA.clear()
+        r_ = _TIENE_LETRA[k_] = bool(font.has_glyph(ord(ch)))
+    return r_
 
 
 def ancho_texto(txt, it_, tam=None):
-    return fuente_ed(it_.get("fam", "Helvetica (PDF)"), it_.get("neg"), it_.get("cur"))[2].text_length(
-        txt, fontsize=tam or it_["tam"])
+    return ancho_con(fuente_de_item(it_)[1], txt, tam or it_["tam"])
 
 
 def familia_de(nombre_pdf, flags=0):
@@ -3670,22 +3948,92 @@ def familia_de(nombre_pdf, flags=0):
     return {"c": "Courier (PDF)", "t": "Times (PDF)"}.get(base[0], "Helvetica (PDF)")
 
 
-def partir_renglones(txt, it_, ancho=None, con_fin=False):
-    """Renglones del texto (ajustados al ancho, si hay). con_fin: (renglon, es_el_ultimo_del_parrafo)."""
-    out = []
+def _estilo_run(it_, rid):
+    """El item con el estilo de un tramo (negrita, cursiva, otra fuente o color dentro del mismo parrafo)."""
+    tab = it_.get("est_tab") or []
+    if rid is None or rid >= len(tab):
+        return it_
+    return dict(it_, _tramo=rid, **tab[rid])
+
+
+def _runs(it_):
+    r_ = it_.get("runs")
+    return r_ if (r_ and len(r_) == len(it_.get("txt", ""))) else None
+
+
+def tramos_texto(it_, a, b):
+    """[(desde, hasta, item_con_su_estilo)] del texto entre a y b, por tramos del mismo estilo. v4.6: una letra
+    que la fuente original no tiene se escribe con la mas parecida (solo esa letra, no todo el parrafo)."""
+    if b <= a:
+        return []
+    runs = _runs(it_)
+    txt = it_["txt"]
+    estilos, fuentes = {}, {}
+    out, k_ = [], a
+    clave_prev, ini = None, a
+    for k_ in range(a, b):
+        rid = runs[k_] if runs else None
+        if rid not in estilos:
+            estilos[rid] = _estilo_run(it_, rid) if runs else it_
+            o_ = _fuente_original_de(estilos[rid])
+            fuentes[rid] = o_[1] if o_ else None
+        ch = txt[k_]
+        falta = fuentes[rid] is not None and not ch.isspace() and not tiene_letra(fuentes[rid], ch)
+        clave = (rid, falta)
+        if k_ > a and clave != clave_prev:
+            out.append((ini, k_, clave_prev))
+            ini = k_
+        clave_prev = clave
+    out.append((ini, b, clave_prev))
+    res = []
+    for d_, h_, (rid, falta) in out:
+        e_ = estilos[rid]
+        res.append((d_, h_, dict(e_, _sin_orig=True) if falta else e_))
+    return res
+
+
+def ancho_idx(it_, a, b):
+    """Ancho del texto entre las letras a y b (cada tramo con su fuente)."""
+    txt = it_["txt"]
+    return sum(ancho_con(fuente_de_item(e_)[1], txt[a2:b2], e_["tam"]) for a2, b2, e_ in tramos_texto(it_, a, b))
+
+
+def renglones_indices(txt, it_, ancho=None):
+    """Renglones como se van a escribir: [(desde, renglon, es_fin_de_parrafo)]; desde = posicion de su primera
+    letra en txt (el espacio donde se corta no se escribe). v4.6: la sangria achica el primer renglon."""
+    if txt is not it_.get("txt") and txt != it_.get("txt"):
+        it_ = dict(it_, txt=txt, runs=None)
+    out, pos = [], 0
+    sangria = it_.get("sangria") or 0
+    primero = True
     for parr in txt.split("\n"):
         if not ancho:
-            out.append((parr, True))
-            continue
-        lin = ""
-        for pal in parr.split(" "):
-            prueba = f"{lin} {pal}" if lin else pal
-            if lin and ancho_texto(prueba, it_) > ancho:
-                out.append((lin, False))
-                lin = pal
-            else:
-                lin = prueba
-        out.append((lin, True))
+            out.append((pos, parr, True))
+        else:
+            lim = ancho + (it_.get("corte_d") or 0)
+            ini, fin = pos, None
+            k_ = pos
+            for pal in parr.split(" "):
+                if fin is None:
+                    fin = k_ + len(pal)
+                    k_ = fin + 1
+                    continue
+                fin_p = k_ + len(pal)
+                if fin > ini and ancho_idx(it_, ini, fin_p) > lim - (sangria if primero else 0):
+                    out.append((ini, txt[ini:fin], False))
+                    primero = False
+                    ini = fin + 1  # el espacio del corte no se escribe
+                fin = fin_p
+                k_ = fin_p + 1
+            out.append((ini, txt[ini:fin if fin is not None else ini], True))
+        primero = False
+        pos += len(parr) + 1
+    return out
+
+
+def partir_renglones(txt, it_, ancho=None, con_fin=False):
+    """Renglones del texto (ajustados al ancho, si hay). con_fin: (renglon, es_el_ultimo_del_parrafo)."""
+    out = [(l_, f_) for _i, l_, f_ in renglones_indices(txt, it_, ancho)]
     return out if con_fin else [l_ for l_, _f in out]
 
 
@@ -3699,59 +4047,153 @@ def paso_renglon(it_):
     return it_["tam"] * (k_ or 1.25)
 
 
-def diseno_texto(it_):
-    """Donde va cada renglon (coordenadas de la pagina como se ve): [(x, base, texto, palabras_x o None)]."""
+def alineacion_parrafo(cajas, columna):
+    """v4.6: (alineacion, sangria, x izquierda, ancho para acomodar o None) de un parrafo, por la forma de sus
+    renglones (cajas en coordenadas de la pagina como se ve). columna: (x0, x1) del texto de la hoja."""
+    n_ = len(cajas)
+    izq = [r_.x0 for r_ in cajas]
+    der = [r_.x1 for r_ in cajas]
+    tol = 1.6
+    if n_ == 1:
+        r_ = cajas[0]
+        c_ = (r_.x0 + r_.x1) / 2
+        cx0, cx1 = columna
+        if abs(c_ - (cx0 + cx1) / 2) < 4 and r_.x0 > cx0 + 20:
+            return "centro", 0, r_.x0, None  # titulo centrado
+        if abs(r_.x1 - cx1) < 4 and r_.x0 > (cx0 + cx1) / 2:
+            return "der", 0, r_.x0, None  # fecha o firma pegada a la derecha
+        return "izq", 0, r_.x0, None
+    x_izq = min(izq[1:])
+    sangria = izq[0] - x_izq if izq[0] - x_izq > 2 else 0
+    x_der = max(der)
+    ancho = x_der - x_izq + 0.3
+    izq_ok = all(abs(x - x_izq) < tol for x in izq[1:]) and (sangria or abs(izq[0] - x_izq) < tol)
+    der_ok = all(abs(x - x_der) < tol for x in der[:-1])
+    centros = [(a + b) / 2 for a, b in zip(izq, der)]
+    if izq_ok and der_ok and (n_ >= 3 or abs(x_der - columna[1]) < 3):
+        return "just", sangria, x_izq, ancho
+    if not izq_ok and all(abs(c - centros[0]) < tol for c in centros):
+        return "centro", 0, min(izq), max(der) - min(izq) + 0.3
+    if not izq_ok and all(abs(x - x_der) < tol for x in der):
+        return "der", 0, min(izq), max(der) - min(izq) + 0.3
+    return "izq", sangria, x_izq, ancho
+
+
+def diseno_texto(it_, con_indices=False):
+    """Donde va cada renglon (coordenadas de la pagina como se ve): [(x, base, texto, palabras o None, ancho)];
+    palabras: [(x, palabra, desde)] (justificado). con_indices: ademas, donde empieza el renglon en el texto."""
     tam, alin = it_["tam"], it_.get("alin", "izq")
     paso = paso_renglon(it_)
+    sangria = it_.get("sangria") or 0
+    rengs = renglones_indices(it_["txt"], it_, it_.get("ancho"))
+    anchos = [ancho_idx(it_, i_, i_ + len(l_)) for i_, l_, _f in rengs]
     if it_["tipo"] == "reemplazo":
-        lineas = partir_renglones(it_["txt"], it_, it_.get("ancho"), con_fin=True)
         x0, base0 = it_["origen"]
-        anchos = [ancho_texto(l_, it_) for l_, _f in lineas]
-        caja = it_.get("ancho") or max(fitz.Rect(it_["rect_orig"]).x1 - x0, max(anchos + [0]))
+        if it_.get("ancho"):
+            caja = it_["ancho"]
+        else:  # v4.6: un renglon centrado o a la derecha sigue centrado (o pegado a la derecha) donde estaba
+            ro = fitz.Rect(it_["rect_orig"])
+            caja = max(ro.x1 - x0, max(anchos + [0]))
+            if alin == "centro":
+                x0 = (ro.x0 + ro.x1) / 2 - caja / 2
+            elif alin == "der":
+                x0 = ro.x1 - caja
     else:
         r_ = fitz.Rect(it_["rect"])
         x0, base0 = r_.x0 + tam * 0.3, r_.y0 + tam * 0.95
-        if it_.get("ancho"):  # v4.1: recuadro de ancho fijo (el texto se acomoda en renglones)
-            lineas = partir_renglones(it_["txt"], it_, it_["ancho"], con_fin=True)
-        else:
-            lineas = [(l_, True) for l_ in it_["txt"].split("\n")]
-        anchos = [ancho_texto(l_, it_) for l_, _f in lineas]
         caja = it_.get("ancho") or max(anchos + [0])
     out = []
-    for k_, ((l_, fin), w_) in enumerate(zip(lineas, anchos)):
+    for k_, ((ini, l_, fin), w_) in enumerate(zip(rengs, anchos)):
         base = base0 + k_ * paso
+        san = sangria if k_ == 0 else 0
+        xl, disp = x0 + san, caja - san
         palabras = l_.split(" ")
         if alin == "just" and not fin and len(palabras) > 1:
-            libre = caja - sum(ancho_texto(p_, it_) for p_ in palabras)
-            hueco = libre / (len(palabras) - 1)
-            xs, x_ = [], x0
+            pos_, lista = ini, []
             for p_ in palabras:
-                xs.append((x_, p_))
-                x_ += ancho_texto(p_, it_) + hueco
-            out.append((x0, base, l_, xs, caja))
-            continue
-        dx = {"centro": (caja - w_) / 2, "der": caja - w_}.get(alin, 0)
-        out.append((x0 + dx, base, l_, None, w_))
+                lista.append((pos_, p_))
+                pos_ += len(p_) + 1
+            libre = disp - sum(ancho_idx(it_, a_, a_ + len(p_)) for a_, p_ in lista)
+            hueco = libre / (len(palabras) - 1)
+            xs, x_ = [], xl
+            for a_, p_ in lista:
+                xs.append((x_, p_, a_))
+                x_ += ancho_idx(it_, a_, a_ + len(p_)) + hueco
+            fila = (xl, base, l_, xs, disp)
+        else:
+            dx = {"centro": (disp - w_) / 2, "der": disp - w_}.get(alin, 0)
+            fila = (xl + dx, base, l_, None, w_)
+        out.append(fila + ((ini,) if con_indices else ()))
+    return out
+
+
+def _adv(it_, k_):
+    """Ancho de la letra k del texto (con la fuente de su tramo)."""
+    e_ = tramos_texto(it_, k_, k_ + 1)[0][2]
+    return ancho_con(fuente_de_item(e_)[1], it_["txt"][k_], e_["tam"])
+
+
+def letras_texto(it_):
+    """v4.6: para el cursor: [(desde, base, [x de cada borde de letra])] de cada renglon."""
+    out = []
+    for x_, base, l_, palabras, _w, ini in diseno_texto(it_, True):
+        xs, xq = [], x_
+        if palabras:  # justificado: los espacios son mas anchos
+            for k_, (xp, p_, a_) in enumerate(palabras):
+                xq = xp
+                for n_ in range(len(p_)):
+                    xs.append(xq)
+                    xq += _adv(it_, a_ + n_)
+                if k_ < len(palabras) - 1:
+                    xs.append(xq)
+        else:
+            for n_ in range(len(l_)):
+                xs.append(xq)
+                xq += _adv(it_, ini + n_)
+        xs.append(xq)
+        out.append((ini, base, xs))
     return out
 
 
 def dibujar_texto(pg, it_, conv, rot=0):
-    """Escribe el texto de un item en la pagina. conv: punto de la vista -> punto de esta pagina."""
-    c_ = tuple(v_ / 255 for v_ in it_["color"])
-    tam, kw = it_["tam"], kw_fuente(it_)
-    for x_, base, l_, palabras, w_ in diseno_texto(it_):
+    """Escribe el texto de un item en la pagina. conv: punto de la vista -> punto de esta pagina.
+    v4.6: cada tramo con su fuente, negrita, cursiva y color (como estaba en el PDF)."""
+    tam = it_["tam"]
+    c0_ = tuple(v_ / 255 for v_ in it_["color"])
+    puestas = pg.__dict__.setdefault("_pdfol_fuentes", set())
+    sh_ = pg.new_shape()  # v4.6: todo el texto de una vez (mas rapido que una escritura por palabra)
+
+    def escribir(x_, base, a_, b_):
+        for a2, b2, e_ in tramos_texto(it_, a_, b_):
+            kw = dict(kw_fuente(e_))
+            if kw["fontname"] not in puestas:  # la fuente se pone una vez por pagina
+                if "fontbuffer" in kw:
+                    pg.insert_font(fontname=kw["fontname"], fontbuffer=kw["fontbuffer"])
+                elif "fontfile" in kw:
+                    pg.insert_font(fontname=kw["fontname"], fontfile=kw["fontfile"])
+                puestas.add(kw["fontname"])
+            t_ = it_["txt"][a2:b2]
+            if t_.strip():
+                sh_.insert_text(conv((x_, base)), t_, fontsize=e_["tam"], fontname=kw["fontname"],
+                                color=tuple(v_ / 255 for v_ in e_["color"]), rotate=rot)
+            x_ += ancho_con(fuente_de_item(e_)[1], t_, e_["tam"])
+        return x_
+    lineas_ = []
+    for x_, base, l_, palabras, w_, ini in diseno_texto(it_, True):
         if palabras:
-            for xp, p_ in palabras:
+            for xp, p_, a_ in palabras:
                 if p_:
-                    pg.insert_text(conv((xp, base)), p_, fontsize=tam, color=c_, rotate=rot, **kw)
+                    escribir(xp, base, a_, a_ + len(p_))
         elif l_:
-            pg.insert_text(conv((x_, base)), l_, fontsize=tam, color=c_, rotate=rot, **kw)
+            escribir(x_, base, ini, ini + len(l_))
         if not l_.strip():
             continue
         for marca, dy in (("sub", tam * 0.14), ("tach", -tam * 0.27)):
             if it_.get(marca):
-                pg.draw_line(conv((x_, base + dy)), conv((x_ + w_, base + dy)), color=c_,
-                             width=max(0.5, tam * 0.065))
+                lineas_.append((conv((x_, base + dy)), conv((x_ + w_, base + dy))))
+    sh_.commit()
+    for p0_, p1_ in lineas_:
+        pg.draw_line(p0_, p1_, color=c0_, width=max(0.5, tam * 0.065))
 
 
 def ruta_icono_ico():
@@ -10226,7 +10668,7 @@ def iniciar_interfaz():
                     fuente = orig if (copia or k_ == 0) else ruta
                     soltar_archivo(fuente)
                     d = fitz.open(fuente)
-                    con_fuentes = any(it_["tipo"] in ("texto_n", "reemplazo") and "fontfile" in kw_fuente(it_)
+                    con_fuentes = any(it_["tipo"] in ("texto_n", "reemplazo") and ("fontfile" in kw_fuente(it_) or "fontbuffer" in kw_fuente(it_))
                                       for items_ in pags.values() for it_ in items_)
                     hubo_giro = []
                     for pag, items_ in pags.items():
@@ -10520,6 +10962,10 @@ def iniciar_interfaz():
         if aplicar:
             estilo_texto_cambio()
 
+    def _cambia_letra(it_, nuevo_):
+        return any(nuevo_.get(k_) != it_.get(k_) for k_ in ("fam", "neg", "cur", "tam")) or \
+            tuple(nuevo_.get("color") or ()) != tuple(it_.get("color") or ())
+
     def estilo_texto_cambio():
         if texto_col.get("sincro"):
             return
@@ -10527,8 +10973,16 @@ def iniciar_interfaz():
         if ed_i:  # v4.1: escribiendo en la hoja: el estilo cambia ahi mismo
             it_ = ed_i["it"]
             nuevo_ = dict(estilo_panel(), tam=tam_texto(), color=texto_col["rgb"])
+            if abs(nuevo_["tam"] - round(it_["tam"], 1)) < 0.01:
+                nuevo_["tam"] = it_["tam"]  # v4.6: el tamaño exacto del original (el panel lo muestra redondeado)
+            ed_i["movido"] = True  # el cambio de estilo queda aunque no se cambie el texto
             if not ed_i["nuevo"]:
                 guardar_historia("estilo", it_["id"])
+            if _cambia_letra(it_, nuevo_):  # v4.6: otra fuente o color para todo el parrafo: sin tramos
+                it_["runs"] = it_["est_tab"] = None
+                for t__ in ed_i["txt"].tag_names():
+                    if t__ == "rb" or (t__[:1] == "r" and t__[1:].isdigit()):
+                        ed_i["txt"].tag_delete(t__)
             it_.update(nuevo_)
             if it_["tipo"] == "reemplazo":
                 ajustar_reemplazo(it_)
@@ -10549,9 +11003,13 @@ def iniciar_interfaz():
         if e_ and e_[2]["tipo"] in ("texto_n", "reemplazo"):  # cambia el texto elegido
             it_ = e_[2]
             nuevo_ = dict(estilo_panel(), tam=tam_texto(), color=texto_col["rgb"])
+            if abs(nuevo_["tam"] - round(it_["tam"], 1)) < 0.01:
+                nuevo_["tam"] = it_["tam"]
             if all(it_.get(k__) == v__ for k__, v__ in nuevo_.items()):
                 return
             guardar_historia("estilo", it_["id"])
+            if _cambia_letra(it_, nuevo_):
+                it_["runs"] = it_["est_tab"] = None
             it_.update(nuevo_)
             if it_["tipo"] == "texto_n":
                 it_["rect"] = rect_texto(it_["rect"][:2], it_["txt"], it_)
@@ -10680,10 +11138,14 @@ def iniciar_interfaz():
                     caja |= r_
                 textos = ["".join(sp["text"] for sp in ln["spans"]).strip() for ln in lineas]
                 txt = ""
+                txt_cortes = []
                 for k_, t_ in enumerate(textos):  # se unen los renglones cortados por el ancho del parrafo
                     txt += t_
                     if k_ < len(textos) - 1:
                         lleno = cajas[k_].x1 >= caja.x0 + caja.width * 0.8 and not t_.endswith((".", ":", ";"))
+                        if abs(cajas[k_].x1 - caja.x1) < 1.6 and abs(cajas[k_ + 1].x0 - caja.x0) < 1.6:
+                            lleno = True  # v4.6: renglon hasta el borde (justificado): sigue el mismo parrafo
+                        txt_cortes.append(lleno)
                         txt += " " if lleno else "\n"
                 bases = [(fitz.Point(ln["spans"][0]["origin"]) * m_) for ln in lineas]
                 inter = ((bases[-1].y - bases[0].y) / (len(bases) - 1)) if len(bases) > 1 else sp0["size"] * 1.2
@@ -10696,13 +11158,81 @@ def iniciar_interfaz():
                             "fondo_borrar": tuple(ln0.get("papel", (255, 255, 255))), "ocr": True,
                             "origen": (min(b_.x for b_ in bases), bases[0].y), "inter": max(1.0, inter),
                             "ancho": caja.width + 1 if len(lineas) > 1 else None, "fuente_pdf": ""}
-                return {"rect": tuple(caja), "rects_borrar": [tuple(r_) for r_ in cajas], "txt": txt,
-                        "tam": round(sp0["size"], 2), "fam": familia_de(n_, sp0["flags"]),
-                        "neg": bool(sp0["flags"] & 16) or any(w_ in n_.lower() for w_ in ("bold", "black", "heavy")),
-                        "cur": bool(sp0["flags"] & 2) or "italic" in n_.lower() or "oblique" in n_.lower(),
+
+                def datos_fuente(sp_):
+                    """Fuente de un tramo: la misma del PDF (instalada o la que trae adentro) o la mas parecida."""
+                    nf_ = sp_["font"]
+                    ng_ = bool(sp_["flags"] & 16) or any(w_ in nf_.lower() for w_ in ("bold", "black", "heavy"))
+                    cr_ = bool(sp_["flags"] & 2) or "italic" in nf_.lower() or "oblique" in nf_.lower()
+                    pa_ = familia_de(nf_, sp_["flags"])
+                    fs_ = archivo_fuente_sistema(nf_, ng_, cr_)
+                    fp_ = fuente_original_pdf(d_, pag, nf_)
+                    fm_ = nombre_visible_fuente(nf_) if (fs_ or fp_) else pa_  # en el panel: el nombre del PDF
+                    return {"fam": fm_, "neg": ng_, "cur": cr_, "fsis": fs_, "fpdf": fp_, "fam_parecida": pa_,
+                            "forig": (fm_, ng_, cr_), "fuente_pdf": nf_,
+                            "color": ((sp_["color"] >> 16) & 255, (sp_["color"] >> 8) & 255, sp_["color"] & 255)}
+                df0_ = datos_fuente(sp0)
+                neg_, cur_, fam_, fsis_, fpdf_, parecida_ = (df0_[k__] for k__ in ("neg", "cur", "fam", "fsis", "fpdf",
+                                                                                     "fam_parecida"))
+                # v4.6: negritas, cursivas, otra fuente o color dentro del parrafo: cada letra con su tramo
+                letras_ = []
+                for k_, ln in enumerate(lineas):
+                    cs_ = [(ch, sp) for sp in ln["spans"] for ch in sp["text"]]
+                    a_, b_ = 0, len(cs_)
+                    while a_ < b_ and cs_[a_][0].isspace():
+                        a_ += 1
+                    while b_ > a_ and cs_[b_ - 1][0].isspace():
+                        b_ -= 1
+                    letras_ += [sp for _c, sp in cs_[a_:b_]]
+                    if k_ < len(lineas) - 1:
+                        letras_.append(letras_[-1] if letras_ else sp0)
+                clave0 = (sp0["font"], sp0["flags"] & 18, sp0["color"], round(sp0["size"], 1))
+                tab_, ids_, runs_ = [], {}, []
+                for sp in letras_:
+                    k__ = (sp["font"], sp["flags"] & 18, sp["color"], round(sp["size"], 1))
+                    if k__ == clave0:
+                        runs_.append(None)
+                        continue
+                    if k__ not in ids_:
+                        ids_[k__] = len(tab_)
+                        e__ = datos_fuente(sp)
+                        if abs(sp["size"] - sp0["size"]) > 0.3:
+                            e__["tam"] = round(sp["size"], 3)
+                        tab_.append(e__)
+                    runs_.append(ids_[k__])
+                if len(runs_) != len(txt) or not tab_:
+                    runs_, tab_ = None, None
+                # v4.6: como Acrobat: la misma fuente (instalada o la que trae el PDF), el mismo ancho de parrafo,
+                # la misma sangria y la misma alineacion
+                todas_ = [fitz.Rect(ln_["bbox"]) * m_ for bl_ in bloques_ for ln_ in bl_.get("lines", [])
+                          if "".join(sp_["text"] for sp_ in ln_["spans"]).strip()]
+                columna_ = (min(r_.x0 for r_ in todas_), max(r_.x1 for r_ in todas_))
+                alin_, sangria_, x_izq, ancho_ = alineacion_parrafo(cajas, columna_)
+                res_ = {"rect": tuple(caja), "rects_borrar": [tuple(r_) for r_ in cajas], "txt": txt,
+                        "tam": round(sp0["size"], 3), "fam": fam_, "neg": neg_, "cur": cur_,
                         "color": ((sp0["color"] >> 16) & 255, (sp0["color"] >> 8) & 255, sp0["color"] & 255),
-                        "origen": (min(b_.x for b_ in bases), bases[0].y), "inter": max(1.0, inter),
-                        "ancho": caja.width + 1 if len(lineas) > 1 else None, "fuente_pdf": n_}
+                        "origen": (x_izq, bases[0].y), "inter": max(1.0, inter),
+                        "ancho": ancho_, "fuente_pdf": n_, "alin": alin_, "sangria": sangria_,
+                        "forig": (fam_, neg_, cur_), "fsis": fsis_, "fpdf": fpdf_, "fam_parecida": parecida_,
+                        "runs": runs_, "est_tab": tab_}
+                if ancho_ and len(textos) > 1 and usa_fuente_original(dict(res_, tipo="reemplazo")):
+                    # donde corta cada renglon: el ancho mas chico en que ningun renglon cortado podia llevar la
+                    # palabra siguiente (asi, sin cambios, los renglones quedan cortados igual que en el original)
+                    tope, nat, pos_ = None, 0, 0
+                    for k_ in range(len(textos)):
+                        fin_ = pos_ + len(textos[k_])
+                        nat = max(nat, ancho_idx(res_, pos_, fin_) + (sangria_ if k_ == 0 else 0))
+                        if k_ < len(textos) - 1 and txt_cortes[k_] and textos[k_ + 1]:
+                            w_ = (ancho_idx(res_, pos_, fin_ + 1 + len(textos[k_ + 1].split(" ")[0]))
+                                  + (sangria_ if k_ == 0 else 0))
+                            tope = w_ if tope is None else min(tope, w_)
+                        pos_ = fin_ + 1
+                    if tope is not None and tope - 0.15 >= nat:
+                        if alin_ == "izq":
+                            res_["ancho"] = max(ancho_, tope - 0.15)
+                        else:
+                            res_["corte_d"] = (tope - 0.15) - ancho_
+                return res_
         except Exception:
             pass
         return None
@@ -11028,8 +11558,133 @@ def iniciar_interfaz():
             return rect_texto(it_["rect"][:2], ed["txt"].get("1.0", "end-1c"), it_)
         return caja_texto(dict(it_, txt=ed["txt"].get("1.0", "end-1c")))
 
+    def _ined_runs(ed, txt_):
+        """Los tramos de estilo del texto del cuadro: lo que se escribe toma el estilo de la letra de antes."""
+        it_ = ed["it"]
+        tab = it_.get("est_tab") or []
+        if not tab:
+            return None
+        t_w = ed["txt"]
+        runs = [None] * len(txt_)
+        marcado = [False] * len(txt_)
+        for rid in [None] + list(range(len(tab))):
+            rg_ = t_w.tag_ranges("rb" if rid is None else f"r{rid}")
+            for a_, b_ in zip(rg_[0::2], rg_[1::2]):
+                ia, ib = len(t_w.get("1.0", a_)), len(t_w.get("1.0", b_))
+                for k_ in range(ia, min(ib, len(txt_))):
+                    runs[k_], marcado[k_] = rid, True
+        # lo nuevo (sin marca) hereda el estilo de la letra anterior (como en Word)
+        prev = runs[0] if txt_ and marcado[0] else next((runs[k_] for k_ in range(len(txt_)) if marcado[k_]), None)
+        for k_ in range(len(txt_)):
+            if marcado[k_]:
+                prev = runs[k_]
+            else:
+                runs[k_] = prev
+        return runs if any(r_ is not None for r_ in runs) else None
+
+    def _ined_item(ed):
+        """El texto como esta escrito ahora (copia del item con el texto del cuadro)."""
+        it_ = ed["it"]
+        txt_ = ed["txt"].get("1.0", "end-1c")
+        tmp = dict(it_, txt=txt_, runs=_ined_runs(ed, txt_))
+        if it_["tipo"] == "reemplazo":
+            ajustar_reemplazo(tmp)
+        else:
+            tmp["rect"] = rect_texto(tmp["rect"][:2], txt_, tmp)
+        return tmp
+
+    def _ined_pos(ed):
+        t_w = ed["txt"]
+        return len(t_w.get("1.0", "insert"))
+
+    def _ined_ir(ed, off, marcar=None):
+        """Pone el cursor en la letra off (y elige desde marcar hasta off, si hay)."""
+        t_w = ed["txt"]
+        n_ = len(t_w.get("1.0", "end-1c"))
+        off = max(0, min(n_, off))
+        t_w.mark_set("insert", f"1.0 + {off} chars")
+        t_w.tag_remove("sel", "1.0", "end")
+        if marcar is not None and marcar != off:
+            a_, b_ = sorted((marcar, off))
+            t_w.tag_add("sel", f"1.0 + {a_} chars", f"1.0 + {b_} chars")
+
+    def _ined_renglon(ed, off):
+        """(indice del renglon, x) de la letra off, segun como quedo escrito el texto."""
+        lets = ed.get("letras") or []
+        if not lets:
+            return 0, 0
+        k_ = 0
+        for n_, (ini, _b, xs) in enumerate(lets):
+            if ini <= off:
+                k_ = n_
+            if ini <= off <= ini + len(xs) - 1:
+                break
+        ini, _b, xs = lets[k_]
+        return k_, xs[max(0, min(len(xs) - 1, off - ini))]
+
+    def _ined_off_en(ed, px_, py_):
+        """La letra mas cercana a un punto de la hoja."""
+        lets = ed.get("letras") or []
+        if not lets:
+            return 0
+        tam = ed["it"]["tam"]
+        k_ = min(range(len(lets)), key=lambda n_: abs((lets[n_][1] - tam * 0.33) - py_))
+        ini, _b, xs = lets[k_]
+        j_ = min(range(len(xs)), key=lambda n_: abs(xs[n_] - px_))
+        return ini + j_
+
+    def ined_cursor(ed, visible=True):
+        """v4.6: el cursor y lo elegido, dibujados sobre el texto tal como va a quedar en el PDF."""
+        vista = ed["vista"]
+        g_ = _ined_escala(ed)
+        if not g_:
+            return
+        M, x, y, _i = g_
+        cv_ = vista.cv
+        cv_.delete("ined_cur")
+        it_ = ed["it"]
+        tam = it_["tam"]
+        lets = ed.get("letras") or []
+        t_w = ed["txt"]
+        try:
+            a_, b_ = (len(t_w.get("1.0", t_w.index(m_))) for m_ in ("sel.first", "sel.last"))
+        except tk.TclError:
+            a_ = b_ = None
+        if a_ is not None and b_ > a_:
+            for ini, base, xs in lets:
+                fin = ini + len(xs) - 1
+                d_, h_ = max(a_, ini), min(b_, fin)
+                if d_ < h_ or (d_ == h_ and a_ < ini <= b_ and fin == ini):
+                    r_ = fitz.Rect(xs[d_ - ini], base - tam * 0.92, xs[h_ - ini] + (2 if d_ == h_ else 0),
+                                   base + tam * 0.25) * M
+                    cv_.create_rectangle(x + r_.x0, y + r_.y0, x + r_.x1, y + r_.y1, fill="#3B82F6",
+                                         stipple="gray50", outline="", tags=("ined", "ined_cur"))
+        k_, xc = _ined_renglon(ed, _ined_pos(ed))
+        if lets:
+            base = lets[k_][1]
+            p0 = fitz.Point(xc, base - tam * 0.9) * M
+            p1 = fitz.Point(xc, base + tam * 0.22) * M
+            col_ = "#%02X%02X%02X" % tuple(int(v_) for v_ in it_["color"])
+            cv_.create_line(x + p0.x, y + p0.y, x + p1.x, y + p1.y, fill=col_, width=max(1, round(M.a * 0.9)),
+                            tags=("ined", "ined_cur", "ined_barra"), state="normal" if visible else "hidden")
+            # el cuadro de escritura (invisible) va donde esta el cursor: ahi aparecen los acentos y el IME
+            cv_.coords("ined_entrada", x + p0.x, y + p0.y)
+        cv_.tag_raise("ined_cur")
+
+    def _ined_parpadeo(ed):
+        if vis.get("ined") is not ed:
+            return
+        ed["vis_cur"] = not ed.get("vis_cur", True)
+        try:
+            ed["vista"].cv.itemconfigure("ined_barra", state="normal" if ed["vis_cur"] else "hidden")
+        except tk.TclError:
+            return
+        ed["blink"] = raiz.after(530, lambda: _ined_parpadeo(ed))
+
     def ined_colocar(vista):
-        """Pone (o vuelve a poner) el cuadro de escritura y su recuadro en la vista (se llama al dibujar)."""
+        """v4.6: el texto se ve mientras se escribe EXACTAMENTE como va a quedar en el PDF (misma fuente, mismos
+        renglones, misma alineacion): lo dibuja el mismo motor que lo guarda. El cuadro donde se teclea esta
+        escondido detras del cursor."""
         ed = vis.get("ined")
         if not ed or ed["vista"] is not vista:
             return
@@ -11039,51 +11694,34 @@ def iniciar_interfaz():
             ined_terminar(True)
             return
         M, x, y, _i = g_
-        it_ = ed["it"]
-        z_ = M.a
-        fnt = _ined_fuente(ed, M)
-        t_w = ed["txt"]
-        c_txt = "#%02X%02X%02X" % tuple(int(v_) for v_ in it_["color"])
-        fondo_ = "#%02X%02X%02X" % tuple(int(v_) for v_ in it_.get("fondo_borrar", (255, 255, 255)))
-        alin_ = {"centro": "center", "der": "right"}.get(it_.get("alin"), "left")
-        paso_px = paso_renglon(it_) * z_
-        extra = max(0, round(paso_px - fnt.metrics("linespace")))
-        t_w.configure(font=fnt, fg=c_txt, insertbackground=c_txt, bg=fondo_, spacing3=extra,
-                      wrap="word" if it_.get("ancho") else "none")
-        t_w.tag_configure("al", justify=alin_)
-        t_w.tag_add("al", "1.0", "end")
-        ox, base = _ined_origen(it_)
-        p0 = fitz.Point(ox, base) * M
-        W = max(px(24), round(_ined_ancho_pt(ed) * z_) + 4 + (0 if it_.get("ancho") else max(6, round(it_["tam"] * z_ * 0.6))))
-        X = x + p0.x - 2
-        Y = y + p0.y - fnt.metrics("ascent") - 2
-        txt_ = t_w.get("1.0", "end-1c")
-        n_lin = len(partir_renglones(txt_, it_, it_["ancho"])) if it_.get("ancho") else txt_.count("\n") + 1
-        try:  # lo que Tk acomoda (por si corta distinto que el PDF)
-            if it_.get("ancho") and t_w.winfo_ismapped():
-                n_lin = max(n_lin, int(t_w.count("1.0", "end", "displaylines")[0]))
+        tmp = _ined_item(ed)
+        ed["tmp"] = tmp
+        ed["letras"] = letras_texto(tmp) if tmp.get("txt") or tmp["tipo"] == "reemplazo" else []
+        if not ed["letras"]:  # recuadro nuevo vacio: el cursor al principio
+            if tmp["tipo"] == "reemplazo":
+                ox, base = tmp["origen"]
+            else:
+                r0_ = fitz.Rect(tmp["rect"])
+                ox, base = r0_.x0 + tmp["tam"] * 0.3, r0_.y0 + tmp["tam"] * 0.95
+            ed["letras"] = [(0, base, [ox])]
+        cv_.delete("ined")
+        try:
+            bx, by, img = imagen_edicion(tmp, M)
+            ed["foto"] = foto_tk(img)
+            cv_.create_image(x + bx, y + by, image=ed["foto"], anchor="nw", tags="ined")
         except Exception:
             pass
-        H = max(1, n_lin) * (fnt.metrics("linespace") + extra) + 4
-        if it_.get("alto"):  # v4.1.1: recuadro mas alto que el texto
-            H = max(H, round(it_["alto"] * z_))
-        cv_.delete("ined")
-        fsin = fondo_sin_texto(dict(it_, rect=it_["rect_orig"]), z_) if it_["tipo"] == "reemplazo" else None
-        if fsin is not None:  # v4.3: la hoja real sin las letras (no un parche blanco)
-            ed["foto_fondo"] = foto_tk(fsin)
-            q0_ = fitz.Rect(it_["rect_orig"]) * M
-            cv_.create_image(x + q0_.x0, y + q0_.y0, image=ed["foto_fondo"], anchor="nw", tags="ined")
-            if "fondo_vivo" not in ed:
-                ed["fondo_vivo"] = "#%02X%02X%02X" % color_dominante(fsin)
-            fondo_ = ed["fondo_vivo"]
-            t_w.configure(bg=fondo_)
-        elif it_["tipo"] == "reemplazo":  # tapa el texto original mientras se escribe
-            for rb_ in it_.get("rects_borrar") or [it_["rect_orig"]]:
-                q_ = fitz.Rect(rb_) * M
-                cv_.create_rectangle(x + q_.x0, y + q_.y0, x + q_.x1, y + q_.y1, fill=fondo_, outline="", tags="ined")
-        cv_.create_window(X, Y, window=t_w, anchor="nw", width=W, height=H, tags="ined")
+        r_ = fitz.Rect(caja_texto(tmp)) * M
+        X, Y = x + r_.x0 - 2, y + r_.y0 - 2
+        W, H = max(px(24), r_.width + 4), max(px(14), r_.height + 4)
+        if tmp.get("alto"):
+            H = max(H, round(tmp["alto"] * M.a))
         ed["caja"] = (X, Y, X + W, Y + H)
         dibujar_marco_word(cv_, X - 3, Y - 3, X + W + 3, Y + H + 3, "ined")
+        fondo_ = "#%02X%02X%02X" % tuple(int(v_) for v_ in tmp.get("fondo_borrar", (255, 255, 255)))
+        ed["txt"].configure(bg=fondo_, fg=fondo_, insertwidth=0, selectbackground=fondo_,
+                            selectforeground=fondo_, inactiveselectbackground=fondo_)
+        cv_.create_window(X, Y, window=ed["txt"], anchor="nw", width=1, height=1, tags=("ined", "ined_entrada"))
         # v4.1.1: boton «Listo» debajo del recuadro (tambien: clic afuera o Ctrl+Enter)
         bw_, bh_ = px(64), px(24)
         bx_, by_ = X + W + 3 - bw_, Y + H + px(10)
@@ -11091,6 +11729,8 @@ def iniciar_interfaz():
         cv_.create_text(bx_ + bw_ / 2, by_ + bh_ / 2, text="✓ Listo", fill="#FFFFFF", font=(FAM, 9, "bold"),
                         tags=("ined", "ined_listo"))
         ed["listo"] = (bx_, by_, bx_ + bw_, by_ + bh_)
+        ed["ult_txt"] = tmp["txt"]
+        ined_cursor(ed)
 
     def dibujar_marco_word(cv_, x0, y0, x1, y1, tag):
         """Recuadro punteado con 8 tiradores (como Word)."""
@@ -11147,6 +11787,10 @@ def iniciar_interfaz():
                       maxundo=-1, cursor="xterm", exportselection=True, selectbackground="#BFDBFE",
                       selectforeground="#0F172A")
         t_w.insert("1.0", it_.get("txt", ""))
+        runs0 = _runs(it_)
+        if runs0:  # v4.6: cada tramo (negrita, cursiva, otra fuente...) queda marcado en el cuadro
+            for a_, b_, _e in tramos_texto(it_, 0, len(it_["txt"])):
+                t_w.tag_add("rb" if runs0[a_] is None else f"r{runs0[a_]}", f"1.0 + {a_} chars", f"1.0 + {b_} chars")
         t_w.edit_reset()
         ed["txt"] = t_w
         vis["ined"] = ed
@@ -11154,7 +11798,52 @@ def iniciar_interfaz():
         sincronizar_panel(it_)
 
         def cambio(_e=None):
-            raiz.after_idle(lambda: ined_colocar(vista) if vis.get("ined") is ed else None)
+            def _hacer():
+                if vis.get("ined") is not ed:
+                    return
+                if ed["txt"].get("1.0", "end-1c") != ed.get("ult_txt"):
+                    ined_colocar(vista)  # cambio el texto: se vuelve a escribir (como quedara en el PDF)
+                else:
+                    ined_cursor(ed)  # solo se movio el cursor
+                ed["vis_cur"] = True
+                if ed.get("blink"):
+                    raiz.after_cancel(ed["blink"])
+                ed["blink"] = raiz.after(530, lambda: _ined_parpadeo(ed))
+            if not ed.get("pend"):
+                ed["pend"] = True
+                raiz.after_idle(lambda: (ed.update(pend=False), _hacer()))
+
+        def vertical(d_, shift=False, extremo=None):
+            """Arriba / abajo / Inicio / Fin por los renglones como se ven (no por los parrafos)."""
+            if not ed.get("letras"):
+                return "break"
+            off = _ined_pos(ed)
+            try:
+                sel_ = (len(t_w.get("1.0", "sel.first")), len(t_w.get("1.0", "sel.last")))
+            except tk.TclError:
+                sel_ = None
+            if shift:
+                if not sel_:
+                    ed["anc"] = off
+                elif ed.get("anc") not in sel_:
+                    ed["anc"] = sel_[0] if off == sel_[1] else sel_[1]
+            k_, xc = _ined_renglon(ed, off)
+            lets = ed["letras"]
+            if extremo is not None:
+                ini, _b, xs = lets[k_]
+                nuevo_ = ini if extremo == "ini" else ini + len(xs) - 1
+            elif 0 <= k_ + d_ < len(lets):
+                ini, _b, xs = lets[k_ + d_]
+                nuevo_ = ini + min(range(len(xs)), key=lambda n_: abs(xs[n_] - xc))
+            else:
+                nuevo_ = 0 if d_ < 0 else len(t_w.get("1.0", "end-1c"))
+            _ined_ir(ed, nuevo_, ed.get("anc") if shift else None)
+            cambio()
+            return "break"
+        for t_k, d_k, ext_k in (("Up", -1, None), ("Down", 1, None), ("Home", 0, "ini"), ("End", 0, "fin")):
+            t_w.bind(f"<{t_k}>", lambda e, d_=d_k, x_=ext_k: vertical(d_, False, x_))
+            t_w.bind(f"<Shift-{t_k}>", lambda e, d_=d_k, x_=ext_k: vertical(d_, True, x_))
+        t_w.bind("<<Selection>>", cambio)
 
         def estilo_tecla(k_):
             {"b": v_tneg, "i": v_tcur, "u": v_tsub}[k_].set(not {"b": v_tneg, "i": v_tcur, "u": v_tsub}[k_].get())
@@ -11171,7 +11860,7 @@ def iniciar_interfaz():
         for k_ in ("b", "i", "u"):
             t_w.bind(f"<Control-{k_}>", lambda e, k_=k_: estilo_tecla(k_))
             t_w.bind(f"<Control-{k_.upper()}>", lambda e, k_=k_: estilo_tecla(k_))
-        t_w.bind("<Control-a>", lambda e: (t_w.tag_add("sel", "1.0", "end-1c"), "break")[1])
+        t_w.bind("<Control-a>", lambda e: (t_w.tag_add("sel", "1.0", "end-1c"), cambio(), "break")[2])
         t_w.bind("<Control-s>", lambda e: (ined_terminar(True), guardar_resaltados_dialogo(), "break")[2])
         t_w.bind("<Control-f>", lambda e: "break")
         t_w.bind("<MouseWheel>", lambda e: vista.cv.event_generate("<MouseWheel>", delta=e.delta, x=0, y=0))
@@ -11190,12 +11879,22 @@ def iniciar_interfaz():
         t_w = ed["txt"]
         txt = t_w.get("1.0", "end-1c")
         try:
+            ed["runs_fin"] = _ined_runs(ed, txt)
+        except Exception:
+            ed["runs_fin"] = None
+        if ed.get("blink"):
+            try:
+                raiz.after_cancel(ed["blink"])
+            except Exception:
+                pass
+        try:
             ed["vista"].cv.delete("ined")
             t_w.destroy()
         except Exception:
             pass
         it_ = ed["it"]
         ruta, pag = ed["ruta"], ed["pag"]
+        runs_fin = ed.get("runs_fin")
         if not guardar:
             if ed["nuevo"]:
                 vis["edit_item"] = None
@@ -11205,10 +11904,12 @@ def iniciar_interfaz():
             if it_["tipo"] == "texto_n":
                 if txt.strip():
                     it_["txt"] = txt
+                    it_["runs"] = runs_fin
                     it_["rect"] = rect_texto(it_["rect"][:2], txt, it_)
                     agregar_item(ruta, pag, it_)
             elif txt != ed["orig"] or ed.get("movido"):
                 it_["txt"] = txt
+                it_["runs"] = runs_fin
                 ajustar_reemplazo(it_)
                 agregar_item(ruta, pag, it_)
             else:
@@ -11221,6 +11922,7 @@ def iniciar_interfaz():
                 return
             guardar_historia()
             it_["txt"] = txt
+            it_["runs"] = runs_fin
             if it_["tipo"] == "texto_n":
                 it_["rect"] = rect_texto(it_["rect"][:2], txt, it_)
             else:
@@ -11304,6 +12006,16 @@ def iniciar_interfaz():
         if ed:  # v4.1: escribiendo en la hoja: el borde mueve, los tiradores cambian el tamaño, afuera termina
             g_ = _ined_escala(ed) if ed["vista"] is vista else None
             t_ = tirador_en(ed["caja"], cx_, cy_) if (g_ and ed.get("caja")) else None
+            if t_ == "dentro":  # v4.6: clic en el texto: el cursor va ahi (arrastrando, se elige)
+                base_e = (g_[3], ed["ruta"], ed["pag"], g_[0], g_[1], g_[2])
+                p_e = vista._pt(ev, base_e)
+                off_ = _ined_off_en(ed, p_e[0], p_e[1])
+                ancla_ = _ined_pos(ed) if (ev.state & 0x1) else None
+                _ined_ir(ed, off_, ancla_)
+                ed["txt"].focus_set()
+                ined_cursor(ed)
+                vista._ed = {"modo": "cursor_ined", "base": base_e, "arr": off_ if ancla_ is None else ancla_}
+                return True
             if t_ in ("n", "s", "e", "o", "ne", "no", "se", "so") or t_ == "borde":
                 base_e = (g_[3], ed["ruta"], ed["pag"], g_[0], g_[1], g_[2])
                 it_ = ed["it"]
@@ -11410,6 +12122,13 @@ def iniciar_interfaz():
         ed = vista._ed
         if ed["modo"] == "nada":
             return
+        if ed["modo"] == "cursor_ined":  # v4.6: eligiendo letras con el mouse
+            ined_ = vis.get("ined")
+            if ined_:
+                p_ = vista._pt(ev, ed["base"])
+                _ined_ir(ined_, _ined_off_en(ined_, p_[0], p_[1]), ed["arr"])
+                ined_cursor(ined_)
+            return
         p_ = vista._pt(ev, ed["base"])
         dx, dy = p_[0] - ed["p0"][0], p_[1] - ed["p0"][1]
         if abs(dx) + abs(dy) > 1.5:
@@ -11457,6 +12176,24 @@ def iniciar_interfaz():
         mini_pedir_dibujo()
 
     def edicion_doble(vista, ev):
+        ined_ = vis.get("ined")
+        if ined_ and ined_["vista"] is vista and ined_.get("caja"):  # v4.6: doble clic: la palabra
+            cx_, cy_ = vista.cv.canvasx(ev.x), vista.cv.canvasy(ev.y)
+            if tirador_en(ined_["caja"], cx_, cy_) == "dentro":
+                g_ = _ined_escala(ined_)
+                base_e = (g_[3], ined_["ruta"], ined_["pag"], g_[0], g_[1], g_[2])
+                p_e = vista._pt(ev, base_e)
+                off_ = _ined_off_en(ined_, p_e[0], p_e[1])
+                txt_ = ined_["txt"].get("1.0", "end-1c")
+                a_ = b_ = off_
+                while a_ > 0 and not txt_[a_ - 1].isspace():
+                    a_ -= 1
+                while b_ < len(txt_) and not txt_[b_].isspace():
+                    b_ += 1
+                _ined_ir(ined_, b_, a_)
+                ined_cursor(ined_)
+                vista._ed = {"modo": "nada"}
+                return True
         e_ = vis.get("edit_item")
         if not e_ or e_[2]["tipo"] not in ("texto_n", "reemplazo"):
             return False
@@ -13892,6 +14629,16 @@ def iniciar_interfaz():
             e_.save(prueba_ocr["ruta"])
             if not _carpeta_tessdata():
                 _fallo(RuntimeError, RuntimeError("Faltan los idiomas del OCR (tessdata)"), None)
+            try:  # v4.6: cambiar texto con la fuente del PDF necesita fontTools (que este en el .exe)
+                arch_ = _buscar_archivo_fuente("CourierPrime-Regular.ttf", incluida=True)
+                with open(arch_, "rb") as f_:
+                    buf_ = f_.read()
+                g_ = fitz.Font(fontbuffer=buf_).has_glyph(ord("Z"))
+                nb_ = agregar_mapa_letras(buf_, {ord("Q"): g_})
+                if fitz.Font(fontbuffer=nb_).has_glyph(ord("Q")) != g_:
+                    raise RuntimeError("el mapa de letras no quedo")
+            except Exception as e__:
+                _fallo(RuntimeError, RuntimeError(f"Fuentes del PDF (fontTools): {e__}"), None)
             ocr_pedir(prueba_ocr["ruta"], 0, avisar=False, forzar=True)
 
         def ocr_revisar():
