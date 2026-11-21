@@ -6,11 +6,11 @@ if not "%~1"=="_abierto" (
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
-title Creando PdFOL v4.4.1 portable
+title Creando PdFOL v4.5 portable
 
 echo.
 echo  ==========================================================
-echo    Creando la version PORTABLE de PdFOL v4.4.1
+echo    Creando la version PORTABLE de PdFOL v4.5
 echo    (solo se hace una vez; tarda unos minutos)
 echo  ==========================================================
 echo.
@@ -36,8 +36,8 @@ if errorlevel 1 (
     goto :fin
 )
 
-if not exist "PdFOL_v4.4.1.py" (
-    echo  No encuentro PdFOL_v4.4.1.py en esta carpeta.
+if not exist "PdFOL_v4.5.py" (
+    echo  No encuentro PdFOL_v4.5.py en esta carpeta.
     echo  Descomprimi el .zip completo y ejecuta este .bat desde esa carpeta.
     goto :fin
 )
@@ -67,9 +67,10 @@ if errorlevel 1 (
 
 echo [2/4] Armando el programa (puede tardar 2 a 5 minutos)...
 rem v3.0: la tarjeta de inicio que el .exe muestra al instante
-python "%~dp0PdFOL_v4.4.1.py" --pdfol-crear-splash "%~dp0splash_pdfol.png"
+python "%~dp0PdFOL_v4.5.py" --pdfol-crear-splash "%~dp0splash_pdfol.png"
 python -m PyInstaller --noconfirm --clean --windowed --onedir ^
     --splash "%~dp0splash_pdfol.png" ^
+    --manifest "%~dp0PdFOL.manifest" ^
     --name PdFOL ^
     --icon "%~dp0PdFOL.ico" ^
     --collect-all pymupdf ^
@@ -87,7 +88,7 @@ python -m PyInstaller --noconfirm --clean --windowed --onedir ^
     --add-data "%~dp0fuentes;fuentes" ^
     --add-data "%~dp0tessdata;tessdata" ^
     --distpath "%~dp0_dist" --workpath "%~dp0_build" --specpath "%~dp0_build" ^
-    PdFOL_v4.4.1.py
+    PdFOL_v4.5.py
 if errorlevel 1 (
     echo.
     echo  Hubo un error armando el programa. Copia el texto de arriba y envialo.
@@ -140,7 +141,7 @@ goto :sin_inno
 :armar_instalador
 "%ISCC%" /Q "%~dp0PdFOL.iss"
 if errorlevel 1 goto :sin_instalador
-set "INSTALADOR=PdFOL_v4.4.1_instalador.exe"
+set "INSTALADOR=PdFOL_v4.5_instalador.exe"
 goto :listo
 
 :sin_inno_descarga

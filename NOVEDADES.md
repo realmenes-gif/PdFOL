@@ -1,3 +1,10 @@
+## PdFOL v4.5 · by Meneses999
+
+- **Abre más rápido**: la ventana arma solo lo que se ve al empezar. Organizar, el resaltador, los marcadores y la barra de comparar se arman la primera vez que los usás (la ventana aparece en un tercio menos de tiempo).
+- **Tarjeta de inicio quieta**: ya no salta hacia arriba a la izquierda al cargar; aparece en su lugar, un poco más grande y nítida.
+
+**Descarga:** `PdFOL_v4.5_portable.zip` (sin instalar) o `PdFOL_v4.5_instalador.exe`.
+
 ## PdFOL v4.4.1 · by Meneses999
 
 - **Firmas en escaneos, enteras**: las firmas con trazos sueltos (rúbricas, rayas que no se tocan) ya no se cortan; se toman completas aunque crucen un sello o la raya de firma.

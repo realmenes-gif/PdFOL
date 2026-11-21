@@ -363,12 +363,17 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.4.1"
-VERSION_INTERNA = "4.4.1"
+VERSION = "v4.5"
+VERSION_INTERNA = "4.5"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.5", [
+        "Abre más rápido: la ventana arma solo lo que se ve; Organizar, el resaltador, los marcadores y la barra "
+        "de comparar se arman la primera vez que los usás.",
+        "La tarjeta de inicio ya no salta hacia arriba a la izquierda: aparece quieta, en su lugar y más nítida.",
+    ]),
     ("v4.4.1", [
         "Escaneos: las firmas con trazos sueltos (rúbricas, firmas cortadas) se reconocen ENTERAS, aunque crucen "
         "un sello o una raya.",
@@ -756,7 +761,9 @@ def crear_imagen_inicio(destino):
     d.text((x0 + w1 + 8 * K, 51 * K), VERSION, font=f2, fill=(76, 111, 159))
     d.text((x0 + 2 * K, 84 * K), f"by {AUTOR}", font=f3, fill=(106, 118, 133))
     d.text((x0 + 2 * K, 104 * K), "Abriendo…", font=f3, fill=(106, 118, 133))
-    im.resize((W, H), Image.LANCZOS).save(destino)
+    # v4.5: el .exe maneja la escala de la pantalla desde que arranca (PdFOL.manifest), asi la tarjeta ya no
+    # salta; Windows no la agranda, por eso se guarda un poco mas grande (se ve bien al 100 % y al 150 %)
+    im.resize((round(W * 1.25), round(H * 1.25)), Image.LANCZOS).save(destino)
 
 
 def cerrar_pantalla_de_inicio():
@@ -825,6 +832,44 @@ Image.MAX_IMAGE_PIXELS = None
 DPI_DEFECTO = 400
 CALIDAD_JPEG = 92
 MOSAICO = 512
+
+
+class Diferido:
+    """v4.5: un control que se arma recien la primera vez que se muestra (el programa abre mas rapido).
+    Ocultarlo o preguntar si tiene hijos no lo arma; cualquier otro uso, si."""
+
+    def __init__(self, fabrica):
+        self._fabrica, self._w = fabrica, None
+
+    def real(self):
+        if self._w is None:
+            self._w = self._fabrica()
+        return self._w
+
+    def _si_hay(self, metodo, *a, **k):
+        if self._w is not None:
+            return getattr(self._w, metodo)(*a, **k)
+
+    def grid_remove(self):
+        self._si_hay("grid_remove")
+
+    def grid_forget(self):
+        self._si_hay("grid_forget")
+
+    def pack_forget(self):
+        self._si_hay("pack_forget")
+
+    def place_forget(self):
+        self._si_hay("place_forget")
+
+    def winfo_children(self):
+        return self._w.winfo_children() if self._w is not None else []
+
+    def winfo_ismapped(self):
+        return bool(self._w is not None and self._w.winfo_ismapped())
+
+    def __getattr__(self, a):
+        return getattr(self.real(), a)
 
 
 class Cancelado(Exception):
@@ -4588,8 +4633,9 @@ def iniciar_interfaz():
     caja_org_izq = ctk.CTkFrame(tarj_doc, fg_color="transparent")
     l_archivos_tit = ctk.CTkLabel(caja_org_izq, text="Archivos", font=F(12, "bold"), text_color=C["texto"], anchor="w")
     # v3.0: la lista de archivos tiene su propio desplazamiento (con muchos PDF, «Procesar» quedaba fuera)
-    leyenda = ctk.CTkScrollableFrame(caja_org_izq, fg_color="transparent", height=60,
-                                     scrollbar_button_color=C["suave_h"], scrollbar_button_hover_color=C["borde"])
+    leyenda = Diferido(lambda: ctk.CTkScrollableFrame(caja_org_izq, fg_color="transparent", height=60,
+                                                       scrollbar_button_color=C["suave_h"],
+                                                       scrollbar_button_hover_color=C["borde"]))
 
     contenido = ctk.CTkFrame(cuerpo, fg_color=C["fondo"], corner_radius=0)
     contenido.grid(row=0, column=2, sticky="nsew")
@@ -5468,29 +5514,39 @@ def iniciar_interfaz():
                    ("todo", "Original", "deshacer", "#64748B"), ("|",),
                    ("limpiar", "Limpiar", "limpiar", "#E0607E"), ("|",),
                    ("ayuda", "Ayuda", "ayuda", "#64748B"))
-    for it_ in BOTONES_ORG:
-        if it_[0] == "|":
-            sep(fila1)
-            continue
-        clave, texto, glifo, color_ = it_
-        im_ = _icono(glifo, color_, 78)
-        img_org[clave] = (ctk.CTkImage(im_, size=(26, 26)), ctk.CTkImage(_icono_apagado(im_), size=(26, 26)))  # v3.3: im_ grande
-        b_ = ctk.CTkButton(fila1, text=texto, image=img_org[clave][0], compound="top", width=48,
-                           height=56, corner_radius=9, font=F(10), fg_color="transparent", hover_color=C["suave"],
-                           text_color=C["texto"], text_color_disabled=C["texto2"])
-        b_.pack(side="left", padx=1)
-        b_org[clave] = b_
+    cmd_org = {}
+
+    def armar_barra_org():
+        """v4.5: los botones de Organizar se arman la primera vez que se abre Organizar (no al iniciar)."""
+        if b_org:
+            return
+        for it_ in BOTONES_ORG:
+            if it_[0] == "|":
+                sep(fila1)
+                continue
+            clave, texto, glifo, color_ = it_
+            im_ = _icono(glifo, color_, 78)
+            img_org[clave] = (ctk.CTkImage(im_, size=(26, 26)), ctk.CTkImage(_icono_apagado(im_), size=(26, 26)))
+            b_ = ctk.CTkButton(fila1, text=texto, image=img_org[clave][0], compound="top", width=48,
+                               height=56, corner_radius=9, font=F(10), fg_color="transparent", hover_color=C["suave"],
+                               text_color=C["texto"], text_color_disabled=C["texto2"], command=cmd_org.get(clave))
+            b_.pack(side="left", padx=1)
+            b_org[clave] = b_
+        menu(caja_der_org, list(TAMS_MINI), v_org_tam, ancho=112, cmd=lambda _: org_dibujar(True)).pack(side="right")
+        casilla_impresa(caja_der_org).pack(side="right", padx=(0, 12))
+        try:
+            org_info()
+        except Exception:
+            pass
     # tamano de miniaturas y «Ver como hoja impresa»: a la derecha, debajo de la barra
     caja_der_org = ctk.CTkFrame(p, fg_color="transparent")
     caja_der_org.grid(row=1, column=0, sticky="ne", padx=24, pady=(0, 4))
-    menu(caja_der_org, list(TAMS_MINI), v_org_tam, ancho=112, cmd=lambda _: org_dibujar(True)).pack(side="right")
 
     def casilla_impresa(master, cmd=None, texto="Ver como hoja impresa"):
         return ctk.CTkCheckBox(master, text=texto, variable=V["girar_prev"], font=F(12),
                                text_color=C["texto"], fg_color=C["acento"], hover_color=C["acento_h"],
                                border_color=C["texto2"], checkbox_width=18, checkbox_height=18, border_width=2,
                                command=cmd)
-    casilla_impresa(caja_der_org).pack(side="right", padx=(0, 12))
     V["girar_prev"].trace_add("write", lambda *_: (org_dibujar(True), actualizar_ejemplo()))
 
     caja_info = ctk.CTkFrame(p, fg_color="transparent")
@@ -5804,7 +5860,7 @@ def iniciar_interfaz():
                 w_.destroy()
             if firma[0]:  # uno por renglon, en la columna izquierda
                 for fid, r_ in enumerate(org["fuentes"]):
-                    item = ctk.CTkFrame(leyenda, fg_color="transparent")
+                    item = ctk.CTkFrame(leyenda.real(), fg_color="transparent")
                     item.pack(fill="x", pady=(0, 3))
                     ctk.CTkFrame(item, width=14, height=14, corner_radius=4, fg_color=color_doc(fid, "barra")).pack(
                         side="left", padx=(0, 6))
@@ -5832,7 +5888,7 @@ def iniciar_interfaz():
                        ("unir", hay and not org["preparando"]),
                        ("limpiar", hay and not org["preparando"] and not app["ocupado"]), ("abrir", not org["preparando"] and not hay),
                        ):
-            if b_org[k_].cget("state") != ("normal" if ok else "disabled"):
+            if k_ in b_org and b_org[k_].cget("state") != ("normal" if ok else "disabled"):
                 b_org[k_].configure(state="normal" if ok else "disabled", image=img_org[k_][0 if ok else 1])
 
     def org_ver_indice(i):
@@ -6659,7 +6715,7 @@ def iniciar_interfaz():
                    ("rot_i", lambda: org_girar(-90)), ("rot_d", lambda: org_girar(90)),
                    ("deshacer", org_deshacer), ("rehacer", org_rehacer), ("todo", org_original),
                    ("limpiar", org_limpiar), ("ayuda", lambda: ayuda_organizar())):
-        b_org[k_].configure(command=f_)
+        cmd_org[k_] = f_
     raiz.after(300, org_recibir)
 
     # ================================================== VISOR (pestanas + miniaturas + documento)
@@ -6793,65 +6849,25 @@ def iniciar_interfaz():
     area_doc.grid_columnconfigure(0, weight=1, uniform="vistas")
     area_doc.grid_columnconfigure(1, weight=0, uniform="")
 
-    # ---------- v3.0: barra de abajo (como Nitro): estado, paginas, modo de vista y zoom
-    barra_inf = ctk.CTkFrame(visor, fg_color=C["tarjeta"], corner_radius=0, height=38)
-    # v3.2: ya no se muestra (como en Adobe, paginas y zoom van en la barra de arriba)
-    barra_inf.grid_columnconfigure(0, weight=1)
-    ctk.CTkFrame(barra_inf, height=1, fg_color=C["borde"], corner_radius=0).place(relx=0, rely=0, relwidth=1)
+    # ---------- v3.0: la barra de abajo (como Nitro) ya no se muestra desde la v3.2: paginas y zoom van en la
+    # barra de arriba. v4.5: tampoco se arma (abria mas lento); quedan sus valores, que usa el resto
     v_estado_corto = tk.StringVar(value="")
 
     def _estado_corto(*_):
         t_ = " ".join(v_estado.get().split())
         v_estado_corto.set(t_ if len(t_) <= 120 else t_[:118] + "…")
     v_estado.trace_add("write", _estado_corto)
-    ctk.CTkLabel(barra_inf, textvariable=v_estado_corto, font=F(11), text_color=C["texto2"], anchor="w").grid(
-        row=0, column=0, sticky="ew", padx=(14, 8), pady=5)
-    caja_inf = ctk.CTkFrame(barra_inf, fg_color="transparent")
-    caja_inf.grid(row=0, column=1, sticky="e", padx=(0, 10), pady=4)
 
-    def b_inf(master, txt, cmd, ancho=28, img=None):
-        b_ = ctk.CTkButton(master, text=txt, width=ancho, height=26, corner_radius=6, font=F(12), image=img,
-                           fg_color=C["suave"], hover_color=C["suave_h"], text_color=C["texto"], command=cmd)
-        return b_
+    class _Oculta:
+        _entry = None
 
-    def img_inf(clave):
-        return ctk.CTkImage(_icono(clave, C["suave"][0], 54, glifo=_hex(C["acento"][0])),
-                            _icono(clave, C["suave"][1], 54, glifo=_hex(C["acento"][1])), size=(18, 18))
-
-    v_pag_inf, v_tot_inf = tk.StringVar(value=""), tk.StringVar(value="")
-    for txt_, f_ in (("«", lambda: ir_inf(0)), ("‹", lambda: ir_inf("ant"))):
-        b_inf(caja_inf, txt_, f_).pack(side="left", padx=1)
-    e_pag_inf = entrada(caja_inf, v_pag_inf, 44, justify="center")
-    e_pag_inf.configure(height=26)
-    e_pag_inf.pack(side="left", padx=(4, 4))
-    e_pag_inf.bind("<Return>", lambda e: ir_inf("txt"))
-    ctk.CTkLabel(caja_inf, textvariable=v_tot_inf, font=F(12), text_color=C["texto2"]).pack(side="left", padx=(0, 4))
-    for txt_, f_ in (("›", lambda: ir_inf("sig")), ("»", lambda: ir_inf(-1))):
-        b_inf(caja_inf, txt_, f_).pack(side="left", padx=1)
-    ctk.CTkFrame(caja_inf, width=1, height=20, fg_color=C["borde"]).pack(side="left", padx=10)
+        def winfo_ismapped(self):
+            return False
+    barra_inf = e_pag_inf = _Oculta()
+    v_pag_inf, v_tot_inf, v_pct_inf = tk.StringVar(value=""), tk.StringVar(value=""), tk.StringVar(value="")
     b_modos = {}
-    for m_ in ("una", "continua", "dos"):
-        b_modos[m_] = b_inf(caja_inf, "", lambda m__=m_: modo_vista(m__), 30, img_inf(m_))
-        b_modos[m_].pack(side="left", padx=1)
-    b_inf(caja_inf, "", lambda: girar_vista(90), 30, img_inf("girar_der")).pack(side="left", padx=(6, 1))
-    ctk.CTkFrame(caja_inf, width=1, height=20, fg_color=C["borde"]).pack(side="left", padx=10)
-    b_inf(caja_inf, "−", lambda: (vista_activa() and vista_activa().zoom_paso(-1))).pack(side="left", padx=1)
     zoom_inf = {"arrastrando": False}
-
-    def _slider(pos):
-        v_ = vista_activa()
-        if v_ and v_.t:
-            v_.poner_zoom(round(10 * 80 ** float(pos)))
-    s_zoom = ctk.CTkSlider(caja_inf, from_=0, to=1, width=120, height=14, command=_slider,
-                           button_color=C["acento"], button_hover_color=C["acento_h"], progress_color=C["acento"],
-                           fg_color=C["suave"])
-    s_zoom.pack(side="left", padx=4)
-    s_zoom.bind("<ButtonPress-1>", lambda e: zoom_inf.update(arrastrando=True), add="+")
-    s_zoom.bind("<ButtonRelease-1>", lambda e: zoom_inf.update(arrastrando=False), add="+")
-    b_inf(caja_inf, "+", lambda: (vista_activa() and vista_activa().zoom_paso(1))).pack(side="left", padx=1)
-    v_pct_inf = tk.StringVar(value="")
-    ctk.CTkLabel(caja_inf, textvariable=v_pct_inf, font=F(12, "bold"), text_color=C["texto"], width=52).pack(
-        side="left", padx=(4, 0))
+    s_zoom = None
 
     def ir_inf(a_):
         v_ = vista_activa()
@@ -7301,32 +7317,13 @@ def iniciar_interfaz():
                                       border_color=C["borde"])
             self.marco.grid_columnconfigure(0, weight=1)
             self.marco.grid_rowconfigure(2, weight=1)
-            # nombre del documento (solo al comparar) y barra: ◀ pagina ▶ · lupa − zoom +
+            # nombre del documento y barra ◀ pagina ▶ · lupa − zoom +: solo se ven al comparar, asi que
+            # v4.5: se arman recien la primera vez que hacen falta (el programa abre mas rapido)
             self.v_nom = tk.StringVar(value="")
-            self.l_nom = ctk.CTkLabel(self.marco, textvariable=self.v_nom, font=F(12, "bold"), text_color=C["texto"],
-                                      anchor="w")
-            bar = self.bar = ctk.CTkFrame(self.marco, fg_color="transparent")
-            bar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(6, 2))
-            bar.grid_remove()  # v3.0: va abajo, en la barra general (se ve solo al comparar)
-            bar.grid_columnconfigure(4, weight=1)
             self.v_pag, self.v_tot = tk.StringVar(), tk.StringVar()
-            self.b_ant = bv(bar, "◀", lambda: self.ir(self.pag - 1), 34)
-            self.e_pag = entrada(bar, self.v_pag, 50, justify="center")
-            self.e_pag.bind("<Return>", self._ir_txt)
-            self.l_tot = ctk.CTkLabel(bar, textvariable=self.v_tot, font=F(12), text_color=C["texto2"])
-            self.b_sig = bv(bar, "▶", lambda: self.ir(self.pag + 1), 34)
-            self.l_lupa = ctk.CTkLabel(bar, text="🔍", font=F(13), text_color=C["texto2"])
-            self.b_menos = bv(bar, "−", lambda: self.zoom_paso(-1), 34)
             self.v_zoom = tk.StringVar(value="Ajustar ancho")
-            self.m_zoom = menu(bar, ZOOMS, self.v_zoom, ancho=136, cmd=lambda v_: self.poner_zoom(v_))
-            self.b_mas = bv(bar, "+", lambda: self.zoom_paso(1), 34)
-            self._piezas = [(self.b_ant, 0, (0, 2)), (self.e_pag, 1, (4, 4)), (self.l_tot, 2, (0, 0)),
-                            (self.b_sig, 3, (6, 2)), (self.l_lupa, 5, (0, 2)), (self.b_menos, 6, (2, 2)),
-                            (self.m_zoom, 7, (2, 2)), (self.b_mas, 8, (2, 0))]
-            for w_, c_, px_ in self._piezas:
-                w_.grid(row=0, column=c_, padx=px_)
+            self._bar = self._l_nom = self.e_pag = None
             self._angosta = False
-            self.marco.bind("<Configure>", self._ancho, add="+")
             self.cv = tk.Canvas(self.marco, highlightthickness=0, bd=0, takefocus=1, yscrollincrement=24,
                                 xscrollincrement=24)
             self.cv.grid(row=2, column=0, sticky="nsew", padx=(6, 0), pady=(2, 0))
@@ -7359,6 +7356,37 @@ def iniciar_interfaz():
             cv_.bind("<Configure>", lambda e: self.pedir())
             cv_.bind("<Key>", self._teclas)
             self.marco.bind("<Button-1>", lambda e: self.activar())
+
+        @property
+        def l_nom(self):
+            if self._l_nom is None:
+                self._l_nom = ctk.CTkLabel(self.marco, textvariable=self.v_nom, font=F(12, "bold"),
+                                           text_color=C["texto"], anchor="w")
+            return self._l_nom
+
+        @property
+        def bar(self):
+            if self._bar is None:
+                bar = self._bar = ctk.CTkFrame(self.marco, fg_color="transparent")
+                bar.grid(row=0, column=0, columnspan=2, sticky="ew", padx=8, pady=(6, 2))
+                bar.grid_remove()
+                bar.grid_columnconfigure(4, weight=1)
+                self.b_ant = bv(bar, "◀", lambda: self.ir(self.pag - 1), 34)
+                self.e_pag = entrada(bar, self.v_pag, 50, justify="center")
+                self.e_pag.bind("<Return>", self._ir_txt)
+                self.l_tot = ctk.CTkLabel(bar, textvariable=self.v_tot, font=F(12), text_color=C["texto2"])
+                self.b_sig = bv(bar, "▶", lambda: self.ir(self.pag + 1), 34)
+                self.l_lupa = ctk.CTkLabel(bar, text="🔍", font=F(13), text_color=C["texto2"])
+                self.b_menos = bv(bar, "−", lambda: self.zoom_paso(-1), 34)
+                self.m_zoom = menu(bar, ZOOMS, self.v_zoom, ancho=136, cmd=lambda v_: self.poner_zoom(v_))
+                self.b_mas = bv(bar, "+", lambda: self.zoom_paso(1), 34)
+                self._piezas = [(self.b_ant, 0, (0, 2)), (self.e_pag, 1, (4, 4)), (self.l_tot, 2, (0, 0)),
+                                (self.b_sig, 3, (6, 2)), (self.l_lupa, 5, (0, 2)), (self.b_menos, 6, (2, 2)),
+                                (self.m_zoom, 7, (2, 2)), (self.b_mas, 8, (2, 0))]
+                for w_, c_, px_ in self._piezas:
+                    w_.grid(row=0, column=c_, padx=px_)
+                self.marco.bind("<Configure>", self._ancho, add="+")
+            return self._bar
 
         def _ancho(self, ev):
             """Vista angosta (comparando con el panel abierto): se ocultan ◀ ▶ y la lupa."""
@@ -7652,7 +7680,8 @@ def iniciar_interfaz():
             if t_ and vis["comp"]:
                 self.l_nom.grid(row=1, column=0, columnspan=2, sticky="ew", padx=14, pady=(0, 2))
             else:
-                self.l_nom.grid_remove()
+                if self._l_nom is not None:
+                    self._l_nom.grid_remove()
 
         def recordar(self):
             if self.t is not None and self.lay:
@@ -7707,7 +7736,7 @@ def iniciar_interfaz():
             actual = self.pagina_en(y0 + H * 0.4)
             if actual != self.pag or self.v_pag.get() != str(actual + 1):
                 self.pag = actual
-                if raiz.focus_get() is not self.e_pag._entry:
+                if self.e_pag is None or raiz.focus_get() is not self.e_pag._entry:
                     self.v_pag.set(str(actual + 1))
                 if self.es_activa():
                     t_["pag"] = actual
@@ -9069,9 +9098,10 @@ def iniciar_interfaz():
         visor_pedir_dibujo()
 
     # ---------- v3.0: marcadores (indice del PDF) en la columna izquierda
-    panel_toc = ctk.CTkScrollableFrame(col_izq, fg_color=C["tarjeta"], corner_radius=12, border_width=1,
-                                       border_color=C["borde"], scrollbar_button_color=C["suave_h"],
-                                       scrollbar_button_hover_color=C["borde"])
+    panel_toc = Diferido(lambda: ctk.CTkScrollableFrame(col_izq, fg_color=C["tarjeta"], corner_radius=12,
+                                                         border_width=1, border_color=C["borde"],
+                                                         scrollbar_button_color=C["suave_h"],
+                                                         scrollbar_button_hover_color=C["borde"]))
     toc_estado = {"ruta": None}
 
     def dibujar_toc():
@@ -9082,7 +9112,7 @@ def iniciar_interfaz():
         toc_estado["ruta"] = ruta
         for w_ in panel_toc.winfo_children():
             w_.destroy()
-        ctk.CTkLabel(panel_toc, text="Marcadores", font=F(13, "bold"), text_color=C["texto"], anchor="w").pack(
+        ctk.CTkLabel(panel_toc.real(), text="Marcadores", font=F(13, "bold"), text_color=C["texto"], anchor="w").pack(
             fill="x", padx=8, pady=(6, 4))
         toc = []
         if ruta:
@@ -9092,11 +9122,11 @@ def iniciar_interfaz():
             except Exception:
                 toc = []
         if not toc:
-            ctk.CTkLabel(panel_toc, text="Este PDF no tiene marcadores.", font=F(11), text_color=C["texto2"],
+            ctk.CTkLabel(panel_toc.real(), text="Este PDF no tiene marcadores.", font=F(11), text_color=C["texto2"],
                          anchor="w", justify="left", wraplength=ANCHO_IZQ - 40).pack(fill="x", padx=8)
             return
         for nivel, tit, pag in toc[:400]:
-            ctk.CTkButton(panel_toc, text=("   " * (nivel - 1)) + tit, anchor="w", font=F(11), height=26,
+            ctk.CTkButton(panel_toc.real(), text=("   " * (nivel - 1)) + tit, anchor="w", font=F(11), height=26,
                           corner_radius=6, fg_color="transparent", hover_color=C["suave"], text_color=C["texto"],
                           command=lambda r_=ruta, p_=pag - 1: ir_a_pagina_de(r_, p_)).pack(fill="x", padx=2)
 
@@ -9315,28 +9345,36 @@ def iniciar_interfaz():
     vis["capas_it"] = {}
     vis["chars"] = {}
     vis["nres"] = 0
-    res_bar = ctk.CTkFrame(area_doc, fg_color=C["tarjeta"], corner_radius=14, border_width=1, border_color=C["borde"])
-    seg_res = segmentado(res_bar, ["Texto", "Área", "Libre"], v_res_modo, cmd=lambda v_: cambiar_modo_res())
-    seg_res.pack(side="left", padx=(10, 8), pady=8)
-    ctk.CTkFrame(res_bar, width=1, height=22, fg_color=C["borde"]).pack(side="left", padx=4)
     botones_res = []
-    for hx in COLORES_RES:
-        b_ = ctk.CTkButton(res_bar, text="", width=22, height=22, corner_radius=11, fg_color=hx, hover_color=hx,
-                           border_width=0, border_color=C["acento"], command=lambda h_=hx: poner_color_res(_hex(h_)))
-        b_.pack(side="left", padx=3)
-        botones_res.append((b_, _hex(hx)))
-    b_res_otro = ctk.CTkButton(res_bar, text="Otro…", width=56, height=24, corner_radius=12, font=F(11),
-                               fg_color=C["suave"], hover_color=C["suave_h"], text_color=C["texto"],
-                               command=lambda: color_res_otro())
-    b_res_otro.pack(side="left", padx=(8, 4))
-    ctk.CTkFrame(res_bar, width=1, height=22, fg_color=C["borde"]).pack(side="left", padx=4)
-    ctk.CTkLabel(res_bar, text="Opacidad", font=F(11), text_color=C["texto2"]).pack(side="left", padx=(4, 4))
-    ctk.CTkSlider(res_bar, from_=0.15, to=0.85, variable=v_res_op, width=90, height=16, button_color=C["acento"],
-                  button_hover_color=C["acento_h"], progress_color=C["acento"], fg_color=C["suave"],
-                  command=lambda _v: guardar_pref_res()).pack(side="left", padx=(0, 6))
-    ctk.CTkButton(res_bar, text="✕", width=28, height=28, corner_radius=14, font=F(13), fg_color="transparent",
-                  hover_color=C["suave_h"], text_color=C["texto2"], command=lambda: alternar_resaltar()).pack(
-        side="left", padx=(2, 8))
+    res_ = {"bar": None}
+
+    def barra_res():
+        """v4.5: la barra del resaltador se arma la primera vez que se usa (no al iniciar)."""
+        if res_["bar"] is not None:
+            return res_["bar"]
+        res_bar = ctk.CTkFrame(area_doc, fg_color=C["tarjeta"], corner_radius=14, border_width=1, border_color=C["borde"])
+        seg_res = segmentado(res_bar, ["Texto", "Área", "Libre"], v_res_modo, cmd=lambda v_: cambiar_modo_res())
+        seg_res.pack(side="left", padx=(10, 8), pady=8)
+        ctk.CTkFrame(res_bar, width=1, height=22, fg_color=C["borde"]).pack(side="left", padx=4)
+        for hx in COLORES_RES:
+            b_ = ctk.CTkButton(res_bar, text="", width=22, height=22, corner_radius=11, fg_color=hx, hover_color=hx,
+                               border_width=0, border_color=C["acento"], command=lambda h_=hx: poner_color_res(_hex(h_)))
+            b_.pack(side="left", padx=3)
+            botones_res.append((b_, _hex(hx)))
+        b_res_otro = ctk.CTkButton(res_bar, text="Otro…", width=56, height=24, corner_radius=12, font=F(11),
+                                   fg_color=C["suave"], hover_color=C["suave_h"], text_color=C["texto"],
+                                   command=lambda: color_res_otro())
+        b_res_otro.pack(side="left", padx=(8, 4))
+        ctk.CTkFrame(res_bar, width=1, height=22, fg_color=C["borde"]).pack(side="left", padx=4)
+        ctk.CTkLabel(res_bar, text="Opacidad", font=F(11), text_color=C["texto2"]).pack(side="left", padx=(4, 4))
+        ctk.CTkSlider(res_bar, from_=0.15, to=0.85, variable=v_res_op, width=90, height=16, button_color=C["acento"],
+                      button_hover_color=C["acento_h"], progress_color=C["acento"], fg_color=C["suave"],
+                      command=lambda _v: guardar_pref_res()).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(res_bar, text="✕", width=28, height=28, corner_radius=14, font=F(13), fg_color="transparent",
+                      hover_color=C["suave_h"], text_color=C["texto2"], command=lambda: alternar_resaltar()).pack(
+            side="left", padx=(2, 8))
+        res_["bar"] = res_bar
+        return res_bar
 
     def guardar_pref_res():
         almacen.datos["resaltador"] = {"modo": v_res_modo.get(), "color": list(vis["res_color"]),
@@ -9386,11 +9424,12 @@ def iniciar_interfaz():
         b_resaltar.configure(fg_color=C["acento"] if vis["modo_res"] else C["suave"],
                              text_color="#FFFFFF" if vis["modo_res"] else C["texto"])
         if vis["modo_res"]:
-            res_bar.place(relx=0.5, y=46, anchor="n")
-            res_bar.lift()
+            barra_res().place(relx=0.5, y=46, anchor="n")
+            barra_res().lift()
             marcar_color_res()
         else:
-            res_bar.place_forget()
+            if res_["bar"] is not None:
+                res_["bar"].place_forget()
             for v_ in vistas:
                 v_._poly = None
                 v_.cv.delete("previa")
@@ -12128,7 +12167,12 @@ def iniciar_interfaz():
         m_.tk_popup(superior.winfo_rootx() + 600, superior.winfo_rooty() + px(36) - 6)
 
     # ================= panel de herramienta (Aplanar / Foliar / Comprimir) a la derecha
-    iconos_panel = {c_: ctk.CTkImage(_icono(c_, col_, 26 * 3), size=(26, 26)) for c_, _t, col_, *_r in ICONOS}
+    class _IconosPanel(dict):  # v4.5: cada icono se dibuja la primera vez que se usa
+        def __missing__(self, c_):
+            col_ = next(col__ for c__, _t, col__, *_r in ICONOS if c__ == c_)
+            im_ = self[c_] = ctk.CTkImage(_icono(c_, col_, 26 * 3), size=(26, 26))
+            return im_
+    iconos_panel = _IconosPanel()
 
     def abrir_panel(clave):
         if vis.get("ined"):  # v4.1: lo que se estaba escribiendo en la hoja queda puesto
@@ -12802,6 +12846,8 @@ def iniciar_interfaz():
             paginas[clave].grid(row=1, column=0, sticky="nsew", padx=0, pady=(0, 0))
             titulo.configure(text=TITULOS[clave])
         app["pagina"] = clave
+        if clave == "organizar":
+            armar_barra_org()
         if clave == "visor":  # la barra del visor vive en la fila de las pestanas
             pass
         else:
@@ -13417,8 +13463,8 @@ def iniciar_interfaz():
                 for v__ in vistas:
                     if vis["comp"]:
                         v__.bar.grid()
-                    else:
-                        v__.bar.grid_remove()
+                    elif v__._bar is not None:
+                        v__._bar.grid_remove()
                 mostrar_inicio()
                 dibujar_cinta()
                 dibujar_riel_der()
