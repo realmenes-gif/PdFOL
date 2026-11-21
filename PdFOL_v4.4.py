@@ -363,12 +363,19 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.3"
-VERSION_INTERNA = "4.3"
+VERSION = "v4.4"
+VERSION_INTERNA = "4.4"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.4", [
+        "Firmas y sellos: PdFOL los reconoce (pegados como imagen, dibujados o en un escaneo). Al pasar el mouse se "
+        "marcan y con un clic se eligen ENTEROS, como una imagen.",
+        "Ctrl+C copia la firma o el sello sin fondo (transparente). Clic derecho: guardarlo como imagen o agregarlo "
+        "a «Mis firmas» / «Mis sellos» para ponerlo en otros PDF.",
+        "Al seleccionar texto en un escaneo ya no se llevan letras sueltas de los sellos.",
+    ]),
     ("v4.3", [
         "Cambiar texto como Acrobat/Nitro: se sacan las letras originales del PDF y el fondo queda como estaba "
         "(colores, celdas, sombreados). Antes se tapaba con blanco y se notaba la edición.",
@@ -1874,6 +1881,161 @@ def _colores_renglon(img, r_):
         return (0, 0, 0), (255, 255, 255)
 
 
+def _componentes_tinta(tinta, m_col, z, pg):
+    """Grupos de tinta (pixeles juntos) que parecen firma o sello."""
+    from PIL import ImageFilter
+    W, H = tinta.size
+    unida = tinta.filter(ImageFilter.MaxFilter(5))
+    dat_u, dat_t, dat_c = bytearray(unida.tobytes()), tinta.tobytes(), m_col.tobytes()
+    out = []
+    for i0 in range(W * H):
+        if dat_u[i0] != 255:
+            continue
+        pila, x0, y0, x1, y1 = [i0], W, H, 0, 0
+        dat_u[i0] = 1
+        puntos, n_col = [], 0
+        while pila:
+            i_ = pila.pop()
+            yy, xx = divmod(i_, W)
+            x0, x1, y0, y1 = min(x0, xx), max(x1, xx), min(y0, yy), max(y1, yy)
+            if dat_t[i_]:
+                puntos.append((xx, yy))
+                if dat_c[i_]:
+                    n_col += 1
+            for j_ in (i_ - 1 if xx else -1, i_ + 1 if xx < W - 1 else -1, i_ - W, i_ + W):
+                if 0 <= j_ < W * H and dat_u[j_] == 255:
+                    dat_u[j_] = 1
+                    pila.append(j_)
+        n_tinta = len(puntos)
+        w_pt, h_pt = (x1 - x0 + 1) / z, (y1 - y0 + 1) / z
+        grande, chico = max(w_pt, h_pt), min(w_pt, h_pt)
+        area = (x1 - x0 + 1) * (y1 - y0 + 1)
+        relleno = n_tinta / max(1, area)
+        if not (18 <= grande <= 320 and chico >= 10 and grande / max(chico, 1) <= 6 and n_tinta >= 30
+                and 0.03 <= relleno <= 0.45):
+            continue
+        b_ = 3  # tinta solo en el borde (un recuadro, una celda): no es firma ni sello
+        adentro = sum(1 for (xx, yy) in puntos if x0 + b_ < xx < x1 - b_ and y0 + b_ < yy < y1 - b_)
+        if adentro < n_tinta * 0.25:
+            continue
+        cuadrado = 0.7 <= w_pt / max(h_pt, 1) <= 1.45
+        r_ = fitz.Rect(x0 / z - 2, y0 / z - 2, (x1 + 1) / z + 2, (y1 + 1) / z + 2) & pg.rect
+        out.append({"bbox": tuple(round(c_, 2) for c_ in r_), "tipo": "sello" if (cuadrado and grande >= 40) else "firma",
+                    "color": n_col > n_tinta * 0.5})
+    return out
+
+
+def _juntar_cercanos(out):
+    junto = True
+    while junto and len(out) > 1:  # dos pedazos muy cerca (una firma cortada) se juntan
+        junto = False
+        for a_ in range(len(out)):
+            for b_ in range(a_ + 1, len(out)):
+                ra, rb = fitz.Rect(out[a_]["bbox"]), fitz.Rect(out[b_]["bbox"])
+                if (ra + (-6, -6, 6, 6)).intersects(rb):
+                    u_ = ra | rb
+                    if max(u_.width, u_.height) <= 340:
+                        out[a_]["bbox"] = tuple(u_)
+                        out[a_]["tipo"] = "sello" if "sello" in (out[a_]["tipo"], out[b_]["tipo"]) else "firma"
+                        del out[b_]
+                        junto = True
+                        break
+            if junto:
+                break
+    return out
+
+
+def detectar_firmas_sellos(pg, letras=None, escaneo=False):
+    """v4.4: busca firmas y sellos en la pagina. En un PDF digital: imagenes pegadas que son tinta sobre fondo
+    claro, y trazos curvos abiertos (una firma dibujada). En un escaneo: grupos de tinta de color, o tinta
+    oscura que no es texto reconocido. Devuelve [{"bbox": (x0, y0, x1, y1) en coordenadas de la hoja,
+    "tipo": "firma"|"sello"}]."""
+    from PIL import ImageChops, ImageDraw
+    rm = pg.rotation_matrix
+    area_pag = abs(pg.rect)
+    out = []
+    if not escaneo:
+        dpi = 60
+        z = dpi / 72
+        for inf in pg.get_image_info():  # 1) imagenes pegadas (firma o sello escaneado y puesto en el PDF)
+            r_ = fitz.Rect(inf["bbox"]) * rm & pg.rect
+            if r_.is_empty or abs(r_) > area_pag * 0.4 or not (18 <= max(r_.width, r_.height) <= 340) \
+                    or min(r_.width, r_.height) < 10:
+                continue
+            pix = pg.get_pixmap(matrix=fitz.Matrix(z, z), clip=r_, alpha=False, annots=False)
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            v_ = img.convert("L").point(lambda x: 255 if x < 200 else 0)
+            tinta = sum(v_.histogram()[255:]) / max(1, img.width * img.height)
+            if 0.02 <= tinta <= 0.5:  # tinta sobre fondo claro (no una foto)
+                cuadrado = 0.7 <= r_.width / max(r_.height, 1) <= 1.45
+                out.append({"bbox": tuple(round(c_, 2) for c_ in r_), "color": False,
+                            "tipo": "sello" if (cuadrado and max(r_.width, r_.height) >= 40) else "firma"})
+        trazos = []  # 2) trazos curvos abiertos (firma dibujada con el dedo o un lapiz)
+        for dr in pg.get_drawings():
+            if dr.get("fill") is not None or dr.get("closePath"):
+                continue
+            n_c = sum(1 for it in dr["items"] if it[0] == "c")
+            n_d = sum(1 for it in dr["items"] if it[0] == "l" and abs(it[2].x - it[1].x) > 0.3
+                      and abs(it[2].y - it[1].y) > 0.3)  # rayitas en diagonal (firma hecha de puntos unidos)
+            if n_c < 1 and n_d < 8:
+                continue
+            r_ = fitz.Rect(dr["rect"]) * rm
+            if max(r_.width, r_.height) > 340:
+                continue
+            trazos.append([r_, n_c + n_d, len(dr["items"])])
+        grupos = []
+        for t_ in trazos:
+            for g_ in grupos:
+                if (g_[0] + (-8, -8, 8, 8)).intersects(t_[0]):
+                    g_[0] |= t_[0]
+                    g_[1] += t_[1]
+                    g_[2] += t_[2]
+                    break
+            else:
+                grupos.append([fitz.Rect(t_[0]), t_[1], t_[2]])
+        letras_pdf = [fitz.Rect(ch["bbox"]) * rm for bl in pg.get_text("rawdict")["blocks"] for ln in bl.get("lines", [])
+                      for sp in ln["spans"] for ch in sp["chars"] if ch["c"].strip()]
+        for r_, n_c, n_t in grupos:
+            if n_c >= 2 and n_c >= n_t * 0.5 and 18 <= max(r_.width, r_.height) <= 340 and min(r_.width, r_.height) >= 6:
+                # la caja de los trazos incluye los puntos de control de las curvas: se ajusta a la tinta real
+                r2 = r_ & pg.rect
+                pix = pg.get_pixmap(matrix=fitz.Matrix(z, z), clip=r2, alpha=False, annots=False)
+                v_ = Image.frombytes("RGB", (pix.width, pix.height), pix.samples).convert("L").point(
+                    lambda x: 255 if x < 200 else 0)
+                tapar = ImageDraw.Draw(v_)
+                for q_ in letras_pdf:
+                    if q_.intersects(r2):
+                        tapar.rectangle([(q_.x0 - r2.x0) * z - 1, (q_.y0 - r2.y0) * z - 1, (q_.x1 - r2.x0) * z + 1,
+                                         (q_.y1 - r2.y0) * z + 1], fill=0)
+                bb = v_.getbbox()
+                if bb:
+                    r_ = fitz.Rect(r2.x0 + bb[0] / z, r2.y0 + bb[1] / z, r2.x0 + bb[2] / z, r2.y0 + bb[3] / z)
+                out.append({"bbox": tuple(round(c_, 2) for c_ in (r_ + (-3, -3, 3, 3))), "tipo": "firma", "color": False})
+        return _juntar_cercanos(out)
+    # 3) escaneo: por la tinta
+    dpi = 50
+    z = dpi / 72
+    pix = pg.get_pixmap(matrix=fitz.Matrix(z, z), alpha=False, annots=False)
+    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    _h, s, v = img.convert("HSV").split()
+    m_col = ImageChops.multiply(s.point(lambda x: 255 if x > 70 else 0), v.point(lambda x: 255 if 40 < x < 238 else 0))
+    if letras:
+        m_osc = v.point(lambda x: 255 if x < 110 else 0)
+        tapar = ImageDraw.Draw(m_osc)
+        for c_ in letras:  # lo reconocido como texto no es firma
+            if c_[5].strip():
+                tapar.rectangle([c_[0] * z - 1, c_[1] * z - 1, c_[2] * z + 1, c_[3] * z + 1], fill=0)
+        tinta = ImageChops.lighter(m_col, m_osc)
+    else:
+        tinta = m_col
+    out = _componentes_tinta(tinta, m_col, z, pg)
+    if len(out) > 10:  # demasiados: es un dibujo o un fondo con trama, no firmas
+        out = [o_ for o_ in out if o_["color"]]
+        if len(out) > 10:
+            out = []
+    return _juntar_cercanos(out)
+
+
 def _unir_parrafos(bloques):
     """El OCR da un bloque por renglon: se juntan los renglones seguidos del mismo parrafo (mismo margen
     izquierdo, letra parecida y poca separacion), como en un PDF de texto."""
@@ -1908,6 +2070,15 @@ def _proceso_ocr(entrada, salida):
         msg = entrada.get()
         if msg is None:
             return
+        if msg[0] == "sellos":  # v4.4: buscar firmas y sellos
+            _t, ruta, pag, ver_, letras, esc = msg
+            try:
+                with fitz.open(ruta) as d_:
+                    regiones = detectar_firmas_sellos(d_[pag], letras, esc)
+            except Exception:
+                regiones = []
+            salida.put(("sellos", ruta, pag, ver_, regiones))
+            continue
         ruta, pag, ver_ = msg
         try:
             if not tess:
@@ -7502,8 +7673,9 @@ def iniciar_interfaz():
                         pi_ = fitz.Point(self._pt(ev, base))
                         sobre_txt = bool(chars) and any(c_[0] - 1 <= pi_.x <= c_[2] + 1 and c_[1] - 1 <= pi_.y <= c_[3] + 1
                                                         for c_ in chars)
-                        im_ = None if (sobre_txt or es_escaneo(base[1], base[2])) else imagen_en(base[1], base[2], pi_,
-                                                                                                  sin_fondo=True)
+                        im_ = None if sobre_txt else sello_en(base[1], base[2], pi_)  # v4.4: firma o sello entero
+                        if im_ is None and not sobre_txt and not es_escaneo(base[1], base[2]):
+                            im_ = imagen_en(base[1], base[2], pi_, sin_fondo=True)
                         if im_:
                             vis["seleccion"] = None
                             elegir_imagen(im_, bool(ev.state & 0x4))
@@ -7602,6 +7774,13 @@ def iniciar_interfaz():
 
         def _mover_libre(self, ev):
             """Sin boton: la polilinea sigue al mouse; en modo Texto se lee el texto de la pagina de antemano."""
+            if (app.get("panel") not in ("texto", "firmar") and not vis["modo_res"] and app["pagina"] == "visor"
+                    and v_herr.get() == "Seleccionar" and not vis["comp"]):
+                if marcar_sello_sobre(self, ev):  # v4.4: firma o sello bajo el mouse
+                    return
+            elif getattr(self, "_sello_sobre", None):
+                self._sello_sobre = None
+                self.cv.delete("sello_sobre")
             if app.get("panel") == "texto" and (vis.get("ined") or vis.get("edit_item")):  # v4.1.1: tiradores
                 cx_, cy_ = self.cv.canvasx(ev.x), self.cv.canvasy(ev.y)
                 ed = vis.get("ined")
@@ -7793,11 +7972,25 @@ def iniciar_interfaz():
                     m_.add_command(label=que_, command=lambda: quitar_resaltado(ruta, pag, toco[-1]),
                                    punto="#EF4444")
                     m_.add_separator()
-                im_ = imagen_en(ruta, pag, p_, sin_fondo=True) if not toco and not es_escaneo(ruta, pag) else None
+                im_ = sello_en(ruta, pag, p_) if not toco else None  # v4.4: firma o sello entero
+                if im_ is None:
+                    im_ = imagen_en(ruta, pag, p_, sin_fondo=True) if not toco and not es_escaneo(ruta, pag) else None
                 if im_ and not any(misma_img(im_, x_) for x_ in vis.get("img_sel") or []):
                     elegir_imagen(im_)
                 n_im = len(vis.get("img_sel") or [])
                 todas_ = imagenes_de(ruta, pag)
+                sel_s = [x_ for x_ in vis.get("img_sel") or [] if x_.get("sello")]
+                if n_im and len(sel_s) == n_im:  # v4.4: firmas o sellos elegidos
+                    que_ = ("la firma" if sel_s[0]["sello"] == "firma" else "el sello") if n_im == 1 else f"{n_im} firmas/sellos"
+                    m_.add_command(label=f"Copiar {que_} (sin fondo)", command=copiar_imagenes, acelerador="Ctrl+C",
+                                   punto="#0EA5E9")
+                    m_.add_command(label=f"Guardar {que_} como imagen…", command=guardar_imagenes_como)
+                    if n_im == 1:
+                        m_.add_command(label="Agregar a «Mis firmas»" if sel_s[0]["sello"] == "firma" else
+                                       "Agregar a «Mis sellos»", command=lambda s0=sel_s[0]: agregar_a_mis_firmas(s0),
+                                       punto="#8B5CF6")
+                    m_.add_separator()
+                    n_im = 0
                 if n_im:
                     m_.add_command(label="Copiar imagen (pegala en una carpeta, Word, WhatsApp…)" if n_im == 1
                                    else f"Copiar {n_im} imágenes", command=copiar_imagenes, acelerador="Ctrl+C",
@@ -9277,7 +9470,14 @@ def iniciar_interfaz():
         else:
             lista = [im_]
         vis["img_sel"] = lista
-        if lista:
+        if lista and all(x_.get("sello") for x_ in lista):  # v4.4
+            if lista[-1]["sello"] == "firma":
+                v_estado.set("Firma elegida entera · Ctrl+C la copia sin fondo (pegala en Word, WhatsApp o una carpeta)"
+                             " · clic derecho: guardarla o agregarla a «Mis firmas».")
+            else:
+                v_estado.set("Sello elegido entero · Ctrl+C lo copia sin fondo (pegalo en Word, WhatsApp o una carpeta)"
+                             " · clic derecho: guardarlo o agregarlo a «Mis sellos».")
+        elif lista:
             v_estado.set(f"{len(lista)} imagen(es) elegida(s) · Ctrl+C la copia: pegala en una carpeta, Word, "
                          "WhatsApp… · Ctrl+clic suma otra.")
         visor_pedir_dibujo()
@@ -9306,6 +9506,11 @@ def iniciar_interfaz():
 
     def extraer_imagen(s_):
         """-> (bytes del archivo, extension, imagen PIL). Se usa la imagen original (mejor calidad)."""
+        if s_.get("sello"):  # v4.4: firma o sello del PDF: en alta resolucion y sin el papel
+            img = imagen_sello(s_)
+            b_ = io.BytesIO()
+            img.save(b_, "PNG")
+            return b_.getvalue(), "png", img
         with fitz.open(s_["ruta"]) as d_:
             pg = d_[s_["pag"]]
             datos, ext, img = None, "png", None
@@ -9397,7 +9602,7 @@ def iniciar_interfaz():
         for k_, s_ in enumerate(lista, 1):
             datos, ext, img = extraer_imagen(s_)
             base = os.path.splitext(os.path.basename(original_de(s_["ruta"])))[0]
-            nom = f"{base}_pag{s_['pag'] + 1}_imagen{k_}.{ext}"
+            nom = f"{base}_pag{s_['pag'] + 1}_{s_.get('sello') or 'imagen'}{k_}.{ext}"
             while nom.lower() in usados or os.path.exists(os.path.join(carpeta, nom)):
                 nom = nom.replace(f".{ext}", f"_.{ext}")
             usados.add(nom.lower())
@@ -10261,7 +10466,7 @@ def iniciar_interfaz():
     # La pagina en la que estas, si es un escaneo, se reconoce sola (en otro proceso): despues su texto se
     # selecciona, se copia y se cambia como cualquier texto del PDF
     ocr_q_ent, ocr_q_sal = mp.Queue(), mp.Queue()
-    ocr_ = {"p": None, "pend": set(), "res": {}, "escaneo": {}, "visto": None}
+    ocr_ = {"p": None, "pend": set(), "res": {}, "escaneo": {}, "visto": None, "sellos": {}, "sellos_pend": set()}
 
     def es_escaneo(ruta, pag):
         k_ = (ruta, pag, ver_arch(ruta))
@@ -10295,16 +10500,8 @@ def iniciar_interfaz():
             return True
         if not forzar and not es_escaneo(ruta, pag):
             return False
-        if ocr_["p"] is None:
-            try:
-                ocr_["p"] = mp.Process(target=_proceso_ocr, args=(ocr_q_ent, ocr_q_sal), daemon=True)
-                ocr_["p"].start()
-                raiz.after(300, ocr_recibir)
-            except Exception as e:
-                ocr_["p"] = False
-                v_estado.set(f"No se pudo reconocer el texto: {e}")
-                return False
-        if ocr_["p"] is False:
+        if not ocr_arrancar():
+            v_estado.set("No se pudo reconocer el texto.")
             return False
         ocr_["pend"].add(k_)
         ocr_q_ent.put(k_)
@@ -10315,7 +10512,11 @@ def iniciar_interfaz():
     def ocr_recibir():
         try:
             while True:
-                ruta, pag, ver_, letras, bloques = ocr_q_sal.get_nowait()
+                msg_ = ocr_q_sal.get_nowait()
+                if msg_[0] == "sellos":
+                    recibir_sellos(*msg_[1:])
+                    continue
+                ruta, pag, ver_, letras, bloques = msg_
                 k_ = (ruta, pag, ver_)
                 ocr_["pend"].discard(k_)
                 if letras is None:
@@ -10325,6 +10526,7 @@ def iniciar_interfaz():
                 ocr_["res"][k_] = {"letras": [tuple(c_) for c_ in letras], "bloques": bloques}
                 vis["chars"][k_] = [tuple(c_) for c_ in letras]  # ya se puede seleccionar y copiar
                 vis["chars"].pop(("pedido",) + k_, None)
+                sellos_de(ruta, pag)  # v4.4: ahora se buscan las firmas y sellos de esta hoja
                 v_estado.set((f"Texto reconocido en la página {pag + 1}: ya podés seleccionarlo, copiarlo o "
                               "cambiarlo (panel Texto › Cambiar).") if letras else
                              f"En la página {pag + 1} no se encontró texto para reconocer.")
@@ -10332,6 +10534,113 @@ def iniciar_interfaz():
         except Exception:
             pass
         raiz.after(250, ocr_recibir)
+
+    # ================= v4.4: FIRMAS Y SELLOS: se reconocen y se eligen enteros (como una imagen)
+    def ocr_arrancar():
+        if ocr_["p"] is None:
+            try:
+                ocr_["p"] = mp.Process(target=_proceso_ocr, args=(ocr_q_ent, ocr_q_sal), daemon=True)
+                ocr_["p"].start()
+                raiz.after(300, ocr_recibir)
+            except Exception:
+                ocr_["p"] = False
+        return bool(ocr_["p"])
+
+    def sellos_de(ruta, pag, pedir=True):
+        """Firmas y sellos de la hoja (lista) o None si todavia se estan buscando."""
+        k_ = (ruta, pag, ver_arch(ruta))
+        if k_ in ocr_["sellos"]:
+            return ocr_["sellos"][k_]
+        if pedir and k_ not in ocr_["sellos_pend"]:
+            esc = es_escaneo(ruta, pag)
+            if esc:
+                oc_ = ocr_["res"].get(k_)
+                if oc_ is None:  # primero el texto (lo que es texto no es firma)
+                    ocr_pedir(ruta, pag, avisar=False)
+                    return None
+                letras = oc_.get("letras") or []
+            else:
+                letras = None
+            if ocr_arrancar():
+                ocr_["sellos_pend"].add(k_)
+                ocr_q_ent.put(("sellos", ruta, pag, k_[2], letras, esc))
+        return None
+
+    def sello_en(ruta, pag, p_):
+        p_ = fitz.Point(p_)
+        for s_ in sellos_de(ruta, pag) or []:
+            if fitz.Rect(s_["bbox"]).contains(p_):
+                return {"ruta": ruta, "pag": pag, "bbox": tuple(s_["bbox"]), "xref": 0, "tr": (1, 0, 0, 1, 0, 0),
+                        "sello": s_["tipo"]}
+        return None
+
+    def recibir_sellos(ruta, pag, ver_, regiones):
+        k_ = (ruta, pag, ver_)
+        ocr_["sellos_pend"].discard(k_)
+        ocr_["sellos"][k_] = regiones
+        if regiones and k_ in ocr_["res"]:  # escaneo: lo que el OCR leyo dentro de una firma o sello no es texto
+            rs_ = [fitz.Rect(r_["bbox"]) for r_ in regiones]
+            fuera = lambda c_: not any(q_.contains(fitz.Point((c_[0] + c_[2]) / 2, (c_[1] + c_[3]) / 2)) for q_ in rs_)
+            ocr_["res"][k_]["letras"] = [c_ for c_ in ocr_["res"][k_]["letras"] if fuera(c_)]
+            vis["chars"][k_] = list(ocr_["res"][k_]["letras"])
+        visor_pedir_dibujo()
+
+    def agregar_a_mis_firmas(s_):
+        """La firma o el sello del PDF (sin fondo) pasa a «Mis firmas» / «Mis sellos» del panel Firmar."""
+        try:
+            img = imagen_sello(s_)
+        except Exception as e:
+            messagebox.showerror(NOMBRE, f"No se pudo sacar la imagen:\n{e}")
+            return
+        cat = "sellos" if s_.get("sello") == "sello" else "firmas"
+        nombre = f"{cat[:-1]}_{int(time.time() * 1000)}.png"
+        img.save(os.path.join(carpeta_firmas(), nombre), optimize=True)
+        almacen.datos[cat] = [nombre] + [n_ for n_ in almacen.datos.get(cat, []) if os.path.isfile(
+            os.path.join(carpeta_firmas(), n_))]
+        almacen.datos[cat[:-1] + "_ult"] = nombre
+        almacen.guardar()
+        try:
+            if caja_firmas is not None:
+                dibujar_firmas_panel()
+        except Exception:
+            pass
+        v_estado.set(("Sello" if cat == "sellos" else "Firma") + " agregada a «Mis " + cat + "» (panel Firmar): "
+                     "ya la podés poner en otros PDF.")
+
+    def imagen_sello(s_):
+        """La firma o el sello en alta resolucion y sin el papel (fondo transparente)."""
+        with fitz.open(s_["ruta"]) as d_:
+            pix = d_[s_["pag"]].get_pixmap(dpi=300, clip=fitz.Rect(s_["bbox"]), alpha=False, annots=False)
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        return quitar_fondo_imagen(img)
+
+    def marcar_sello_sobre(vista, ev):
+        """Al pasar el mouse por una firma o sello: un recuadro punteado y la manito (se elige con un clic)."""
+        cv_ = vista.cv
+        cx_, cy_ = cv_.canvasx(ev.x), cv_.canvasy(ev.y)
+        base = vista._punto_pagina(cx_, cy_)
+        s_ = None
+        if base:
+            p_ = fitz.Point(cx_ - base[4], cy_ - base[5]) * ~base[3]
+            s_ = sello_en(base[1], base[2], p_)
+        clave = (base[1], base[2], s_["bbox"]) if s_ else None
+        if clave == getattr(vista, "_sello_sobre", None):
+            return bool(s_)
+        vista._sello_sobre = clave
+        cv_.delete("sello_sobre")
+        if s_:
+            q_ = fitz.Rect(s_["bbox"]) * base[3]
+            x, y = base[4], base[5]
+            cv_.create_rectangle(x + q_.x0, y + q_.y0, x + q_.x1, y + q_.y1, outline="#0EA5E9", width=2, dash=(5, 3),
+                                 tags="sello_sobre")
+            etq = "Firma" if s_["sello"] == "firma" else "Sello"
+            cv_.create_text(x + q_.x0 + 4, y + q_.y0 - 9, text=f"{etq} · clic para elegirla" if etq == "Firma" else
+                            f"{etq} · clic para elegirlo", anchor="w", fill="#0EA5E9", font=(FAM, 9, "bold"),
+                            tags="sello_sobre")
+            cv_.configure(cursor="hand2")
+        else:
+            cv_.configure(cursor=cursor_herramienta())
+        return bool(s_)
 
     def copiar_texto_ocr(ruta, pag):
         oc_ = ocr_de(ruta, pag)
@@ -10357,6 +10666,7 @@ def iniciar_interfaz():
                 if ocr_["visto"] == k_:
                     if k_ not in ocr_["res"] and k_ not in ocr_["pend"]:
                         ocr_pedir(ruta, pag, avisar=False)
+                    sellos_de(ruta, pag)  # v4.4
                 ocr_["visto"] = k_
         except Exception:
             pass

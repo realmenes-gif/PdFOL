@@ -1,8 +1,10 @@
-## PdFOL v4.3 · by Meneses999
+## PdFOL v4.4 · by Meneses999
 
-- **Cambiar texto como Acrobat o Nitro**: al cambiar un texto del PDF se **sacan sus letras** del documento y lo que hay debajo **queda intacto** (franjas de color, celdas de tablas, sombreados). Antes se tapaba con un rectángulo blanco y se notaba la edición.
-- **Mientras escribís**, el recuadro toma el color del fondo y debajo se ve la hoja real sin las letras viejas: lo que ves es lo que se guarda.
-- El texto nuevo conserva el color y la fuente del original (por ejemplo, blanco sobre una franja azul).
-- En **escaneos** (OCR) el texto es parte de la imagen: ahí se tapa con el color del papel de ese renglón.
+- **Firmas y sellos se reconocen solos**: sirve si están pegados como imagen, dibujados (firma digital a mano) o si son parte de un **escaneo**.
+  - Con la herramienta **Seleccionar**, al pasar el mouse por una firma o sello se marca con un recuadro punteado; **un clic la elige entera**, como una imagen (ya no se selecciona a pedazos).
+  - **Ctrl+C** la copia **sin fondo** (PNG transparente, en alta resolución): pegala en Word, WhatsApp o una carpeta.
+  - **Clic derecho**: «Guardar como imagen…» o **«Agregar a Mis firmas / Mis sellos»** para ponerla después en otros PDF desde el panel Firmar.
+- En escaneos, **al seleccionar texto ya no se llevan letras sueltas** de los sellos o firmas.
+- No confunde franjas de color, textos de color, tablas ni planos con firmas.
 
-**Descarga:** `PdFOL_v4.3_portable.zip` (sin instalar) o `PdFOL_v4.3_instalador.exe`.
+**Descarga:** `PdFOL_v4.4_portable.zip` (sin instalar) o `PdFOL_v4.4_instalador.exe`.
