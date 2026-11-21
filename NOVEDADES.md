@@ -1,3 +1,12 @@
+## PdFOL v4.6.1 · by Meneses999
+
+- **El párrafo se respeta**: al cambiar texto, el párrafo se arma con los renglones de la hoja (como Acrobat). Con interlineado amplio ya no se toma un solo renglón, y se conservan el interlineado, la sangría y la alineación.
+- **Listas**: el número o la viñeta conserva su espacio; el texto sigue empezando donde estaba.
+- **Barra de formato flotante** (como Word), arriba del texto mientras escribís: fuente, tamaño, negrita, cursiva, subrayado, tachado, color, alineación y ⋯ (interlineado, fondo blanco, duplicar, quitar).
+- **Formato a lo elegido**: la fuente, la negrita, el tamaño o el color se aplican solo a lo que seleccionás (o a todo el párrafo si no hay nada elegido). Ya no se abre el panel al costado; Esc o el mismo botón terminan.
+
+**Descarga:** `PdFOL_v4.6.1_portable.zip` (sin instalar) o `PdFOL_v4.6.1_instalador.exe`.
+
 ## PdFOL v4.6 · by Meneses999
 
 - **Cambiar texto como Acrobat**: se escribe con la **misma fuente** del PDF (la instalada con ese nombre o la que trae el PDF adentro). Si la fuente del PDF no trae alguna letra nueva, solo esa letra va con la más parecida.

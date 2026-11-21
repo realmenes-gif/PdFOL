@@ -363,12 +363,21 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.6"
-VERSION_INTERNA = "4.6"
+VERSION = "v4.6.1"
+VERSION_INTERNA = "4.6.1"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.6.1", [
+        "Cambiar texto: el párrafo se arma con los renglones de la hoja (como Acrobat): con interlineado amplio "
+        "ya no se cambia un solo renglón ni se pierde el interlineado, la sangría o la alineación.",
+        "Listas: el número o la viñeta conserva su espacio y el texto sigue empezando donde estaba.",
+        "Barra de formato flotante (como Word) arriba del texto al escribir: fuente, tamaño, negrita, cursiva, "
+        "subrayado, tachado, color, alineación y ⋯ (interlineado, fondo, duplicar, quitar).",
+        "La fuente, la negrita, el tamaño o el color se aplican solo a lo que elegís (o a todo el párrafo si no "
+        "elegís nada). Ya no se abre el panel al costado.",
+    ]),
     ("v4.6", [
         "Cambiar texto como Acrobat: se escribe con la MISMA fuente del PDF (la instalada con ese nombre o la que "
         "trae el PDF adentro); solo una letra que la fuente no tenga va con la más parecida.",
@@ -3969,6 +3978,7 @@ def tramos_texto(it_, a, b):
     runs = _runs(it_)
     txt = it_["txt"]
     estilos, fuentes = {}, {}
+    n_marca = len(_marca(it_)[0])
     out, k_ = [], a
     clave_prev, ini = None, a
     for k_ in range(a, b):
@@ -3979,23 +3989,42 @@ def tramos_texto(it_, a, b):
             fuentes[rid] = o_[1] if o_ else None
         ch = txt[k_]
         falta = fuentes[rid] is not None and not ch.isspace() and not tiene_letra(fuentes[rid], ch)
-        clave = (rid, falta)
+        clave = (rid, falta, k_ < n_marca)
         if k_ > a and clave != clave_prev:
             out.append((ini, k_, clave_prev))
             ini = k_
         clave_prev = clave
     out.append((ini, b, clave_prev))
     res = []
-    for d_, h_, (rid, falta) in out:
+    for d_, h_, (rid, falta, _m) in out:
         e_ = estilos[rid]
         res.append((d_, h_, dict(e_, _sin_orig=True) if falta else e_))
     return res
 
 
+def _marca(it_):
+    """v4.6.1: (texto, ancho) de la viñeta o el numero de una lista ("1. "): ocupa lo mismo que en el original
+    (el texto de la lista empieza donde empezaba). ('', 0) si no hay o si se cambio."""
+    m_ = it_.get("marca")
+    if m_ and it_.get("txt", "").startswith(m_[0]):
+        return m_[0], m_[1]
+    return "", 0
+
+
+def _extra_marca(it_, a, b):
+    """Lo que hay que sumar al ancho entre a y b por el espacio despues de la viñeta."""
+    pre, w_ = _marca(it_)
+    if not pre or not (a <= len(pre) - 1 < b):
+        return 0.0
+    natural = sum(ancho_con(fuente_de_item(e_)[1], pre[a2:b2], e_["tam"]) for a2, b2, e_ in tramos_texto(it_, 0, len(pre)))
+    return max(0.0, w_ - natural)
+
+
 def ancho_idx(it_, a, b):
     """Ancho del texto entre las letras a y b (cada tramo con su fuente)."""
     txt = it_["txt"]
-    return sum(ancho_con(fuente_de_item(e_)[1], txt[a2:b2], e_["tam"]) for a2, b2, e_ in tramos_texto(it_, a, b))
+    return sum(ancho_con(fuente_de_item(e_)[1], txt[a2:b2], e_["tam"]) for a2, b2, e_ in tramos_texto(it_, a, b)) \
+        + _extra_marca(it_, a, b)
 
 
 def renglones_indices(txt, it_, ancho=None):
@@ -4045,6 +4074,83 @@ def paso_renglon(it_):
     if it_["tipo"] == "reemplazo":
         return it_["tam"] * k_ if k_ else it_["inter"]
     return it_["tam"] * (k_ or 1.25)
+
+
+def parrafo_de_renglones(lineas, cajas, k0, m_):
+    """v4.6.1: los renglones (indices) del parrafo al que pertenece el renglon k0, por su forma en la hoja:
+    misma columna, mismo tamaño de letra, el mismo interlineado, y el renglon de arriba lleno hasta el margen
+    (si quedo corto, ahi termino el parrafo). Una viñeta o un numero al empezar un renglon abre otro parrafo."""
+    import re
+    n_ = len(lineas)
+
+    def tam_(k_):
+        sps = [sp for sp in lineas[k_]["spans"] if sp["text"].strip()]
+        return max(sps, key=lambda sp: len(sp["text"])) ["size"] if sps else 0
+
+    def base_(k_):
+        return (fitz.Point(lineas[k_]["spans"][0]["origin"]) * m_).y
+
+    def texto_(k_):
+        return "".join(sp["text"] for sp in lineas[k_]["spans"]).strip()
+
+    def horizontal(k_):
+        d_ = fitz.Point(lineas[k_]["dir"]) * m_ - fitz.Point(0, 0) * m_
+        return abs(d_.y) < 0.01 and d_.x > 0
+    if not horizontal(k0):
+        return [k0]
+    orden = sorted((k_ for k_ in range(n_) if horizontal(k_)), key=lambda k_: (round(base_(k_), 1), cajas[k_].x0))
+    # renglones de la misma columna que el elegido (se solapan en x)
+    r0 = cajas[k0]
+    col = [k_ for k_ in orden if cajas[k_].x0 < r0.x1 + 2 and r0.x0 < cajas[k_].x1 + 2]
+    if k0 not in col:
+        return [k0]
+    der_col = max(cajas[k_].x1 for k_ in col)
+    vineta = re.compile(r"^(\(?\d{1,3}[.)]|[a-zA-Z][.)]|[•·▪◦●○\-–—*])\s")
+
+    def sigue(a_, b_, salto_par):
+        """¿El renglon b_ (debajo de a_) sigue el mismo parrafo?"""
+        ta, tb = tam_(a_), tam_(b_)
+        if abs(ta - tb) > 0.8:
+            return False
+        salto = base_(b_) - base_(a_)
+        if not (0.6 * ta < salto <= 2.4 * max(ta, tb)):
+            return False
+        if salto_par and abs(salto - salto_par) > 0.2 * salto_par:
+            return False  # otro interlineado (o un espacio entre parrafos)
+        if vineta.match(texto_(b_)):
+            return False
+        ra, rb = cajas[a_], cajas[b_]
+        lleno = ra.x1 >= der_col - 3 or ra.x1 >= rb.x1 - 2
+        if not lleno:  # izquierda sin justificar: ¿la primera palabra de abajo entraba arriba?
+            pal = texto_(b_).split(" ")[0]
+            prom = ra.width / max(1, len(texto_(a_)))
+            lleno = ra.x1 + prom * (len(pal) + 1) > der_col + 1
+        if not lleno:
+            return False
+        if rb.x0 > ra.x0 + 3:
+            return False  # renglon con sangria: empieza otro parrafo
+        return True
+    i0 = col.index(k0)
+    arr_ = [k0]
+    # hacia arriba
+    salto_p = None
+    j = i0
+    while j > 0:
+        a_, b_ = col[j - 1], col[j]
+        if not sigue(a_, b_, salto_p):
+            break
+        salto_p = salto_p or (base_(b_) - base_(a_))
+        arr_.insert(0, a_)
+        j -= 1
+    j = i0
+    while j < len(col) - 1:
+        a_, b_ = col[j], col[j + 1]
+        if not sigue(a_, b_, salto_p):
+            break
+        salto_p = salto_p or (base_(b_) - base_(a_))
+        arr_.append(b_)
+        j += 1
+    return arr_
 
 
 def alineacion_parrafo(cajas, columna):
@@ -4113,12 +4219,18 @@ def diseno_texto(it_, con_indices=False):
             for p_ in palabras:
                 lista.append((pos_, p_))
                 pos_ += len(p_) + 1
-            libre = disp - sum(ancho_idx(it_, a_, a_ + len(p_)) for a_, p_ in lista)
-            hueco = libre / (len(palabras) - 1)
+            pre_, w_pre = _marca(it_)
+            fijo = 0.0
+            if ini == 0 and pre_ and len(lista) > 2 and lista[1][0] == len(pre_):
+                # la viñeta ("1. ") con su espacio ocupa lo mismo que en el original: no se estira
+                fijo = w_pre - ancho_idx(it_, 0, len(lista[0][1]))
+            n_huecos = len(palabras) - 1 - (1 if fijo else 0)
+            libre = disp - sum(ancho_idx(it_, a_, a_ + len(p_)) for a_, p_ in lista) - fijo
+            hueco = libre / max(1, n_huecos)
             xs, x_ = [], xl
-            for a_, p_ in lista:
+            for n_, (a_, p_) in enumerate(lista):
                 xs.append((x_, p_, a_))
-                x_ += ancho_idx(it_, a_, a_ + len(p_)) + hueco
+                x_ += ancho_idx(it_, a_, a_ + len(p_)) + (fijo if (fijo and n_ == 0) else hueco)
             fila = (xl, base, l_, xs, disp)
         else:
             dx = {"centro": (disp - w_) / 2, "der": disp - w_}.get(alin, 0)
@@ -4130,7 +4242,7 @@ def diseno_texto(it_, con_indices=False):
 def _adv(it_, k_):
     """Ancho de la letra k del texto (con la fuente de su tramo)."""
     e_ = tramos_texto(it_, k_, k_ + 1)[0][2]
-    return ancho_con(fuente_de_item(e_)[1], it_["txt"][k_], e_["tam"])
+    return ancho_con(fuente_de_item(e_)[1], it_["txt"][k_], e_["tam"]) + _extra_marca(it_, k_, k_ + 1)
 
 
 def letras_texto(it_):
@@ -4173,27 +4285,34 @@ def dibujar_texto(pg, it_, conv, rot=0):
                     pg.insert_font(fontname=kw["fontname"], fontfile=kw["fontfile"])
                 puestas.add(kw["fontname"])
             t_ = it_["txt"][a2:b2]
+            col_ = tuple(v_ / 255 for v_ in e_["color"])
             if t_.strip():
-                sh_.insert_text(conv((x_, base)), t_, fontsize=e_["tam"], fontname=kw["fontname"],
-                                color=tuple(v_ / 255 for v_ in e_["color"]), rotate=rot)
-            x_ += ancho_con(fuente_de_item(e_)[1], t_, e_["tam"])
+                sh_.insert_text(conv((x_, base)), t_, fontsize=e_["tam"], fontname=kw["fontname"], color=col_,
+                                rotate=rot)
+            w_t = ancho_con(fuente_de_item(e_)[1], t_, e_["tam"]) + _extra_marca(it_, a2, b2)
+            for marca, dy in (("sub", e_["tam"] * 0.14), ("tach", -e_["tam"] * 0.27)):
+                if e_.get(marca) and t_.strip():  # v4.6.1: subrayado y tachado por tramo (como Word)
+                    lineas_.append((conv((x_, base + dy)), conv((x_ + w_t, base + dy)), col_, e_["tam"]))
+            x_ += w_t
         return x_
     lineas_ = []
     for x_, base, l_, palabras, w_, ini in diseno_texto(it_, True):
         if palabras:
-            for xp, p_, a_ in palabras:
-                if p_:
-                    escribir(xp, base, a_, a_ + len(p_))
+            for n_, (xp, p_, a_) in enumerate(palabras):
+                xf_ = escribir(xp, base, a_, a_ + len(p_)) if p_ else xp
+                if n_ < len(palabras) - 1:  # el subrayado sigue por el espacio estirado
+                    e_ = tramos_texto(it_, a_ + len(p_), a_ + len(p_) + 1)
+                    e_ = e_[0][2] if e_ else it_
+                    xn_ = palabras[n_ + 1][0]
+                    col_ = tuple(v_ / 255 for v_ in e_["color"])
+                    for marca, dy in (("sub", e_["tam"] * 0.14), ("tach", -e_["tam"] * 0.27)):
+                        if e_.get(marca):
+                            lineas_.append((conv((xf_, base + dy)), conv((xn_, base + dy)), col_, e_["tam"]))
         elif l_:
             escribir(x_, base, ini, ini + len(l_))
-        if not l_.strip():
-            continue
-        for marca, dy in (("sub", tam * 0.14), ("tach", -tam * 0.27)):
-            if it_.get(marca):
-                lineas_.append((conv((x_, base + dy)), conv((x_ + w_, base + dy))))
     sh_.commit()
-    for p0_, p1_ in lineas_:
-        pg.draw_line(p0_, p1_, color=c0_, width=max(0.5, tam * 0.065))
+    for p0_, p1_, col_, t_ in lineas_:
+        pg.draw_line(p0_, p1_, color=col_, width=max(0.5, t_ * 0.065))
 
 
 def ruta_icono_ico():
@@ -5798,50 +5917,17 @@ def iniciar_interfaz():
                                                                ayuda_texto())))
         ctk.CTkLabel(p, textvariable=v_texto_ayuda, font=F(11), text_color=C["texto2"], anchor="w", justify="left",
                      wraplength=440).grid(row=1, column=0, sticky="ew", padx=18, pady=(4, 6))
-        seccion(p, "Letra", 2)
-        t = Tarjeta(p, 3)
+        # v4.6.1: fuente, tamaño, negrita, color y alineacion van en la barra flotante que aparece sobre el
+        # texto al escribir (como en Word); aca queda lo del parrafo
         disp_ = fuentes_ed_disponibles()
         if v_tfuente.get() not in disp_:
             v_tfuente.set("Arial" if "Arial" in disp_ else "Helvetica (PDF)")
-        t.fila("Fuente", menu(t, disp_, v_tfuente, 200, cmd=lambda _v: estilo_texto_cambio()))
-        caja_e = ctk.CTkFrame(t, fg_color="transparent")
-        for txt_, var_, fnt_, tip_ in (("N", v_tneg, F(13, "bold"), "Negrita"),
-                                       ("C", v_tcur, ctk.CTkFont(family=FAM, size=13, slant="italic"), "Cursiva"),
-                                       ("S", v_tsub, ctk.CTkFont(family=FAM, size=13, underline=True), "Subrayado"),
-                                       ("T", v_ttach, ctk.CTkFont(family=FAM, size=13, overstrike=True), "Tachado")):
-            b_ = ctk.CTkButton(caja_e, text=txt_, width=34, height=30, corner_radius=7, font=fnt_,
-                               fg_color=C["suave"], hover_color=C["suave_h"], text_color=C["texto"],
-                               command=lambda v__=var_: v__.set(not v__.get()))
-            b_.pack(side="left", padx=2)
-
-            def pintar_(*_a, b__=b_, v__=var_):
-                b__.configure(fg_color=C["acento"] if v__.get() else C["suave"],
-                              text_color="#FFFFFF" if v__.get() else C["texto"])
-            var_.trace_add("write", pintar_)
-            pintar_()
-        t.fila("Estilo", caja_e)
-        t.fila("Tamaño (pt)", Contador(t, v_ttam, 4, 144, ancho=50, decimales=True))
-        t.fila("Alineación", segmentado(t, list(ALINEAS), v_talin, ancho=200, cmd=lambda _v: estilo_texto_cambio()))
+        seccion(p, "Párrafo", 2)
+        t = Tarjeta(p, 3)
         t.fila("Interlineado", menu(t, list(INTERLINEADOS), v_tinter, 110, cmd=lambda _v: estilo_texto_cambio()),
                ayuda="«Original»: el del PDF (o 1,25 en texto nuevo)")
         t.fila("Fondo blanco", switch(t, v_tfondo), ayuda="Tapa lo que hay debajo (texto nuevo)")
-        caja_c = ctk.CTkFrame(t, fg_color="transparent")
         texto_col["puntos"] = []
-        for _n, rgb in COLORES_FOLIO:
-            hx = "#%02x%02x%02x" % rgb
-            b_ = ctk.CTkButton(caja_c, text="", width=22, height=22, corner_radius=11, fg_color=hx, hover_color=hx,
-                               border_width=0, border_color=C["acento"], command=lambda c_=rgb: color_texto(c_))
-            b_.pack(side="left", padx=3)
-            texto_col["puntos"].append((b_, rgb))
-
-        def otro_color():
-            from tkinter import colorchooser
-            r_ = colorchooser.askcolor(color="#%02x%02x%02x" % texto_col["rgb"], parent=raiz, title="Color del texto")
-            if r_ and r_[0]:
-                color_texto(tuple(int(v_) for v_ in r_[0]))
-        boton(caja_c, "Otro…", ancho=60, command=otro_color).configure(height=24, font=F(11))
-        caja_c.winfo_children()[-1].pack(side="left", padx=(8, 0))
-        t.fila("Color", caja_c, abajo=True)
         seccion(p, "Editar", 5)
         t = Tarjeta(p, 6)
         caja_b = ctk.CTkFrame(t, fg_color="transparent")
@@ -5853,8 +5939,10 @@ def iniciar_interfaz():
                              "(Shift: más rápido) · doble clic corrige el texto.",
                      font=F(11), text_color=C["texto2"], anchor="w", justify="left", wraplength=440).grid(
             row=7, column=0, sticky="ew", padx=18, pady=(4, 0))
-        ctk.CTkLabel(p, text="«Cambiar» usa la misma fuente del texto original si está instalada en Windows; si no, la "
-                             "más parecida. Podés elegir otra en «Fuente». Nada se escribe en el PDF hasta «Guardar cambios».",
+        ctk.CTkLabel(p, text="«Cambiar» escribe con la misma fuente del PDF y respeta el párrafo (ancho, sangría, "
+                             "alineación). Al escribir aparece arriba del texto una barra para la fuente, el tamaño, "
+                             "la negrita, el color y la alineación: se aplica a lo que elijas (o a todo el párrafo). "
+                             "Nada se escribe en el PDF hasta «Guardar cambios».",
                      font=F(11), text_color=C["texto2"], anchor="w", justify="left", wraplength=440).grid(
             row=4, column=0, sticky="ew", padx=18, pady=(10, 20))
         color_texto(texto_col["rgb"], aplicar=False)
@@ -8755,6 +8843,13 @@ def iniciar_interfaz():
                 copiar_seleccion()
             elif ctrl and k_.lower() == "c" and vis.get("img_sel"):
                 copiar_imagenes()
+            elif k_ == "Escape" and app.get("panel") == "texto" and not vis.get("ined"):
+                if vis.get("edit_item"):
+                    vis["edit_item"] = None
+                    visor_pedir_dibujo()
+                else:
+                    cerrar_panel()  # v4.6.1: sin panel al costado, Esc deja de escribir
+                    v_estado.set("Listo.")
             elif k_ == "Escape" and vis.get("img_sel"):
                 vis["img_sel"] = []
                 visor_pedir_dibujo()
@@ -10926,6 +11021,11 @@ def iniciar_interfaz():
                            else "Hacé clic sobre un texto del PDF para cambiarlo. Se toma el renglón") +
                           " y se escribe con la misma fuente (o la más parecida). Después podés cambiarle la fuente, el "
                           "tamaño o el color desde aquí; también se puede mover. En escaneos, el texto se reconoce solo (OCR).")
+        if app.get("panel") == "texto" and not vis.get("ined"):  # v4.6.1: sin panel: la ayuda va abajo
+            v_estado.set(("Agregar texto: hacé clic en la hoja y escribí." if v_tmodo.get() == "Agregar" else
+                          "Cambiar texto: hacé clic sobre un texto del PDF.") +
+                         " Arriba del texto aparece la barra de formato (fuente, tamaño, negrita, color, alineación)."
+                         " Esc o el mismo botón: terminar.")
 
     def estilo_panel():
         return {"fam": v_tfuente.get(), "neg": bool(v_tneg.get()), "cur": bool(v_tcur.get()),
@@ -10959,8 +11059,83 @@ def iniciar_interfaz():
         texto_col["rgb"] = tuple(int(x) for x in rgb)
         for b_, c_ in texto_col["puntos"]:
             b_.configure(border_width=3 if tuple(c_) == texto_col["rgb"] else 0)
+        for f_ in texto_col.get("al_cambiar", []):
+            f_()
         if aplicar:
             estilo_texto_cambio()
+
+    ESTILO_LETRA = ("fam", "neg", "cur", "sub", "tach", "tam", "color")
+
+    def _ined_sel(ed):
+        t_w = ed["txt"]
+        try:
+            return len(t_w.get("1.0", "sel.first")), len(t_w.get("1.0", "sel.last"))
+        except tk.TclError:
+            return None
+
+    def restilo(e_, cambios):
+        """El estilo e_ con los cambios. Negrita o cursiva de la misma fuente: se busca esa variante instalada
+        (Calibri -> Calibri Bold) antes de cambiar de fuente."""
+        n_ = dict(e_, **cambios)
+        if ("neg" in cambios or "cur" in cambios) and "fam" not in cambios and e_.get("fuente_pdf") and \
+                e_.get("forig") and e_["forig"][0] == e_.get("fam"):
+            fs_ = archivo_fuente_sistema(e_["fuente_pdf"], n_.get("neg"), n_.get("cur"))
+            if fs_:
+                n_.update(fsis=fs_, fpdf=None, forig=(n_.get("fam"), bool(n_.get("neg")), bool(n_.get("cur"))))
+        return n_
+
+    def aplicar_estilo_tramo(ed, a, b, cambios, todo=False):
+        """v4.6.1: cambia el estilo de las letras a..b del cuadro (cada una conserva lo que no se cambia)."""
+        it_ = ed["it"]
+        t_w = ed["txt"]
+        txt_ = t_w.get("1.0", "end-1c")
+        runs = _ined_runs(ed, txt_) or [None] * len(txt_)
+        tab = list(it_.get("est_tab") or [])
+        claves_base = ("fam", "neg", "cur", "sub", "tach", "tam", "color", "fsis", "fpdf", "forig", "fuente_pdf",
+                       "fam_parecida")
+        base_ = {k__: it_.get(k__) for k__ in claves_base}
+        if todo:  # todo el parrafo: cambia el estilo base y cada tramo
+            nb_ = restilo(base_, cambios)
+            it_.update(nb_)
+            tab = [restilo(dict(base_, **t__), cambios) for t__ in tab]
+            tab = [{k__: v__ for k__, v__ in t__.items() if nb_.get(k__) != v__} for t__ in tab]
+        else:
+            nuevos = {}
+            for k_ in range(a, min(b, len(txt_))):
+                rid = runs[k_]
+                if rid not in nuevos:
+                    act_ = dict(base_, **(tab[rid] if rid is not None else {}))
+                    n_ = restilo(act_, cambios)
+                    dif_ = {k__: v__ for k__, v__ in n_.items() if base_.get(k__) != v__}
+                    if not dif_:
+                        nuevos[rid] = None
+                    else:
+                        if dif_ not in tab:
+                            tab.append(dif_)
+                        nuevos[rid] = tab.index(dif_)
+                runs[k_] = nuevos[rid]
+        it_["est_tab"] = tab or None
+        for t__ in t_w.tag_names():
+            if t__ == "rb" or (t__[:1] == "r" and t__[1:].isdigit()):
+                t_w.tag_delete(t__)
+        if tab:
+            k_ = 0
+            while k_ < len(txt_):
+                f_ = k_ + 1
+                while f_ < len(txt_) and runs[f_] == runs[k_]:
+                    f_ += 1
+                t_w.tag_add("rb" if runs[k_] is None else f"r{runs[k_]}", f"1.0 + {k_} chars", f"1.0 + {f_} chars")
+                k_ = f_
+        it_["runs"] = list(runs) if tab else None
+
+    def estilo_en_cursor(ed):
+        """El estilo de la letra antes del cursor (para que la barra muestre negrita, fuente, tamaño...)."""
+        it_ = ed["it"]
+        tmp = ed.get("tmp") or it_
+        off = _ined_pos(ed)
+        runs = _runs(tmp)
+        rid = runs[max(0, off - 1)] if runs and len(runs) else None
+        return _estilo_run(tmp, rid) if rid is not None else tmp
 
     def _cambia_letra(it_, nuevo_):
         return any(nuevo_.get(k_) != it_.get(k_) for k_ in ("fam", "neg", "cur", "tam")) or \
@@ -10973,17 +11148,29 @@ def iniciar_interfaz():
         if ed_i:  # v4.1: escribiendo en la hoja: el estilo cambia ahi mismo
             it_ = ed_i["it"]
             nuevo_ = dict(estilo_panel(), tam=tam_texto(), color=texto_col["rgb"])
-            if abs(nuevo_["tam"] - round(it_["tam"], 1)) < 0.01:
-                nuevo_["tam"] = it_["tam"]  # v4.6: el tamaño exacto del original (el panel lo muestra redondeado)
+            antes_ = ed_i.get("panel") or {}
+            cambios_ = {k__: v__ for k__, v__ in nuevo_.items() if antes_.get(k__) != v__}
+            if "tam" in cambios_ and abs(nuevo_["tam"] - round(float(antes_.get("tam") or 0), 1)) < 0.01:
+                cambios_.pop("tam")  # el panel lo muestra redondeado: no es un cambio
+            if not cambios_:
+                return
+            ed_i["panel"] = dict(nuevo_)
             ed_i["movido"] = True  # el cambio de estilo queda aunque no se cambie el texto
             if not ed_i["nuevo"]:
                 guardar_historia("estilo", it_["id"])
-            if _cambia_letra(it_, nuevo_):  # v4.6: otra fuente o color para todo el parrafo: sin tramos
-                it_["runs"] = it_["est_tab"] = None
-                for t__ in ed_i["txt"].tag_names():
-                    if t__ == "rb" or (t__[:1] == "r" and t__[1:].isdigit()):
-                        ed_i["txt"].tag_delete(t__)
-            it_.update(nuevo_)
+            letra_ = {k__: v__ for k__, v__ in cambios_.items() if k__ in ESTILO_LETRA}
+            sel_ = _ined_sel(ed_i)
+            if letra_ and sel_ and sel_[1] > sel_[0]:
+                # v4.6.1: como Word: la negrita, la fuente, el tamaño o el color van solo a lo elegido
+                aplicar_estilo_tramo(ed_i, sel_[0], sel_[1], letra_)
+                for k__ in letra_:
+                    cambios_.pop(k__)
+            elif letra_:
+                # sin nada elegido: a todo el parrafo (cada tramo conserva lo demas: una negrita sigue negrita)
+                aplicar_estilo_tramo(ed_i, 0, len(ed_i["txt"].get("1.0", "end-1c")), letra_, todo=True)
+                for k__ in letra_:
+                    cambios_.pop(k__)
+            it_.update(cambios_)
             if it_["tipo"] == "reemplazo":
                 ajustar_reemplazo(it_)
             else:
@@ -11117,17 +11304,23 @@ def iniciar_interfaz():
                 ocr_r = ocr_de(ruta, pag)  # v4.1: escaneo: el texto reconocido
                 if ocr_r:
                     bloques_ = ocr_r["bloques"]
-            for bl in bloques_:
-                lineas = [ln for ln in bl.get("lines", []) if "".join(sp["text"] for sp in ln["spans"]).strip()]
-                if not lineas:
-                    continue
-                cajas = [fitz.Rect(ln["bbox"]) * m_ for ln in lineas]
-                dentro = [k_ for k_, r_ in enumerate(cajas) if r_.contains(pt_)]
+            # v4.6.1: el parrafo se arma con los renglones de la hoja (como Acrobat), no con los bloques del PDF:
+            # con interlineado amplio cada renglon venia en un bloque aparte y se cambiaba un solo renglon
+            todas_l = [(bi_, ln) for bi_, bl in enumerate(bloques_) for ln in bl.get("lines", [])
+                       if "".join(sp["text"] for sp in ln["spans"]).strip()]
+            for _uno in (1,):
+                cajas_t = [fitz.Rect(ln["bbox"]) * m_ for _b, ln in todas_l]
+                dentro = [k_ for k_, r_ in enumerate(cajas_t) if r_.contains(pt_)]
                 if not dentro:
                     continue
-                elegidas = list(range(len(lineas))) if parrafo else dentro[:1]
-                lineas = [lineas[k_] for k_ in elegidas]
-                cajas = [cajas[k_] for k_ in elegidas]
+                if not parrafo:
+                    elegidas = dentro[:1]
+                elif ocr_r:  # escaneo: el OCR ya junta los renglones en parrafos
+                    elegidas = [k_ for k_, (b_, _l) in enumerate(todas_l) if b_ == todas_l[dentro[0]][0]]
+                else:
+                    elegidas = parrafo_de_renglones([ln for _b, ln in todas_l], cajas_t, dentro[0], m_)
+                lineas = [todas_l[k_][1] for k_ in elegidas]
+                cajas = [cajas_t[k_] for k_ in elegidas]
                 d0 = fitz.Point(lineas[0]["dir"]) * m_ - fitz.Point(0, 0) * m_
                 if abs(d0.y) > 0.01 or d0.x <= 0:
                     return "girado"
@@ -11215,6 +11408,20 @@ def iniciar_interfaz():
                         "ancho": ancho_, "fuente_pdf": n_, "alin": alin_, "sangria": sangria_,
                         "forig": (fam_, neg_, cur_), "fsis": fsis_, "fpdf": fpdf_, "fam_parecida": parecida_,
                         "runs": runs_, "est_tab": tab_}
+                import re
+                mv_ = re.match(r"^(\(?\d{1,3}[.)]|[a-zA-Z][.)]|[•·▪◦●○\-–—*])\s+", textos[0])
+                if mv_:  # v4.6.1: lista: lo que ocupa la viñeta o el numero, como en el original
+                    try:
+                        cs_ = [c_ for b__ in pg.get_text("rawdict", clip=fitz.Rect(lineas[0]["bbox"]))["blocks"]
+                               for l__ in b__.get("lines", []) for s__ in l__["spans"] for c_ in s__["chars"]]
+                        k0_ = next(n__ for n__, c_ in enumerate(cs_) if not c_["c"].isspace())
+                        c1_ = cs_[k0_ + len(mv_.group(0))]
+                        x0_ = (fitz.Point(cs_[k0_]["origin"]) * m_).x
+                        x1_ = (fitz.Point(c1_["origin"]) * m_).x
+                        if x1_ > x0_:
+                            res_["marca"] = (mv_.group(0), x1_ - x0_)
+                    except Exception:
+                        pass
                 if ancho_ and len(textos) > 1 and usa_fuente_original(dict(res_, tipo="reemplazo")):
                     # donde corta cada renglon: el ancho mas chico en que ningun renglon cortado podia llevar la
                     # palabra siguiente (asi, sin cambios, los renglones quedan cortados igual que en el original)
@@ -11659,6 +11866,16 @@ def iniciar_interfaz():
                                    base + tam * 0.25) * M
                     cv_.create_rectangle(x + r_.x0, y + r_.y0, x + r_.x1, y + r_.y1, fill="#3B82F6",
                                          stipple="gray50", outline="", tags=("ined", "ined_cur"))
+        try:  # v4.6.1: la barra muestra el estilo de donde esta el cursor (negrita, fuente, tamaño, color)
+            e_c = estilo_en_cursor(ed)
+            clave_c = tuple(e_c.get(k__) for k__ in ESTILO_LETRA)
+            if ed.get("clave_c") != clave_c:
+                ed["clave_c"] = clave_c
+                sincronizar_panel(dict(e_c, alin=it_.get("alin"), interlin=it_.get("interlin"),
+                                       fondo=it_.get("fondo")))
+                ed["panel"] = dict(estilo_panel(), tam=tam_texto(), color=texto_col["rgb"])
+        except Exception:
+            pass
         k_, xc = _ined_renglon(ed, _ined_pos(ed))
         if lets:
             base = lets[k_][1]
@@ -11680,6 +11897,181 @@ def iniciar_interfaz():
         except tk.TclError:
             return
         ed["blink"] = raiz.after(530, lambda: _ined_parpadeo(ed))
+
+    # ---- v4.6.1: barra flotante para dar formato (como la de Word): aparece arriba del texto al escribir
+    barras_flot = {}
+    flot_ = {"pal": None}
+
+    def _img_alinea(cual, oscuro):
+        W, H, K = 18, 14, 4
+        im_ = Image.new("RGBA", (W * K, H * K), (0, 0, 0, 0))
+        d_ = ImageDraw.Draw(im_)
+        col_ = _hex(C["texto"][1 if oscuro else 0]) + (255,)
+        largos = (1.0, 0.62, 0.86, 0.5)
+        for n_, l_ in enumerate(largos):
+            l_ = 1.0 if (cual == "just" and n_ < 3) else l_
+            w_ = (W - 2) * K * l_
+            x0 = {"izq": K, "centro": (W * K - w_) / 2, "der": W * K - K - w_, "just": K}[cual]
+            y = (2 + n_ * 3.3) * K
+            d_.rounded_rectangle([x0, y, x0 + w_, y + 1.6 * K], radius=K, fill=col_)
+        return im_.resize((W, H), Image.LANCZOS)
+
+    def paleta_colores(boton_):
+        """Ventanita con los colores (como Word)."""
+        if flot_["pal"] is None or not flot_["pal"].winfo_exists():
+            w_ = tk.Toplevel(raiz)
+            w_.overrideredirect(True)
+            w_.attributes("-topmost", True)
+            fr_ = ctk.CTkFrame(w_, fg_color=C["tarjeta"], corner_radius=10, border_width=1, border_color=C["borde"])
+            fr_.pack()
+            colores_ = [rgb for _n, rgb in COLORES_FOLIO] + [(255, 255, 255), (128, 128, 128)]
+            for n_, rgb in enumerate(colores_):
+                hx_ = "#%02x%02x%02x" % rgb
+                ctk.CTkButton(fr_, text="", width=22, height=22, corner_radius=6, fg_color=hx_, hover_color=hx_,
+                              border_width=1, border_color=C["borde"],
+                              command=lambda c_=rgb: (flot_["pal"].withdraw(), color_texto(c_))).grid(
+                    row=n_ // 6, column=n_ % 6, padx=3, pady=3)
+
+            def otro_():
+                flot_["pal"].withdraw()
+                from tkinter import colorchooser
+                r_ = colorchooser.askcolor(color="#%02x%02x%02x" % texto_col["rgb"], parent=raiz,
+                                           title="Color del texto")
+                if r_ and r_[0]:
+                    color_texto(tuple(int(v_) for v_ in r_[0]))
+            ctk.CTkButton(fr_, text="Otro color…", height=24, corner_radius=6, font=F(11), fg_color=C["suave"],
+                          hover_color=C["suave_h"], text_color=C["texto"], command=otro_).grid(
+                row=9, column=0, columnspan=6, sticky="ew", padx=3, pady=(2, 4))
+            w_.bind("<FocusOut>", lambda e: w_.withdraw())
+            w_.bind("<Escape>", lambda e: w_.withdraw())
+            flot_["pal"] = w_
+        w_ = flot_["pal"]
+        w_.geometry(f"+{boton_.winfo_rootx()}+{boton_.winfo_rooty() + boton_.winfo_height() + 4}")
+        w_.deiconify()
+        w_.lift()
+        w_.focus_force()
+
+    def barra_flotante(vista):
+        """La barra de formato de una vista (se arma la primera vez)."""
+        if vista in barras_flot:
+            return barras_flot[vista]
+        b_ = ctk.CTkFrame(vista.cv, fg_color=C["tarjeta"], corner_radius=10, border_width=1, border_color=C["borde"])
+        fuentes_ = fuentes_ed_disponibles()
+        m_f = ctk.CTkOptionMenu(b_, values=fuentes_, variable=v_tfuente, width=150, height=28, corner_radius=7,
+                                font=F(12), dropdown_font=F(12), fg_color=C["suave"], button_color=C["suave_h"],
+                                button_hover_color=C["borde"], text_color=C["texto"], dropdown_fg_color=C["tarjeta"],
+                                dropdown_hover_color=C["suave"], dropdown_text_color=C["texto"],
+                                command=lambda _v: estilo_texto_cambio(), dynamic_resizing=False)
+        m_f.pack(side="left", padx=(8, 4), pady=6)
+
+        def chico(txt_, cmd_, ancho=26, fnt=None):
+            return ctk.CTkButton(b_, text=txt_, width=ancho, height=28, corner_radius=7, font=fnt or F(13),
+                                 fg_color="transparent", hover_color=C["suave_h"], text_color=C["texto"],
+                                 command=cmd_)
+
+        def paso_tam(d_):
+            v_ttam.set(("%g" % max(4.0, min(144.0, round(tam_texto() + d_, 1)))).replace(".", ","))
+        chico("−", lambda: paso_tam(-1)).pack(side="left")
+        e_t = ctk.CTkEntry(b_, textvariable=v_ttam, width=42, height=28, corner_radius=7, font=F(12),
+                           justify="center", fg_color=C["campo"], border_color=C["borde"], text_color=C["texto"])
+        e_t.pack(side="left", padx=1)
+        e_t.bind("<Return>", lambda e: vis.get("ined") and vis["ined"]["txt"].focus_set())
+        chico("+", lambda: paso_tam(1)).pack(side="left", padx=(0, 4))
+        ctk.CTkFrame(b_, width=1, height=20, fg_color=C["borde"]).pack(side="left", padx=4)
+        for txt_, var_, fnt_ in (("N", v_tneg, F(13, "bold")),
+                                 ("C", v_tcur, ctk.CTkFont(family=FAM, size=13, slant="italic")),
+                                 ("S", v_tsub, ctk.CTkFont(family=FAM, size=13, underline=True)),
+                                 ("T", v_ttach, ctk.CTkFont(family=FAM, size=13, overstrike=True))):
+            bt_ = chico(txt_, lambda v__=var_: v__.set(not v__.get()), 28, fnt_)
+            bt_.pack(side="left", padx=1)
+
+            def pintar_(*_a, b__=bt_, v__=var_):
+                try:
+                    b__.configure(fg_color=C["acento"] if v__.get() else "transparent",
+                                  text_color="#FFFFFF" if v__.get() else C["texto"])
+                except tk.TclError:
+                    pass
+            var_.trace_add("write", pintar_)
+            pintar_()
+        b_col = ctk.CTkButton(b_, text="A", width=30, height=28, corner_radius=7, font=F(14, "bold"),
+                              fg_color="transparent", hover_color=C["suave_h"], text_color=C["texto"], border_width=0)
+        b_col.configure(command=lambda: paleta_colores(b_col))
+        b_col.pack(side="left", padx=(2, 1))
+        raya_ = ctk.CTkFrame(b_col, height=4, width=20, corner_radius=2, fg_color="#000000")
+        raya_.place(relx=0.5, rely=0.86, anchor="center")
+        ctk.CTkFrame(b_, width=1, height=20, fg_color=C["borde"]).pack(side="left", padx=4)
+        b_al = {}
+        for clave_, nombre_ in (("izq", "Izq."), ("centro", "Centro"), ("der", "Der."), ("just", "Justif.")):
+            img_ = ctk.CTkImage(_img_alinea(clave_, False), _img_alinea(clave_, True), size=(18, 14))
+            bt_ = ctk.CTkButton(b_, text="", image=img_, width=30, height=28, corner_radius=7,
+                                fg_color="transparent", hover_color=C["suave_h"],
+                                command=lambda n__=nombre_: (v_talin.set(n__), estilo_texto_cambio()))
+            bt_.pack(side="left", padx=1)
+            b_al[nombre_] = bt_
+        ctk.CTkFrame(b_, width=1, height=20, fg_color=C["borde"]).pack(side="left", padx=4)
+        b_mas = chico("⋯", None, 30, F(15, "bold"))
+        b_mas.configure(command=lambda: menu_mas_texto(b_mas))
+        b_mas.pack(side="left", padx=(0, 6))
+
+        def pintar_al(*_a):
+            for n__, bt__ in b_al.items():
+                try:
+                    bt__.configure(fg_color=C["suave"] if v_talin.get() == n__ else "transparent")
+                except tk.TclError:
+                    pass
+        v_talin.trace_add("write", pintar_al)
+        pintar_al()
+
+        def pintar_col(*_a):
+            try:
+                raya_.configure(fg_color="#%02x%02x%02x" % tuple(texto_col["rgb"]))
+            except tk.TclError:
+                pass
+        texto_col.setdefault("al_cambiar", []).append(pintar_col)
+        pintar_col()
+        barras_flot[vista] = {"w": b_, "fuentes": m_f, "base": fuentes_}
+        return barras_flot[vista]
+
+    def menu_mas_texto(boton_):
+        """⋯ de la barra: interlineado, fondo blanco, tomar parrafo o renglon, duplicar y quitar."""
+        m_ = menu_contextual(raiz)
+        m_.add_titulo("Interlineado")
+        for n_ in INTERLINEADOS:
+            m_.add_command(label=("✓  " if v_tinter.get() == n_ else "     ") + n_,
+                           command=lambda n__=n_: (v_tinter.set(n__), estilo_texto_cambio()))
+        m_.add_separator()
+        m_.add_command(label=("✓  " if v_tfondo.get() else "     ") + "Fondo blanco (texto nuevo)",
+                       command=lambda: v_tfondo.set(not v_tfondo.get()))
+        m_.add_titulo("Al cambiar, tomar")
+        for n_ in ("Párrafo", "Renglón"):
+            m_.add_command(label=("✓  " if v_talc.get() == n_ else "     ") + n_,
+                           command=lambda n__=n_: (v_talc.set(n__), almacen.datos.update(texto_alcance=n__)))
+        m_.add_separator()
+        m_.add_command(label="Duplicar", command=lambda: (ined_terminar(True), duplicar_editado()))
+        m_.add_command(label="Quitar este texto", acelerador="Supr", punto="#EF4444",
+                       command=lambda: (ined_terminar(True), quitar_editado()))
+        m_.tk_popup(boton_.winfo_rootx(), boton_.winfo_rooty() + boton_.winfo_height() + 4)
+
+    def poner_barra_flotante(ed, X, Y, W, H):
+        """Pone la barra arriba del recuadro (o abajo, si arriba no hay lugar)."""
+        vista = ed["vista"]
+        bf_ = barra_flotante(vista)
+        it_ = ed["it"]
+        orig_ = it_.get("forig")[0] if it_.get("forig") else None
+        vals_ = ([orig_] if orig_ and orig_ not in bf_["base"] else []) + bf_["base"]
+        if bf_.get("vals") != vals_:
+            bf_["vals"] = vals_
+            bf_["fuentes"].configure(values=vals_)
+        cv_ = vista.cv
+        h_ = bf_["w"].winfo_reqheight() or px(42)
+        w_ = bf_["w"].winfo_reqwidth() or px(560)
+        izq_, der_ = cv_.canvasx(0) + 4, cv_.canvasx(0) + cv_.winfo_width() - 4
+        xb = max(izq_, min(X - 3, der_ - w_))
+        arriba = Y - 10 - h_ > cv_.canvasy(0) + 2
+        if arriba:
+            cv_.create_window(xb, Y - 10, window=bf_["w"], anchor="sw", tags=("ined", "ined_flot"))
+        else:
+            cv_.create_window(xb, Y + H + px(42), window=bf_["w"], anchor="nw", tags=("ined", "ined_flot"))
 
     def ined_colocar(vista):
         """v4.6: el texto se ve mientras se escribe EXACTAMENTE como va a quedar en el PDF (misma fuente, mismos
@@ -11730,6 +12122,10 @@ def iniciar_interfaz():
                         tags=("ined", "ined_listo"))
         ed["listo"] = (bx_, by_, bx_ + bw_, by_ + bh_)
         ed["ult_txt"] = tmp["txt"]
+        try:
+            poner_barra_flotante(ed, X, Y, W, H)
+        except Exception:
+            pass
         ined_cursor(ed)
 
     def dibujar_marco_word(cv_, x0, y0, x1, y1, tag):
@@ -11784,7 +12180,7 @@ def iniciar_interfaz():
         if not _ined_escala(ed):  # hoja girada: se usa la ventanita
             return False
         t_w = tk.Text(vista.cv, bd=0, highlightthickness=0, relief="flat", padx=0, pady=0, undo=True,
-                      maxundo=-1, cursor="xterm", exportselection=True, selectbackground="#BFDBFE",
+                      maxundo=-1, cursor="xterm", exportselection=False, selectbackground="#BFDBFE",
                       selectforeground="#0F172A")
         t_w.insert("1.0", it_.get("txt", ""))
         runs0 = _runs(it_)
@@ -11796,6 +12192,7 @@ def iniciar_interfaz():
         vis["ined"] = ed
         vis["edit_item"] = None if nuevo else (ruta, pag, it_)
         sincronizar_panel(it_)
+        ed["panel"] = dict(estilo_panel(), tam=tam_texto(), color=texto_col["rgb"])
 
         def cambio(_e=None):
             def _hacer():
@@ -12923,10 +13320,14 @@ def iniciar_interfaz():
                 p_.pack_forget()
         v_panel_tit.set(TITULOS[clave])
         l_panel_ico.configure(image=iconos_panel[clave])
-        if paneles[clave]._parent_frame.winfo_manager() != "pack":
-            paneles[clave].pack(fill="both", expand=True, padx=2, pady=(4, 6))
-        if not panel_der.winfo_ismapped():
-            panel_der.grid(row=0, column=3, sticky="ns", padx=(0, 10), pady=(10, 12))
+        if clave == "texto":  # v4.6.1: sin panel al costado: el formato va en la barra flotante (como Word)
+            if panel_der.winfo_ismapped():
+                panel_der.grid_forget()
+        else:
+            if paneles[clave]._parent_frame.winfo_manager() != "pack":
+                paneles[clave].pack(fill="both", expand=True, padx=2, pady=(4, 6))
+            if not panel_der.winfo_ismapped():
+                panel_der.grid(row=0, column=3, sticky="ns", padx=(0, 10), pady=(10, 12))
         app["panel"] = clave
         vis["edit_item"] = None
         columna_izquierda()
@@ -12935,7 +13336,7 @@ def iniciar_interfaz():
         if clave == "firmar":
             v_estado.set("Firmar: elegí la firma o el sello y hacé clic en la hoja donde va.")
         elif clave == "texto":
-            v_estado.set("Texto: hacé clic en la hoja para escribir, o elegí «Cambiar» y tocá un texto del PDF.")
+            ayuda_texto()
         dibujar_lateral()
         if clave == "foliar":
             actualizar_ejemplo()
@@ -14104,6 +14505,9 @@ def iniciar_interfaz():
             abrir_panel(clave)
 
     def cinta_texto(modo_):
+        if app.get("panel") == "texto" and v_tmodo.get() == modo_ and app["pagina"] == "visor":
+            cerrar_panel()  # tocarla de nuevo deja de escribir
+            return
         abrir_panel("texto")
         try:
             v_tmodo.set(modo_)
