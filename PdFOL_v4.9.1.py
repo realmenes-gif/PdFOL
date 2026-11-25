@@ -363,12 +363,16 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.9"
-VERSION_INTERNA = "4.9"
+VERSION = "v4.9.1"
+VERSION_INTERNA = "4.9.1"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.9.1", [
+        "Más espacio para la hoja: el husky y Buscar van en la fila de las pestañas de la cinta (sin la barra de "
+        "arriba); el nombre del documento va en el título de la ventana.",
+    ]),
     ("v4.9", [
         "Convertir páginas a imagen (CONVERTIR → «A imagen»): todas, esta página, un rango o las elegidas; formato "
         "PNG, JPG, TIFF, BMP o WEBP; resolución de 72 a 600 ppp (y calidad en JPG/WEBP).",
@@ -5090,7 +5094,7 @@ def iniciar_interfaz():
     # Fila 2 (44 px): una sola barra de iconos chicos (sin textos; al pasar el mouse dicen que hacen).
     ALTO_SUP = px(36)
     superior = tk.Canvas(raiz, height=ALTO_SUP, highlightthickness=0, bd=0)
-    superior.grid(row=0, column=0, sticky="ew")
+    # v4.9.1: sin esta barra (ocupaba espacio): el husky y Buscar van en la fila de las pestañas de la cinta
     import tkinter.font as tkfont
     f_item = tkfont.Font(family=FAM, size=10)
     logo_tk = foto_tk(icono_husky(px(24)))
@@ -5100,7 +5104,7 @@ def iniciar_interfaz():
         img = img.copy()
         img.putalpha(a)
         return img
-    e_buscar = ctk.CTkEntry(superior, width=220, height=26, corner_radius=13, font=F(12), bg_color=C["lat_ini"],
+    e_buscar = ctk.CTkEntry(raiz, width=220, height=24, corner_radius=12, font=F(12), bg_color=C["tarjeta"],
                             fg_color=C["campo"], border_color=C["borde"], text_color=C["texto"],
                             placeholder_text="Buscar  (Ctrl+F)", placeholder_text_color=C["texto2"])
     app["vista_top"] = None  # None: el documento · "inicio" · "herr"
@@ -5144,14 +5148,14 @@ def iniciar_interfaz():
         app["x_pest"] = x + 12
         ancho_b = 220 if w > 1100 else 170
         e_buscar.configure(width=ancho_b)
-        superior.create_window(w - 10, h // 2, window=e_buscar, anchor="e")
+
         try:  # v4.8: arriba, al centro, el nombre del documento (como Nitro); las pestañas van bajo la cinta
             t_a = pest_activa()
         except NameError:
             t_a = None
-        if t_a:
-            superior.create_text(max(app["x_pest"] + px(150), w / 2), h // 2 + 1,
-                                 text=f"{t_a['nombre']} - {NOMBRE}", fill=col("texto2"), font=(FAM, 10))
+        tit_ = (f"{t_a['nombre']} - " if t_a else "") + f"{NOMBRE} {VERSION} · by {AUTOR}"
+        if raiz.title() != tit_:
+            raiz.title(tit_)  # el nombre del documento va en la barra de Windows (como Nitro)
         dibujar_cinta()
 
     def ir_top(clave_):
@@ -5288,6 +5292,8 @@ def iniciar_interfaz():
                    "ancho": "#475569", "una": "#475569", "continua": "#475569", "dos": "#475569",
                    "completa": "#475569", "miniaturas": "#475569", "marcadores": "#475569", "zoom_mas": "#475569",
                    "deshacer": "#475569", "rehacer": "#475569", "herramientas": "#0EA5E9"}
+
+    logo_tk_c = foto_tk(icono_husky(px(22)))
 
     def icono_cinta_g(glifo_, tam_):
         k_ = ("g", glifo_, tam_, modo_oscuro())
@@ -5480,9 +5486,17 @@ def iniciar_interfaz():
             return
         app["cinta_acc"], app["cinta_ayuda"] = {}, {}
         hay_doc = bool(pest) and not app["vista_top"]
-        # --- pestañas
-        x = px(8)
+        # --- el husky (menu de PdFOL) y las pestañas
         h_t = ALTO_TABS
+        if app.get("menu_logo"):
+            cinta.create_rectangle(px(3), px(2), px(31), h_t - 1, fill=col("lat_sel"), outline="")
+        cinta.create_image(px(17), h_t / 2 + 1, image=logo_tk_c, tags=("item", "b:logo"))
+        cinta.create_rectangle(px(3), px(2), px(31), h_t - 1, outline="", fill="", tags=("item", "b:logo"))
+        if app.get("hay_nueva"):
+            cinta.create_oval(px(24), px(3), px(32), px(11), fill="#F97316", outline=col("tarjeta"), width=2)
+        app["cinta_acc"]["logo"] = menu_husky
+        app["cinta_ayuda"]["logo"] = f"{NOMBRE} {VERSION}: actualizaciones, novedades y ayuda"
+        x = px(38)
         f_tab = (FAM, 9, "bold")
         for tab_ in CINTA_TABS:
             ancho_ = f_tabm.measure(tab_) + px(22)
@@ -5522,6 +5536,15 @@ def iniciar_interfaz():
         xd -= px(24)
         chico_d("rehacer", "rehacer", lambda: rehacer_edicion(), "Rehacer (Ctrl+Y)")
         chico_d("deshacer", "deshacer", cinta_deshacer, "Deshacer (Ctrl+Z)")
+        ancho_bus = 200 if w > 1250 else 150
+        xd -= px(8)
+        e_buscar.configure(width=ancho_bus)
+        cinta.create_window(xd, h_t / 2 + 1, window=e_buscar, anchor="e")
+        try:
+            e_buscar.tk.call("raise", e_buscar._w, barra_pest._w)  # si no, queda detras de la cinta
+        except Exception:
+            pass
+        xd -= px(ancho_bus) + px(6)
         if hay_doc:
             xd -= px(10)
             chico_d("mas", "zoom_mas", lambda: (vista_activa() and vista_activa().zoom_paso(1)), "Acercar")
@@ -5667,7 +5690,8 @@ def iniciar_interfaz():
                     acc_ = app.get("cinta_acc", {}).get(t[2:])
                     if acc_:
                         if app["vista_top"] and t[2:] not in ("abrir", "zoom_menu", "min", "ayuda", "novedades",
-                                                              "actualizar", "acerca", "herr_todas", "inicio_p") and \
+                                                              "actualizar", "acerca", "herr_todas", "inicio_p",
+                                                              "logo") and \
                                 not t[2:].startswith("tab:"):
                             app["vista_top"] = None
                             mostrar_inicio()
@@ -14191,7 +14215,7 @@ def iniciar_interfaz():
         for k_, t_ in enumerate(pest):
             if k_ != vis["act"]:
                 m_.add_command(label=f"Comparar con «{t_['nombre']}»", command=lambda k__=k_: comparar(vis["act"], k__))
-        m_.tk_popup(superior.winfo_rootx() + 600, superior.winfo_rooty() + px(36) - 6)
+        m_.tk_popup(cinta.winfo_rootx() + 600, cinta.winfo_rooty() + px(28))
 
     # ================= panel de herramienta (Aplanar / Foliar / Comprimir) a la derecha
     class _IconosPanel(dict):  # v4.5: cada icono se dibuja la primera vez que se usa
@@ -14622,7 +14646,7 @@ def iniciar_interfaz():
         m_.add_command(label="Acerca de PdFOL", command=acerca_de)
         app["menu_logo"] = True
         dibujar_lateral()
-        m_.tk_popup(superior.winfo_rootx() + 12, superior.winfo_rooty() + px(36) - 4)
+        m_.tk_popup(cinta.winfo_rootx() + 8, cinta.winfo_rooty() + px(28))
 
         def vigilar():  # se quita el resaltado del logo cuando se cierra el menu
             if MenuPdfol.abierto is m_:
@@ -14690,7 +14714,7 @@ def iniciar_interfaz():
                        ("Deshacer · Rehacer", "Ctrl+Z · Ctrl+Y"), ("Imprimir", "Ctrl+P"),
                        ("Más opciones", "clic derecho")):
             m_.add_command(label=t_, acelerador=a_)
-        m_.tk_popup(superior.winfo_rootx() + 12, superior.winfo_rooty() + px(36) - 4)
+        m_.tk_popup(cinta.winfo_rootx() + 8, cinta.winfo_rooty() + px(28))
         return "break"
 
     def acerca_de():
