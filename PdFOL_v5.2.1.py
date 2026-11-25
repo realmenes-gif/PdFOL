@@ -363,12 +363,19 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.2"
-VERSION_INTERNA = "5.2"
+VERSION = "v5.2.1"
+VERSION_INTERNA = "5.2.1"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.2.1", [
+        "Copiar y pegar cuadros de texto e imágenes: Ctrl+C (o clic derecho → Copiar) y Ctrl+V lo pega donde "
+        "esté el mouse, en esta u otra hoja. Escribiendo, Ctrl+C sin letras elegidas copia el cuadro entero.",
+        "Arreglado: al tomar un texto debajo de otro ya cambiado o borrado, volvía a aparecer lo borrado.",
+        "Arreglado: al cambiar un texto con la letra del PDF faltaban letras («FECHA 5 E NOIEME E»): las letras "
+        "que el PDF no guardó van con la más parecida.",
+    ]),
     ("v5.2", [
         "Imágenes del PDF como objetos (como Nitro): clic para elegirla, arrastrar para moverla, el punto de la "
         "esquina la agranda o achica, Supr la borra. Ctrl+Z deshace; Ctrl+S lo deja en el PDF.",
@@ -4061,6 +4068,41 @@ def agregar_mapa_letras(buf, mapa):
     return sal_.getvalue()
 
 
+_LETRAS_OK = {}
+
+
+def _letras_con_dibujo(buf, mapa):
+    """v5.2: las letras de la fuente que tienen dibujo de verdad. Los PDF recortan la fuente a las letras que
+    usan, pero muchas veces dejan las demas en la tabla SIN dibujo: escribir con ellas dejaba huecos
+    («FECHA 5 E NOIEME E»)."""
+    ok = set(mapa)
+    try:
+        from fontTools.ttLib import TTFont
+        tt = TTFont(io.BytesIO(buf), lazy=True)
+        cm = tt.getBestCmap() or {}
+        if "glyf" in tt:
+            gl = tt["glyf"]
+            for u_, n_ in cm.items():
+                try:
+                    if gl[n_].numberOfContours != 0:
+                        ok.add(u_)
+                except Exception:
+                    pass
+        elif "CFF " in tt:
+            cs = tt["CFF "].cff.topDictIndex[0].CharStrings
+            for u_, n_ in cm.items():
+                try:
+                    if cs[n_].calcBounds(cs) is not None:
+                        ok.add(u_)
+                except Exception:
+                    pass
+        else:
+            return None
+    except Exception:
+        return None
+    return ok
+
+
 def fuente_original_pdf(doc, pag, nombre_span):
     """La fuente que trae el PDF (la de ese texto), lista para escribir con ella: clave en _FUENTES_PDF o None.
     Los PDF guardan solo las letras que usan y casi nunca dicen que letra es cada dibujo; eso se saca de como
@@ -4103,6 +4145,9 @@ def fuente_original_pdf(doc, pag, nombre_span):
         if not all(ft_.has_glyph(u_) == g_ for u_, g_ in mapa.items()):
             buf = agregar_mapa_letras(buf, mapa)
             ft_ = fitz.Font(fontbuffer=buf)
+        ok_ = _letras_con_dibujo(buf, mapa)
+        if ok_ is not None:  # v5.2: las letras cuyo dibujo el PDF no guardo (vacias) van con la mas parecida
+            _LETRAS_OK[id(ft_)] = ok_
         _FUENTES_PDF[clave] = {"buf": buf, "font": ft_, "nom": "PdO%X" % (zlib.crc32(buf) & 0xFFFFFF)}
         return clave
     except Exception:
@@ -4110,7 +4155,7 @@ def fuente_original_pdf(doc, pag, nombre_span):
 
 
 def _cubre(font, txt):
-    return all(ch in " \n\t" or font.has_glyph(ord(ch)) for ch in txt)
+    return all(ch.isspace() or tiene_letra(font, ch) for ch in txt)
 
 
 def _letras_del_tramo(it_):
@@ -4203,7 +4248,8 @@ def tiene_letra(font, ch):
     if r_ is None:
         if len(_TIENE_LETRA) > 200000:
             _TIENE_LETRA.clear()
-        r_ = _TIENE_LETRA[k_] = bool(font.has_glyph(ord(ch)))
+        ok_ = _LETRAS_OK.get(id(font))
+        r_ = _TIENE_LETRA[k_] = bool(font.has_glyph(ord(ch))) and (ok_ is None or ord(ch) in ok_)
     return r_
 
 
@@ -9472,7 +9518,7 @@ def iniciar_interfaz():
                         q0_ = fitz.Rect(caja_texto(e_[2])) * M
                         dibujar_marco_word(cv_, x + q0_.x0 - 3, y + q0_.y0 - 3, x + q0_.x1 + 3, y + q0_.y1 + 3, "marco")
                     elif (e_ and e_[0] == ruta and e_[1] == pag and not ined_ and not e_[2].get("borrada")
-                          and (app.get("panel") in ("firmar", "texto") or e_[2].get("img_orig"))):
+                          and (app.get("panel") in ("firmar", "texto") or e_[2]["tipo"] == "firma")):
                         rr_ = fitz.Rect(e_[2]["rect"])
                         qs_ = [q_ * M for q_ in (rr_.tl, rr_.tr, rr_.br, rr_.bl)]
                         cv_.create_rectangle(x + min(q.x for q in qs_) - 2, y + min(q.y for q in qs_) - 2,
@@ -9923,6 +9969,14 @@ def iniciar_interfaz():
                     m_.add_command(label=que_, command=lambda: quitar_resaltado(ruta, pag, toco[-1]),
                                    punto="#EF4444")
                     m_.add_separator()
+                if toco and toco[-1]["tipo"] in EDITABLES and not toco[-1].get("borrada"):  # v5.2
+                    m_.add_command(label="Copiar " + ("imagen" if toco[-1]["tipo"] == "firma" else "cuadro de texto"),
+                                   command=lambda it__=toco[-1]: copiar_obj(it__), acelerador="Ctrl+C")
+                if vis.get("obj_copiado"):
+                    cpos_ = (self.cv.canvasx(ev.x), self.cv.canvasy(ev.y))
+                    m_.add_command(label="Pegar aquí", command=lambda c__=cpos_: pegar_obj(self, c__),
+                                   acelerador="Ctrl+V", punto="#0EA5E9")
+                    m_.add_separator()
                 im_ = sello_en(ruta, pag, p_) if not toco else None  # v4.4: firma o sello entero
                 if im_ is None:
                     im_ = imagen_en(ruta, pag, p_, sin_fondo=True) if not toco and not es_escaneo(ruta, pag) else None
@@ -10014,13 +10068,21 @@ def iniciar_interfaz():
                 else:
                     org_deshacer()
             elif (k_ in ("Left", "Right", "Up", "Down") and not ctrl and vis.get("edit_item")
-                  and (app.get("panel") in ("texto", "firmar") or vis["edit_item"][2].get("img_orig"))):
+                  and (app.get("panel") in ("texto", "firmar") or vis["edit_item"][2]["tipo"] == "firma")):
                 d_ = 10 if ev.state & 0x1 else 1  # Shift: mas rapido
                 mover_editado(*{"Left": (-d_, 0), "Right": (d_, 0), "Up": (0, -d_), "Down": (0, d_)}[k_])
+            elif (ctrl and k_.lower() == "c" and not vis.get("ined") and vis.get("edit_item")
+                  and not vis["edit_item"][2].get("borrada") and vis["edit_item"][2]["tipo"] in EDITABLES):
+                copiar_obj(vis["edit_item"][2])  # v5.2: copiar un cuadro de texto o una imagen
+            elif (ctrl and k_.lower() == "v" and not vis.get("ined") and vis.get("obj_copiado")
+                  and vis.get("ult_copia") == "obj"):
+                pegar_obj(self)
             elif ctrl and k_.lower() == "c" and vis.get("seleccion"):
                 copiar_seleccion()
             elif ctrl and k_.lower() == "c" and vis.get("img_sel"):
                 copiar_imagenes()
+                if len(vis["img_sel"]) == 1:  # v5.2: y queda para pegarla en el PDF (Ctrl+V)
+                    copiar_obj(img=vis["img_sel"][0])
             elif k_ == "Escape" and app.get("panel") == "texto" and not vis.get("ined"):
                 if vis.get("edit_item"):
                     vis["edit_item"] = None
@@ -10028,7 +10090,7 @@ def iniciar_interfaz():
                 else:
                     cerrar_panel()  # v4.6.1: sin panel al costado, Esc deja de escribir
                     v_estado.set("Listo.")
-            elif k_ == "Escape" and vis.get("edit_item") and vis["edit_item"][2].get("img_orig"):
+            elif k_ == "Escape" and vis.get("edit_item") and vis["edit_item"][2]["tipo"] == "firma":
                 vis["edit_item"] = None
                 visor_pedir_dibujo()
             elif k_ == "Escape" and vis.get("img_sel"):
@@ -10526,6 +10588,8 @@ def iniciar_interfaz():
             p_ = pc_[1] if (pc_ and v_ and v_.t and pc_[0] == v_.t["id"]) else v_.pag
             p_ = max(0, min(p_, len(org["orden"]) - 1))
             org["sel"], org["ancla"] = {p_}, p_
+        if k_ in ("c", "x"):
+            vis["ult_copia"] = "pag"
         if k_ == "c":
             org_copiar()
         elif k_ == "x":
@@ -11751,7 +11815,7 @@ def iniciar_interfaz():
         cx_, cy_ = vista.cv.canvasx(ev.x), vista.cv.canvasy(ev.y)
         p_ = vista._pt(ev, base)
         e_ = vis.get("edit_item")
-        if e_ and e_[0] == ruta and e_[1] == pag and e_[2].get("img_orig") and not e_[2].get("borrada"):
+        if e_ and e_[0] == ruta and e_[1] == pag and e_[2]["tipo"] == "firma" and not e_[2].get("borrada"):
             q_ = fitz.Point(e_[2]["rect"][2], e_[2]["rect"][3]) * M
             if abs(q_.x + x - cx_) < 11 and abs(q_.y + y - cy_) < 11:
                 vista._ed = {"it": e_[2], "base": base, "p0": p_, "r0": tuple(e_[2]["rect"]), "modo": "tam"}
@@ -11764,7 +11828,7 @@ def iniciar_interfaz():
                              "modo": "tam"}
                 return True
         for it_ in reversed(vis["res"].get(ruta, {}).get(pag, [])):
-            if it_.get("img_orig") and not it_.get("borrada") and fitz.Rect(it_["rect"]).contains(fitz.Point(p_)):
+            if it_["tipo"] == "firma" and not it_.get("borrada") and fitz.Rect(it_["rect"]).contains(fitz.Point(p_)):
                 vis["edit_item"] = (ruta, pag, it_)
                 vis["img_sel"], vis["seleccion"] = [], None
                 vista._ed = {"it": it_, "base": base, "p0": p_, "r0": tuple(it_["rect"]), "modo": "mover"}
@@ -11772,10 +11836,63 @@ def iniciar_interfaz():
                              "· Supr la borra.")
                 visor_pedir_dibujo()
                 return True
-        if e_ and e_[2].get("img_orig"):  # clic afuera: se suelta
+        if e_ and e_[2]["tipo"] == "firma":  # clic afuera: se suelta
             vis["edit_item"] = None
             visor_pedir_dibujo()
         return False
+
+    def copiar_obj(it_=None, img=None):
+        """v5.2: copia un cuadro de texto o una imagen para pegarlo (Ctrl+V) en esta u otra hoja."""
+        try:
+            if img is not None:
+                o_ = item_de_imagen(img)
+            else:
+                o_ = copy.deepcopy(it_)
+                if o_["tipo"] == "reemplazo":  # un texto del PDF: se pega como cuadro de texto nuevo
+                    cj_ = fitz.Rect(caja_texto(it_))
+                    for k_ in ("rect_orig", "rects_borrar", "orig", "origen", "lineas", "fondo_borrar", "ocr"):
+                        o_.pop(k_, None)
+                    o_["tipo"] = "texto_n"
+                    o_["rect"] = rect_texto((cj_.x0, cj_.y0), o_["txt"], o_)
+            for k_ in ("img_orig", "borrada", "id", "ver"):
+                o_.pop(k_, None)
+        except Exception as e:
+            v_estado.set(f"No se pudo copiar: {e}")
+            return
+        vis["obj_copiado"], vis["ult_copia"], vis["n_pegado"] = o_, "obj", 0
+        v_estado.set(("Imagen copiada" if o_["tipo"] == "firma" else "Cuadro de texto copiado")
+                     + " · Ctrl+V lo pega donde esté el mouse (en esta u otra hoja).")
+
+    def pegar_obj(vista, cpos=None):
+        o_ = vis.get("obj_copiado")
+        if not o_ or not vista.lay:
+            return False
+        if cpos is None:
+            px_ = vista.cv.winfo_pointerx() - vista.cv.winfo_rootx()
+            py_ = vista.cv.winfo_pointery() - vista.cv.winfo_rooty()
+            cpos = (vista.cv.canvasx(px_), vista.cv.canvasy(py_))
+        r0 = fitz.Rect(o_["rect"])
+        base = vista._punto_pagina(*cpos)
+        if base:
+            _i, ruta, pag, M, x, y = base
+            p_ = fitz.Point(cpos[0] - x, cpos[1] - y) * ~M
+            dx, dy = p_.x - r0.x0, p_.y - r0.y0
+        else:
+            base = vista._punto_pagina(0, 0, i=vista.pag)
+            if not base:
+                return False
+            ruta, pag = base[1], base[2]
+            vis["n_pegado"] = vis.get("n_pegado", 0) + 1
+            dx = dy = 12.0 * vis["n_pegado"]
+        n_ = copy.deepcopy(o_)
+        n_["rect"] = tuple(r0 + (dx, dy, dx, dy))
+        n_["ruta"], n_["pag"] = ruta, pag
+        agregar_item(ruta, pag, n_)
+        if n_["tipo"] == "texto_n" and app.get("panel") != "texto":
+            abrir_panel("texto")
+        visor_pedir_dibujo()
+        v_estado.set("Pegado · arrastralo para acomodarlo · Ctrl+Z lo quita.")
+        return True
 
     def borrar_imagenes_sel():
         lista = [s_ for s_ in vis.get("img_sel") or [] if not s_.get("sello")]
@@ -13813,6 +13930,29 @@ def iniciar_interfaz():
             t_w.bind(f"<Control-{k_.upper()}>", lambda e, k_=k_: estilo_tecla(k_))
         t_w.bind("<Control-a>", lambda e: (t_w.tag_add("sel", "1.0", "end-1c"), cambio(), "break")[2])
         t_w.bind("<Control-s>", lambda e: (ined_terminar(True), guardar_resaltados_dialogo(), "break")[2])
+
+        def copiar_cuadro(_e=None):  # v5.2: Ctrl+C sin letras elegidas: se copia el cuadro entero (para pegarlo)
+            try:
+                if t_w.get("sel.first", "sel.last"):
+                    return None
+            except tk.TclError:
+                pass
+            txt_ = t_w.get("1.0", "end-1c")
+            if not txt_.strip():
+                return "break"
+            try:
+                runs_ = _ined_runs(ed, txt_)
+            except Exception:
+                runs_ = None
+            tmp_ = dict(it_, txt=txt_, runs=runs_)
+            if tmp_["tipo"] == "reemplazo":
+                ajustar_reemplazo(tmp_)
+            elif tmp_["tipo"] == "texto_n":
+                tmp_["rect"] = rect_texto(tmp_["rect"][:2], txt_, tmp_)
+            copiar_obj(tmp_)
+            return "break"
+        t_w.bind("<Control-c>", copiar_cuadro)
+        t_w.bind("<Control-C>", copiar_cuadro)
         t_w.bind("<Control-f>", lambda e: "break")
         t_w.bind("<MouseWheel>", lambda e: vista.cv.event_generate("<MouseWheel>", delta=e.delta, x=0, y=0))
         visor_pedir_dibujo()
@@ -13840,7 +13980,10 @@ def iniciar_interfaz():
                 pass
         try:
             ed["vista"].cv.delete("ined")
+            tenia_foco = raiz.focus_get() is t_w
             t_w.destroy()
+            if tenia_foco:  # v5.2: el teclado vuelve a la hoja (Ctrl+V, Supr, flechas)
+                ed["vista"].cv.focus_set()
         except Exception:
             pass
         it_ = ed["it"]
@@ -14362,8 +14505,15 @@ def iniciar_interfaz():
         if ruta is None or pag is None or item.get("ocr"):
             return None
         r_ = fitz.Rect(item["rect"])
-        k_ = (ruta, pag, ver_arch(ruta), tuple(tuple(round(v_, 2) for v_ in q_) for q_ in _rects_quitar(item)),
-              tuple(round(v_, 2) for v_ in r_), round(z, 4))
+        # v5.2: tambien sin las letras de los OTROS textos ya cambiados o borrados de la hoja que caen en esta zona
+        # (antes, al tomar el renglon de abajo de uno borrado, volvia a aparecer lo borrado)
+        otros = [o_ for o_ in vis["res"].get(ruta, {}).get(pag, []) if o_.get("tipo") == "reemplazo"
+                 and not o_.get("ocr") and any(q_.intersects(r_) for q_ in _rects_quitar(o_))]
+        imgs_ = [o_ for o_ in vis["res"].get(ruta, {}).get(pag, []) if o_.get("img_orig")
+                 and fitz.Rect(o_["img_orig"]["bbox"]).intersects(r_)]
+        k_ = (ruta, pag, ver_arch(ruta), tuple(tuple(round(v_, 2) for v_ in q_) for o_ in [item] + otros
+                                               for q_ in _rects_quitar(o_)),
+              tuple(tuple(o_["img_orig"]["bbox"]) for o_ in imgs_), tuple(round(v_, 2) for v_ in r_), round(z, 4))
         if k_ in cache_fondo:
             return cache_fondo[k_]
         img = None
@@ -14372,7 +14522,11 @@ def iniciar_interfaz():
                 d2 = fitz.open()
                 d2.insert_pdf(d_, from_page=pag, to_page=pag)
                 p2 = d2[0]
+                for o_ in imgs_:
+                    quitar_imagen_pg(p2, o_["img_orig"])
                 quitar_letras(p2, item)
+                for o_ in otros:
+                    quitar_letras(p2, o_)
                 p2.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=fitz.PDF_REDACT_LINE_ART_NONE,
                                     text=fitz.PDF_REDACT_TEXT_REMOVE)
                 pix = p2.get_pixmap(matrix=fitz.Matrix(z, z), clip=r_, alpha=False, annots=False)

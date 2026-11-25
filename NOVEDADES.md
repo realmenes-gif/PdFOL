@@ -1,3 +1,11 @@
+## PdFOL v5.2.1 · by Meneses999
+
+- **Copiar y pegar** cuadros de texto e imágenes: Ctrl+C / Ctrl+V (se pega donde esté el mouse, en esta u otra hoja).
+- Arreglado: al tomar un texto debajo de otro ya cambiado, volvía a aparecer lo borrado.
+- Arreglado: faltaban letras al cambiar un texto con la letra del PDF.
+
+**Descarga:** `PdFOL_v5.2.1_portable.zip` (sin instalar) o `PdFOL_v5.2.1_instalador.exe`.
+
 ## PdFOL v5.2 · by Meneses999
 
 - **Imágenes del PDF como objetos**: clic para elegirla, arrastrar para moverla, el punto de la esquina la agranda o achica, **Supr** la borra.
