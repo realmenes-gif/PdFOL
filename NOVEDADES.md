@@ -1,3 +1,10 @@
+## PdFOL v5.4.2 · by Meneses999
+
+- **«Cancelar» en todos los procesos**: convertir (Word, Excel, imagen), extraer páginas, guardar páginas organizadas e imprimir muestran arriba el avance con su «Cancelar», en cualquier pantalla.
+- Mientras se procesa, la tarjeta «Proceso» con «Cancelar» queda siempre a la vista.
+
+**Descarga:** `PdFOL_v5.4.2_portable.zip` (sin instalar) o `PdFOL_v5.4.2_instalador.exe`.
+
 ## PdFOL v5.4.1 · by Meneses999
 
 - Arreglado: **faltaban letras** (o salían otras) al abrir algunos cuadros de texto. Se usa la copia correcta de cada fuente del PDF.

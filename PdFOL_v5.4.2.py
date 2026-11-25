@@ -363,12 +363,18 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.4.1"
-VERSION_INTERNA = "5.4.1"
+VERSION = "v5.4.2"
+VERSION_INTERNA = "5.4.2"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.4.2", [
+        "«Cancelar» en todos los procesos: convertir a Word/Excel/imagen, extraer páginas, guardar páginas "
+        "organizadas e imprimir muestran arriba una franja con el avance y su «Cancelar», en cualquier pantalla.",
+        "Mientras se procesa (Aplanar, Foliar, Comprimir), la tarjeta «Proceso» con «Cancelar» queda siempre "
+        "a la vista aunque se cierre el panel.",
+    ]),
     ("v5.4.1", [
         "Arreglado: al abrir algunos cuadros de texto faltaban letras o salían otras. Un PDF puede traer varias "
         "copias recortadas de la misma letra (cada una con otras letras adentro): ahora se usa la copia correcta "
@@ -7554,6 +7560,27 @@ def iniciar_interfaz():
             v_estado.set(f"{len(s)} página(s) copiadas: elegí dónde y presioná «Pegar».")
 
     conv_ = {"p": None}
+    proc_vis = {"activo": False}
+
+    def proceso_mostrar(texto, al_cancelar):
+        """v5.4.2: todo trabajo largo se ve arriba con su «Cancelar», en cualquier pantalla."""
+        proc_vis["activo"] = True
+
+        def cancelar_():
+            try:
+                al_cancelar()
+            finally:
+                v_franja.set("Cancelando…")
+        franja_mostrar(texto, [("Cancelar", cancelar_, False)])
+
+    def proceso_texto(texto):
+        if proc_vis["activo"]:
+            v_franja.set(texto)
+
+    def proceso_fin():
+        if proc_vis["activo"]:
+            proc_vis["activo"] = False
+            franja_ocultar()
 
     def convertir_documento(tipo):
         """v4.7: el PDF activo a Word (.docx) o a Excel (.xlsx), en un proceso aparte. Al terminar se abre."""
@@ -7583,8 +7610,27 @@ def iniciar_interfaz():
         except Exception:
             pass
         inicio_ = time.time()
+        cancel_ = {"si": False}
+
+        def cancelar_conv():
+            cancel_["si"] = True
+            try:
+                pr_.terminate()
+            except Exception:
+                pass
+        proceso_mostrar(f"Convirtiendo «{os.path.basename(ruta_)}» a {nom_}…", cancelar_conv)
 
         def esperar(n_=0):
+            if cancel_["si"]:
+                proceso_fin()
+                try:
+                    pr_.join(timeout=2)
+                    if os.path.isfile(dest):
+                        os.remove(dest)
+                except Exception:
+                    pass
+                v_estado.set(f"Conversión a {nom_} cancelada.")
+                return
             try:
                 r_ = cola_.get_nowait()
             except Exception:
@@ -7593,9 +7639,12 @@ def iniciar_interfaz():
                 if not pr_.is_alive():
                     r_ = ("error", "el proceso terminó sin avisar")
                 else:
-                    v_estado.set(f"Convirtiendo a {nom_}" + "." * (1 + n_ % 3) + f"  ({int(time.time() - inicio_)} s)")
+                    t_s = f"Convirtiendo a {nom_}" + "." * (1 + n_ % 3) + f"  ({int(time.time() - inicio_)} s)"
+                    v_estado.set(t_s)
+                    proceso_texto(t_s)
                     raiz.after(300, lambda: esperar(n_ + 1))
                     return
+            proceso_fin()
             if r_[0] == "error":
                 v_estado.set(f"No se pudo convertir a {nom_}: {r_[1]}")
                 return
@@ -7944,18 +7993,25 @@ def iniciar_interfaz():
             w.destroy()
             base_ = os.path.splitext(os.path.basename(ruta_))[0]
             est_ = {"n": 0, "tot": len(pags_), "res": None, "error": None}
+            ev_ = threading.Event()
 
             def trabajo():
                 try:
                     est_["res"] = paginas_a_imagenes(ruta_, pags_, carpeta_, base_, fmt_, dpi_, cal_,
-                                                     avance=lambda a__, b__: est_.update(n=a__))
+                                                     avance=lambda a__, b__: est_.update(n=a__), cancelar=ev_)
                 except Exception as e__:
                     est_["error"] = str(e__)
+            proceso_mostrar(f"Convirtiendo a {fmt_}…", ev_.set)
 
             def esperar():
                 if th_.is_alive():
                     v_estado.set(f"Convirtiendo a {fmt_}… {est_['n']} de {est_['tot']}")
+                    proceso_texto(f"Convirtiendo a {fmt_}… {est_['n']} de {est_['tot']}")
                     raiz.after(150, esperar)
+                    return
+                proceso_fin()
+                if ev_.is_set():
+                    v_estado.set(f"Cancelado: quedaron {len(est_['res'] or [])} imagen(es) en «{carpeta_}».")
                     return
                 if est_["error"]:
                     v_estado.set("No se pudo convertir a imagen: " + est_["error"])
@@ -7996,17 +8052,28 @@ def iniciar_interfaz():
             return
         v_estado.set(f"Extrayendo {len(s)} página(s)…")
         res_ = {}
+        ev_ = threading.Event()
 
         def trabajo():
             try:
-                armar_organizado(orden_, fuentes_, dest)
+                armar_organizado(orden_, fuentes_, dest, cancelar=ev_)
                 res_["ok"] = True
             except Exception as e__:
                 res_["error"] = str(e__)
+        proceso_mostrar(f"Extrayendo {len(s)} página(s)…", ev_.set)
 
         def esperar():
             if th_.is_alive():
                 raiz.after(80, esperar)
+                return
+            proceso_fin()
+            if ev_.is_set():
+                try:
+                    if os.path.isfile(dest):
+                        os.remove(dest)
+                except Exception:
+                    pass
+                v_estado.set("Extracción cancelada.")
                 return
             if res_.get("error"):
                 v_estado.set("No se pudieron extraer las páginas: " + res_["error"])
@@ -11630,7 +11697,8 @@ def iniciar_interfaz():
         en_visor = app["pagina"] == "visor"
         t_ = pest_activa()
         v_doc_nom.set(t_["nombre"] if t_ else "Ningún documento abierto")
-        con_proceso = (not en_visor) or app.get("panel") in ("aplanar", "foliar", "comprimir")
+        con_proceso = ((not en_visor) or app.get("panel") in ("aplanar", "foliar", "comprimir")
+                       or app.get("ocupado"))  # v5.4.2: trabajando, siempre a la vista (con su «Cancelar»)
         if app["pagina"] == "organizar":
             caja_opc_org.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 4))
             pintar_chips_org()
@@ -12927,11 +12995,32 @@ def iniciar_interfaz():
         return "break"
 
     def _armar_esperando(orden_, fuentes_, dest):
+        """-> True (listo), False (error) o None (cancelado)."""
         pr = mp.Process(target=armar_organizado, args=(orden_, fuentes_, dest), daemon=True)
         pr.start()
-        while pr.is_alive():  # la ventana sigue respondiendo mientras se arma
-            raiz.update()
-            time.sleep(0.05)
+        cancel_ = {"si": False}
+
+        def cancelar_():
+            cancel_["si"] = True
+            try:
+                pr.terminate()
+            except Exception:
+                pass
+        proceso_mostrar(f"Guardando «{os.path.basename(dest).replace('.pdfol_tmp', '')}»…", cancelar_)
+        try:
+            while pr.is_alive():  # la ventana sigue respondiendo mientras se arma
+                raiz.update()
+                time.sleep(0.05)
+        finally:
+            proceso_fin()
+        if cancel_["si"]:
+            try:
+                if os.path.isfile(dest):
+                    os.remove(dest)
+            except Exception:
+                pass
+            v_estado.set("Guardado cancelado (el PDF quedó como estaba).")
+            return None
         return pr.exitcode == 0 and os.path.isfile(dest)
 
     def recordar_lugar():
@@ -12981,10 +13070,11 @@ def iniciar_interfaz():
                 messagebox.showerror(NOMBRE, "Para reemplazar el mismo PDF usá «En este PDF».")
                 return
             v_estado.set(f"Guardando {os.path.basename(dest)}…")
-            if _armar_esperando(list(o_["orden"]), list(o_["fuentes"]), dest):
+            r_a = _armar_esperando(list(o_["orden"]), list(o_["fuentes"]), dest)
+            if r_a:
                 v_estado.set(f"Copia guardada: {os.path.basename(dest)}")
                 v_detalle.set(dest)
-            else:
+            elif r_a is not None:
                 messagebox.showerror(NOMBRE, f"No se pudo guardar:\n{dest}")
             return
         lugar_ = recordar_lugar()  # v5.3.1: al guardar no se mueve de pagina
@@ -12997,8 +13087,10 @@ def iniciar_interfaz():
         orden_, fuentes_ = list(o_["orden"]), list(o_["fuentes"])
         tmp = ruta + ".pdfol_tmp"
         v_estado.set(f"Guardando {t_['nombre']}…")
-        if not _armar_esperando(orden_, fuentes_, tmp):
-            messagebox.showerror(NOMBRE, f"No se pudo guardar:\n{ruta}")
+        r_a = _armar_esperando(orden_, fuentes_, tmp)
+        if not r_a:
+            if r_a is not None:
+                messagebox.showerror(NOMBRE, f"No se pudo guardar:\n{ruta}")
             return
         # otras pestanas (o lo copiado) que usan paginas de este PDF siguen viendo las de antes
         usa_ = [x for x in pest if x is not t_ and ruta in (org_de(x).get("fuentes") or [])]
@@ -16199,6 +16291,7 @@ def iniciar_interfaz():
             pr.start()
             imp["proc"] = pr
             b_cancelar.configure(state="normal")
+            proceso_mostrar(f"Imprimiendo «{t_['nombre']}»…", lambda: imp["cancelar"].set())
             v_estado.set(f"Imprimiendo «{t_['nombre']}» en {params['impresora']}…")
             barra.set(0)
             raiz.after(200, mirar_impresion)
@@ -16544,6 +16637,7 @@ def iniciar_interfaz():
                 if tipo == "imp_prog":
                     barra.set(v_[0] / max(1, v_[1]))
                     v_detalle.set(f"Hoja {v_[0]} de {v_[1]}")
+                    proceso_texto(f"Imprimiendo… hoja {v_[0]} de {v_[1]}")
                 elif tipo == "imp_fin":
                     v_estado.set(f"Impresión enviada: {v_} hoja(s).")
                     barra.set(1)
@@ -16561,6 +16655,7 @@ def iniciar_interfaz():
             fin = True
         if fin:
             imp["proc"] = None
+            proceso_fin()
             msg_ = v_estado.get()
             refrescar()
             v_estado.set(msg_)
@@ -16891,6 +16986,10 @@ def iniciar_interfaz():
     def ocupar(si):
         app["ocupado"] = si
         refrescar()
+        try:
+            columna_izquierda()  # v5.4.2: la tarjeta «Proceso» (con «Cancelar») a la vista mientras trabaja
+        except Exception:
+            pass
 
     def nuevo_archivo(r_):
         """En la v2.0 cada PDF va en su pestana (v2.4: siempre se ve primero en el visor)."""
