@@ -1,3 +1,9 @@
+## PdFOL v5.0.2 · by Meneses999
+
+- La cinta usa el **azul del programa** (ARCHIVO, la pestaña elegida y los avisos) en lugar del naranja; también el recuadro y el botón «Listo» al escribir texto.
+
+**Descarga:** `PdFOL_v5.0.2_portable.zip` (sin instalar) o `PdFOL_v5.0.2_instalador.exe`.
+
 ## PdFOL v5.0.1 · by Meneses999
 
 - **Quitar marcas** (cinta INICIO → Marcas, y clic derecho): quitar las de un color (aparecen solo los colores que hay, con cuántas) o todas.

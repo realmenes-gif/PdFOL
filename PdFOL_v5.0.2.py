@@ -363,12 +363,16 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.0.1"
-VERSION_INTERNA = "5.0.1"
+VERSION = "v5.0.2"
+VERSION_INTERNA = "5.0.2"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.0.2", [
+        "La cinta usa el azul del programa (ARCHIVO, la pestaña elegida y los avisos) en lugar del naranja; también "
+        "el recuadro y el botón «Listo» al escribir texto.",
+    ]),
     ("v5.0.1", [
         "«Quitar marcas» (cinta INICIO → Marcas y clic derecho): quitar las de un color (solo aparecen los colores "
         "que hay, con cuántas) o todas.",
@@ -5303,7 +5307,7 @@ def iniciar_interfaz():
     COLOR_CINTA = {"abrir": "#E8890C", "guardar": "#2563EB", "guardar_como": "#2563EB", "imprimir": "#475569",
                    "buscar": "#475569", "mano": "#475569", "seleccionar": "#475569", "resaltar": "#EAB308",
                    "area": "#EAB308", "libre": "#EAB308", "cambiar": "#0284C7", "agregar": "#0284C7",
-                   "firmar": "#7C3AED", "organizar_g": "#06B6D4", "extraer": "#E8590C", "unir": "#0891B2",
+                   "firmar": "#7C3AED", "organizar_g": "#06B6D4", "extraer": "#2563EB", "unir": "#0891B2",
                    "girar_izq": "#475569", "girar_der": "#475569", "eliminar": "#DC2626", "comparar": "#0D9488",
                    "aplanar": "#8B5CF6", "foliar": "#F59E0B", "comprimir": "#10B981", "word": "#2B579A",
                    "excel": "#217346", "imagen_g": "#D97706", "marcar_g": "#EF4444", "pagina": "#3B82F6", "perfil": "#EC4899", "apariencia": "#64748B",
@@ -5469,7 +5473,7 @@ def iniciar_interfaz():
         return []
 
     def menu_archivo():
-        """La pestaña ARCHIVO (naranja, como Nitro): un menu con lo del archivo."""
+        """La pestaña ARCHIVO (con el azul del programa): un menu con lo del archivo."""
         m_ = menu_contextual()
         m_.add_titulo(f"{NOMBRE} {VERSION}")
         m_.add_command(label="Inicio (recientes)", command=lambda: ir_top("inicio"))
@@ -5529,7 +5533,7 @@ def iniciar_interfaz():
         cinta.create_image(px(17), h_t / 2 + 1, image=logo_tk_c, tags=("item", "b:logo"))
         cinta.create_rectangle(px(3), px(2), px(31), h_t - 1, outline="", fill="", tags=("item", "b:logo"))
         if app.get("hay_nueva"):
-            cinta.create_oval(px(24), px(3), px(32), px(11), fill="#F97316", outline=col("tarjeta"), width=2)
+            cinta.create_oval(px(24), px(3), px(32), px(11), fill=col("acento"), outline=col("tarjeta"), width=2)
         app["cinta_acc"]["logo"] = menu_husky
         app["cinta_ayuda"]["logo"] = f"{NOMBRE} {VERSION}: actualizaciones, novedades y ayuda"
         x = px(38)
@@ -5537,7 +5541,7 @@ def iniciar_interfaz():
         for tab_ in CINTA_TABS:
             ancho_ = f_tabm.measure(tab_) + px(22)
             if tab_ == "ARCHIVO":
-                cinta.create_rectangle(x, px(3), x + ancho_, h_t, fill="#E8590C", outline="", tags=("item", "b:tab:" + tab_))
+                cinta.create_rectangle(x, px(3), x + ancho_, h_t, fill=col("acento"), outline="", tags=("item", "b:tab:" + tab_))
                 cinta.create_text(x + ancho_ / 2, h_t / 2 + px(1), text=tab_, fill="#FFFFFF", font=f_tab,
                                   tags=("item", "b:tab:" + tab_))
                 app["cinta_acc"]["tab:" + tab_] = menu_archivo
@@ -5546,9 +5550,9 @@ def iniciar_interfaz():
                 if elegida:
                     cinta.create_rectangle(x, px(3), x + ancho_, h_t + 1, fill=col("tarjeta"), outline=col("borde"))
                     cinta.create_line(x + 1, h_t, x + ancho_, h_t, fill=col("tarjeta"))
-                    cinta.create_line(x, px(3), x + ancho_, px(3), fill="#E8590C", width=2)
+                    cinta.create_line(x, px(3), x + ancho_, px(3), fill=col("acento"), width=2)
                 cinta.create_text(x + ancho_ / 2, h_t / 2 + px(1), text=tab_,
-                                  fill="#E8590C" if elegida else col("texto"), font=f_tab,
+                                  fill=col("acento") if elegida else col("texto"), font=f_tab,
                                   tags=("item", "b:tab:" + tab_))
                 cinta.create_rectangle(x, px(3), x + ancho_, h_t, outline="", fill="", tags=("item", "b:tab:" + tab_))
                 app["cinta_acc"]["tab:" + tab_] = (lambda t__=tab_: elegir_tab(t__))
@@ -5625,7 +5629,7 @@ def iniciar_interfaz():
                     cinta.create_rectangle(x + 1, y0, x + ancho_ - 1, y1, outline="", fill="", tags=("item", "b:" + id_))
                     if id_ == "guardar" and n_resaltes():
                         cinta.create_oval(x + ancho_ / 2 + px(9), y0 + px(3), x + ancho_ / 2 + px(17), y0 + px(11),
-                                          fill="#F97316", outline="")
+                                          fill=col("acento"), outline="")
                     app["cinta_acc"][id_], app["cinta_ayuda"][id_] = acc_, ay_
                     if id_ == "marcar":
                         app["_x_marcar"] = x
@@ -13332,7 +13336,7 @@ def iniciar_interfaz():
         # v4.1.1: boton «Listo» debajo del recuadro (tambien: clic afuera o Ctrl+Enter)
         bw_, bh_ = px(64), px(24)
         bx_, by_ = X + W + 3 - bw_, Y + H + px(10)
-        cv_.create_rectangle(bx_, by_, bx_ + bw_, by_ + bh_, fill=NARANJA_W, outline="", tags=("ined", "ined_listo"))
+        cv_.create_rectangle(bx_, by_, bx_ + bw_, by_ + bh_, fill=col("acento"), outline="", tags=("ined", "ined_listo"))
         cv_.create_text(bx_ + bw_ / 2, by_ + bh_ / 2, text="✓ Listo", fill="#FFFFFF", font=(FAM, 9, "bold"),
                         tags=("ined", "ined_listo"))
         ed["listo"] = (bx_, by_, bx_ + bw_, by_ + bh_)
@@ -13345,11 +13349,11 @@ def iniciar_interfaz():
 
     def dibujar_marco_word(cv_, x0, y0, x1, y1, tag):
         """Recuadro punteado con 8 tiradores (como Word)."""
-        cv_.create_rectangle(x0, y0, x1, y1, outline=NARANJA_W, width=1, dash=(4, 3), tags=tag)
+        cv_.create_rectangle(x0, y0, x1, y1, outline=col("acento"), width=1, dash=(4, 3), tags=tag)
         t_ = px(4)
         xm, ym = (x0 + x1) / 2, (y0 + y1) / 2
         for hx, hy in ((x0, y0), (xm, y0), (x1, y0), (x0, ym), (x1, ym), (x0, y1), (xm, y1), (x1, y1)):
-            cv_.create_rectangle(hx - t_, hy - t_, hx + t_, hy + t_, fill="#FFFFFF", outline=NARANJA_W, width=1.5,
+            cv_.create_rectangle(hx - t_, hy - t_, hx + t_, hy + t_, fill="#FFFFFF", outline=col("acento"), width=1.5,
                                  tags=tag)
 
     def tirador_en(caja, cx_, cy_):
