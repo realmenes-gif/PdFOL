@@ -1,3 +1,9 @@
+## PdFOL v5.3.1 · by Meneses999
+
+- Borrar o mover una imagen ya **no deja un hueco blanco**: se saca solo esa imagen y el fondo queda como el resto (como Nitro).
+
+**Descarga:** `PdFOL_v5.3.1_portable.zip` (sin instalar) o `PdFOL_v5.3.1_instalador.exe`.
+
 ## PdFOL v5.3 · by Meneses999
 
 - **Nuevo motor de edición de texto (como Nitro)**: se cambian solo las letras del texto dentro del PDF; lo demás queda exactamente igual.

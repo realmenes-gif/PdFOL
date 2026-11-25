@@ -363,12 +363,16 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.3"
-VERSION_INTERNA = "5.3"
+VERSION = "v5.3.1"
+VERSION_INTERNA = "5.3.1"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.3.1", [
+        "Borrar o mover una imagen ya no deja un hueco blanco: como Nitro, se saca solo esa imagen y el fondo "
+        "de abajo queda como el resto.",
+    ]),
     ("v5.3", [
         "Nuevo motor de edición de texto (como Nitro): al cambiar o borrar un texto se sacan del contenido del PDF "
         "SOLO sus letras; todo lo demás queda exactamente igual (sin tapar ni recortar zonas).",
@@ -4834,6 +4838,62 @@ def quitar_glifos(doc, pg, rects):
     except Exception:
         return None
     return quitadas
+
+
+def quitar_imagen_contenido(doc, pg, bbox):
+    """v5.3.1: como Nitro: saca del contenido de la hoja SOLO el dibujo de esa imagen (su «Do» o la imagen metida
+    en el contenido). Lo que estaba debajo (el fondo, otra imagen) queda tal cual: no queda un hueco blanco.
+    bbox: coordenadas de la hoja sin girar. -> True si la saco."""
+    import pikepdf
+    try:
+        objetivo = fitz.Rect(bbox)
+        nombres = {im_[7] for im_ in pg.get_images(full=True) if im_[9] in (0, None)}
+        pdf_ = pikepdf.new()
+        ops = pikepdf.parse_content_stream(pikepdf.Stream(pdf_, pg.read_contents()))
+    except Exception:
+        return False
+    a_fitz = pg.transformation_matrix
+    ctm, pila, salida, hecho = fitz.Matrix(fitz.Identity), [], [], False
+    tol = max(1.0, min(objetivo.width, objetivo.height) * 0.03)
+
+    def es_ella(m_):
+        r_ = fitz.Rect(fitz.Point(0, 0) * m_, fitz.Point(1, 1) * m_)
+        for p_ in (fitz.Point(1, 0) * m_, fitz.Point(0, 1) * m_):
+            r_ |= p_
+        r_ = r_ * a_fitz
+        return all(abs(a_ - b_) <= tol for a_, b_ in zip(r_, objetivo))
+    try:
+        for ins in ops:
+            if not hasattr(ins, "operator"):  # imagen metida en el contenido (BI ... EI)
+                if not hecho and es_ella(ctm):
+                    hecho = True
+                    continue
+                salida.append(ins)
+                continue
+            op_, args = str(ins.operator), list(ins.operands)
+            if op_ == "q":
+                pila.append(fitz.Matrix(ctm))
+            elif op_ == "Q":
+                if pila:
+                    ctm = pila.pop()
+            elif op_ == "cm" and len(args) == 6:
+                ctm = fitz.Matrix(*[float(v_) for v_ in args]) * ctm
+            elif op_ == "Do" and not hecho and args and str(args[0]).lstrip("/") in nombres and es_ella(ctm):
+                hecho = True
+                continue
+            salida.append(ins)
+    except Exception:
+        return False
+    if not hecho:
+        return False
+    try:
+        xr_ = doc.get_new_xref()
+        doc.update_object(xr_, "<<>>")
+        doc.update_stream(xr_, pikepdf.unparse_content_stream(salida), compress=True)
+        pg.set_contents(xr_)
+    except Exception:
+        return False
+    return True
 
 
 def _fuente_original_en_hoja(pg, e_):
@@ -12054,6 +12114,8 @@ def iniciar_interfaz():
         """Saca de la hoja (solo de esta) la imagen que estaba en io_['bbox'] (coordenadas como se ve)."""
         rm = pg.rotation_matrix
         ob = fitz.Rect(io_["bbox"])
+        if quitar_imagen_contenido(pg.parent, pg, ob * pg.derotation_matrix):
+            return  # v5.3.1: como Nitro: el fondo de abajo queda (sin hueco blanco)
         m_ = min(1.0, ob.width * 0.1, ob.height * 0.1)
         adentro = ob + (m_, m_, -m_, -m_)
         otras = False
