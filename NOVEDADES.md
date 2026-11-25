@@ -1,3 +1,9 @@
+## PdFOL v4.9.2 · by Meneses999
+
+- En **Inicio** y en **Todas las herramientas** ya no quedan las miniaturas del PDF abierto al costado.
+
+**Descarga:** `PdFOL_v4.9.2_portable.zip` (sin instalar) o `PdFOL_v4.9.2_instalador.exe`.
+
 ## PdFOL v4.9.1 · by Meneses999
 
 - **Más espacio para la hoja**: el husky y Buscar van en la misma fila que las pestañas de la cinta (sin la barra de arriba); el nombre del documento va en el título de la ventana.

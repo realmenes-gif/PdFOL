@@ -363,12 +363,15 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.9.1"
-VERSION_INTERNA = "4.9.1"
+VERSION = "v4.9.2"
+VERSION_INTERNA = "4.9.2"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.9.2", [
+        "En Inicio y en «Todas las herramientas» ya no quedan las miniaturas del PDF abierto al costado.",
+    ]),
     ("v4.9.1", [
         "Más espacio para la hoja: el husky y Buscar van en la fila de las pestañas de la cinta (sin la barra de "
         "arriba); el nombre del documento va en el título de la ventana.",
@@ -8283,6 +8286,9 @@ def iniciar_interfaz():
     def mostrar_inicio():
         """v3.2: «Inicio» (o sin documento) y «Herramientas» se ven sobre la hoja, como en Adobe."""
         en_visor = app["pagina"] == "visor" and not vis["comp"]
+        if app.get("_top_col") != (app["vista_top"], bool(pest), app["pagina"]):
+            app["_top_col"] = (app["vista_top"], bool(pest), app["pagina"])
+            raiz.after_idle(columna_izquierda)  # v4.9.2: sin miniaturas en Inicio
         ver_ini = en_visor and (app["vista_top"] == "inicio" or (not pest and app["vista_top"] != "herr"))
         ver_herr = en_visor and app["vista_top"] == "herr"
         if ver_ini:
@@ -10558,14 +10564,16 @@ def iniciar_interfaz():
             inferior.grid(row=2, column=0, sticky="sew", pady=(8, 0))
         else:
             inferior.grid_remove()
-        if en_visor:
+        # v4.9.2: en Inicio y en «Todas las herramientas» no van las miniaturas (aunque haya un PDF abierto)
+        tapado = en_visor and (not pest or app.get("vista_top") in ("inicio", "herr"))
+        if en_visor and not tapado:
             riel.grid()
         else:
             riel.grid_remove()
         lado = app.get("lado_izq", "minis")
         visibles = almacen.datos.get("miniaturas") is not False
-        if en_visor and not pest:
-            col_izq.grid_remove()  # en el inicio sin documento, la columna no hace falta
+        if tapado:
+            col_izq.grid_remove()  # en el inicio, la columna no hace falta
         else:
             col_izq.grid()
         if en_visor and visibles and lado == "marcadores":
