@@ -363,12 +363,22 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.6.1"
-VERSION_INTERNA = "4.6.1"
+VERSION = "v4.7"
+VERSION_INTERNA = "4.7"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.7", [
+        "Cinta nueva con pestañas (como Nitro): Archivo, Inicio, Editar, Revisar, Documento, Convertir y Ayuda, con "
+        "botones grandes y su nombre. Doble clic en una pestaña la achica.",
+        "Extraer páginas: elegí páginas en las miniaturas o en Organizar, clic derecho «Extraer» (o Ctrl+E) y se "
+        "crea un PDF nuevo solo con ellas.",
+        "Convertir a Word y a Excel (las tablas, con las cifras como números).",
+        "Sombrear más simple: elegís el texto y aparecen los colores ahí mismo; clic en un sombreado para cambiarle "
+        "el color o quitarlo.",
+        "Con zoom, al pasar de una hoja horizontal a una vertical (o al revés) la hoja nueva queda a la vista.",
+    ]),
     ("v4.6.1", [
         "Cambiar texto: el párrafo se arma con los renglones de la hoja (como Acrobat): con interlineado amplio "
         "ya no se cambia un solo renglón ni se pierde el interlineado, la sangría o la alineación.",
@@ -1741,6 +1751,142 @@ def leer_listas(ruta):
 
 
 # ---- organizar: trabajo pesado en un PROCESO aparte (la ventana nunca se congela)
+# ---- v4.7: convertir a Word y a Excel (en un proceso aparte: la ventana no se congela)
+def convertir_a_word(origen, destino, avance=None):
+    """PDF -> .docx (Word) con pdf2docx: parrafos, tablas, imagenes y formato."""
+    import logging
+    logging.disable(logging.CRITICAL)  # pdf2docx anota todo en la consola
+    from pdf2docx import Converter
+    tmp = destino + ".tmp.docx"
+    cv_ = Converter(origen)
+    try:
+        cv_.convert(tmp, multi_processing=False)
+    finally:
+        cv_.close()
+    os.replace(tmp, destino)
+
+
+def _numero_celda(t_):
+    """'1,234.50' -> 1234.5 (las cifras quedan como numeros en Excel); lo demas queda como texto."""
+    import re
+    s_ = (t_ or "").strip().replace(" ", " ")
+    if not s_:
+        return None
+    neg = s_.startswith("(") and s_.endswith(")")
+    s2 = s_.strip("()").replace("L.", "").replace("$", "").replace("L ", "").strip()
+    if re.fullmatch(r"-?\d{1,3}(,\d{3})*(\.\d+)?|-?\d+(\.\d+)?", s2) and not re.fullmatch(r"0\d+", s2):
+        try:
+            v_ = float(s2.replace(",", ""))
+            v_ = -v_ if neg else v_
+            dec = len(s2.split(".")[1]) if "." in s2 else 0
+            fmt = ("#,##0" if "," in s2 else "0") + ("." + "0" * dec if dec else "")
+            return _NumeroExcel(int(v_) if v_.is_integer() and not dec else v_, fmt)
+        except ValueError:
+            pass
+    return s_
+
+
+class _NumeroExcel(float):
+    """Una cifra con el formato con que venia (1,250.00 sigue viendose asi en Excel)."""
+    def __new__(cls, v_, fmt):
+        o_ = float.__new__(cls, v_)
+        o_.fmt, o_.v = fmt, v_
+        return o_
+
+
+def _poner_celda(ws, fila, col, valor):
+    if isinstance(valor, _NumeroExcel):
+        c_ = ws.cell(row=fila, column=col, value=valor.v)
+        c_.number_format = valor.fmt
+        return c_
+    return ws.cell(row=fila, column=col, value=valor)
+
+
+def convertir_a_excel(origen, destino, avance=None):
+    """PDF -> .xlsx: las tablas de cada pagina (con sus cifras como numeros). Si una pagina no tiene tablas, su
+    texto va renglon por renglon, separado en columnas donde hay espacios grandes."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+    d_ = fitz.open(origen)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "PDF"
+    fila = 1
+    negrita = Font(bold=True)
+    fondo_t = PatternFill("solid", fgColor="DCE6F1")
+    fino = Side(style="thin", color="A6A6A6")
+    borde = Border(left=fino, right=fino, top=fino, bottom=fino)
+    anchos = {}
+    hojas_tablas = 0
+    for n_, pg in enumerate(d_):
+        if avance:
+            avance(n_, len(d_))
+        try:
+            tablas = list(pg.find_tables().tables)
+        except Exception:
+            tablas = []
+        ws.cell(row=fila, column=1, value=f"Página {n_ + 1}").font = Font(bold=True, size=12, color="1F4E79")
+        fila += 1
+        if tablas:
+            for t_ in tablas:
+                # el texto de cada celda por su recuadro (extract() a veces desordena puntos y espacios)
+                datos = [[" ".join(pg.get_text("text", clip=fitz.Rect(c__)).split()) if c__ else ""
+                          for c__ in r__.cells] for r__ in t_.rows]
+                for k_, reng in enumerate(datos):
+                    for c_, v_ in enumerate(reng):
+                        txt_ = (v_ or "").replace("\n", " ").strip()
+                        cel = _poner_celda(ws, fila, c_ + 1, _numero_celda(txt_) if k_ else (txt_ or None))
+                        cel.border = borde
+                        if k_ == 0:
+                            cel.font, cel.fill = negrita, fondo_t
+                            cel.alignment = Alignment(wrap_text=True, vertical="center")
+                        anchos[c_ + 1] = max(anchos.get(c_ + 1, 8), min(60, len(txt_) + 2))
+                    fila += 1
+                fila += 1
+                hojas_tablas += 1
+        else:  # sin tablas: el texto, con columnas donde hay espacios grandes
+            for b_ in pg.get_text("dict")["blocks"]:
+                for l_ in b_.get("lines", []):
+                    celdas, ult_x = [], None
+                    for sp in l_["spans"]:
+                        if not sp["text"].strip():
+                            continue
+                        if ult_x is not None and sp["bbox"][0] - ult_x > sp["size"] * 1.5:
+                            celdas.append(sp["text"].strip())
+                        elif celdas:
+                            celdas[-1] += sp["text"]
+                        else:
+                            celdas.append(sp["text"].strip())
+                        ult_x = sp["bbox"][2]
+                    for c_, txt_ in enumerate(celdas):
+                        _poner_celda(ws, fila, c_ + 1, _numero_celda(txt_.strip()))
+                        anchos[c_ + 1] = max(anchos.get(c_ + 1, 8), min(60, len(txt_) + 2))
+                    if celdas:
+                        fila += 1
+        fila += 1
+    for c_, w_ in anchos.items():
+        ws.column_dimensions[get_column_letter(c_)].width = w_
+    d_.close()
+    tmp = destino + ".tmp.xlsx"
+    wb.save(tmp)
+    os.replace(tmp, destino)
+    return hojas_tablas
+
+
+def _proceso_convertir(tipo, origen, destino, cola):
+    """Proceso aparte: convierte y avisa por la cola ('ok', n) o ('error', texto)."""
+    try:
+        if tipo == "word":
+            convertir_a_word(origen, destino)
+            cola.put(("ok", 0))
+        else:
+            cola.put(("ok", convertir_a_excel(origen, destino)))
+    except Exception as e_:
+        import traceback
+        cola.put(("error", f"{type(e_).__name__}: {e_}", traceback.format_exc()[-1500:]))
+
+
 def armar_organizado(orden, fuentes, destino, avance=None, cancelar=None):
     """orden: [(fuente, pagina, giro)] -> PDF nuevo en 'destino' con las paginas listas marcadas."""
     docs = {}
@@ -3303,7 +3449,42 @@ def _rect(x0, y0, x1, y1):
 # v3.0: glifos de la cinta (trazos en una grilla de 24 x 24)
 _DESHACER = [[(9, 14), (4, 9), (9, 4)], [(4, 9), (14.5, 9)] + _arco(14.5, 14.5, 5.5, -90, 90)[1:] + [(11, 20)]]
 _GIRAR_DER = [_arco(12, 12.5, 7.5, -40, 250, 18), [(13.5, 3.2), (18, 6.6), (13.8, 9.6)]]
+_ESTRELLA = [(12 + (9 if k % 2 == 0 else 4) * math.cos(math.radians(-90 + 36 * k)),
+              12.5 + (9 if k % 2 == 0 else 4) * math.sin(math.radians(-90 + 36 * k))) for k in range(11)]
 GLIFOS = {
+    # v4.7: glifos de la cinta grande (estilo Nitro)
+    "extraer": [[(14, 7), (14, 3), (4, 3), (4, 21), (14, 21), (14, 17)], [(9, 12), (21, 12)], [(17, 8), (21, 12), (17, 16)]],
+    "word": [_rect(4.5, 3, 19.5, 21), [(7.5, 8.5), (9.5, 16), (12, 10.5), (14.5, 16), (16.5, 8.5)]],
+    "excel": [_rect(4.5, 3, 19.5, 21), [(8, 8.5), (16, 16.5)], [(16, 8.5), (8, 16.5)]],
+    "comprimir": [[(12, 2.5), (12, 9)], [(8.5, 5.5), (12, 9), (15.5, 5.5)], [(12, 21.5), (12, 15)],
+                  [(8.5, 18.5), (12, 15), (15.5, 18.5)], [(4, 12), (20, 12)]],
+    "foliar": [[(10, 3.5), (8, 20.5)], [(16, 3.5), (14, 20.5)], [(4.5, 9), (20, 9)], [(4, 15), (19.5, 15)]],
+    "aplanar": [[(12, 4), (21, 8.5), (12, 13), (3, 8.5), (12, 4)], [(3, 12.5), (12, 17), (21, 12.5)],
+                [(3, 16.5), (12, 21), (21, 16.5)]],
+    "comparar": [_rect(2.5, 5, 10.5, 19), _rect(13.5, 5, 21.5, 19), [(5, 9), (8, 9)], [(5, 12), (8, 12)],
+                 [(16, 9), (19, 9)], [(16, 12), (19, 12)]],
+    "unir": [_rect(3, 3, 10, 12), _rect(14, 3, 21, 12), [(6.5, 12), (6.5, 15), (12, 18), (17.5, 15), (17.5, 12)],
+             [(12, 18), (12, 21.5)]],
+    "organizar_g": [_rect(3.5, 3.5, 10.5, 10.5), _rect(13.5, 3.5, 20.5, 10.5), _rect(3.5, 13.5, 10.5, 20.5),
+                    [(13.5, 17), (20.5, 17)], [(17, 13.5), (17, 20.5)]],
+    "ayuda": [_arco(12, 12, 9, 0, 360, 28), [(9.3, 9.6), (9.9, 7.8), (12, 6.9), (14.1, 7.6), (14.8, 9.4),
+                                              (13.8, 11.1), (12, 12.3), (12, 14.2)], [(12, 17.2), (12, 17.2)]],
+    "acerca": [_arco(12, 12, 9, 0, 360, 28), [(12, 11), (12, 17)], [(12, 7.5), (12, 7.5)]],
+    "novedades": [_ESTRELLA],
+    "perfil": [_arco(12, 8.5, 3.8, 0, 360, 20), [(4.5, 20.5), (5.5, 16.5), (8.5, 14.3), (15.5, 14.3), (18.5, 16.5),
+                                                 (19.5, 20.5)]],
+    "apariencia": [_arco(12, 12, 8.5, 0, 360, 28), [(12, 3.5), (12, 20.5)], [(12, 7), (16, 7)], [(12, 11), (19, 11)],
+                   [(12, 15), (18, 15)]],
+    "area": [[(4, 7), (4, 5), (6, 5)], [(10, 5), (14, 5)], [(18, 5), (20, 5), (20, 7)], [(20, 11), (20, 13)],
+             [(20, 17), (20, 19), (18, 19)], [(14, 19), (10, 19)], [(6, 19), (4, 19), (4, 17)], [(4, 13), (4, 11)]],
+    "libre": [[(3, 16), (5.5, 10), (8.5, 15), (11.5, 8), (14.5, 15), (17.5, 9), (21, 14)]],
+    "eliminar": [[(4.5, 7), (19.5, 7)], [(9, 7), (9, 4), (15, 4), (15, 7)], [(6.5, 7), (7.5, 20.5), (16.5, 20.5),
+                                                                            (17.5, 7)], [(10, 10.5), (10, 17)],
+                 [(14, 10.5), (14, 17)]],
+    "actualizar": [_arco(12, 12, 8, -60, 230, 20), [(17.5, 2.8), (16.2, 6.9), (20.3, 7.9)]],
+    "guardar_como": [[(5, 4), (16, 4), (19, 7), (19, 11)], [(5, 4), (5, 20), (11, 20)], [(8, 4), (8, 9), (15, 9), (15, 4)],
+                     [(13, 21), (13, 18.5), (19, 12.5), (21.5, 15), (15.5, 21), (13, 21)]],
+
     "guardar": [[(5, 4), (16, 4), (19, 7), (19, 20), (5, 20), (5, 4)], [(8, 4), (8, 9), (15, 9), (15, 4)],
                 [(8, 20), (8, 14), (16, 14), (16, 20)]],
     "deshacer": _DESHACER,
@@ -4944,7 +5125,7 @@ def iniciar_interfaz():
     superior.bind("<Button-1>", click_superior)
 
     # ---- la barra de iconos
-    barra_pest = ctk.CTkFrame(raiz, fg_color=C["tarjeta"], corner_radius=0, height=44)
+    barra_pest = ctk.CTkFrame(raiz, fg_color=C["tarjeta"], corner_radius=0, height=44)  # (crece con la cinta)
     barra_pest.grid(row=2, column=0, sticky="ew")
     barra_pest.grid_columnconfigure(0, weight=1)
     ALTO_CINTA = px(44)
@@ -5033,61 +5214,340 @@ def iniciar_interfaz():
     v_tot_bar = tk.StringVar(value="")
     v_pct_bar = tk.StringVar(value="")
 
+    # ================= v4.7: CINTA CON PESTAÑAS (estilo Nitro / Office): pestañas arriba y, debajo, los
+    # botones grandes con su nombre, agrupados (el nombre del grupo va abajo). Doble clic en una pestaña la achica.
+    CINTA_TABS = ["ARCHIVO", "INICIO", "EDITAR", "REVISAR", "DOCUMENTO", "CONVERTIR", "AYUDA"]
+    app["cinta_tab"] = almacen.datos.get("cinta_tab") if almacen.datos.get("cinta_tab") in CINTA_TABS[1:] else "INICIO"
+    app["cinta_min"] = bool(almacen.datos.get("cinta_min", False))
+    ALTO_TABS, ALTO_CUERPO = px(28), px(78)
+    COLOR_CINTA = {"abrir": "#E8890C", "guardar": "#2563EB", "guardar_como": "#2563EB", "imprimir": "#475569",
+                   "buscar": "#475569", "mano": "#475569", "seleccionar": "#475569", "resaltar": "#EAB308",
+                   "area": "#EAB308", "libre": "#EAB308", "cambiar": "#0284C7", "agregar": "#0284C7",
+                   "firmar": "#7C3AED", "organizar_g": "#06B6D4", "extraer": "#E8590C", "unir": "#0891B2",
+                   "girar_izq": "#475569", "girar_der": "#475569", "eliminar": "#DC2626", "comparar": "#0D9488",
+                   "aplanar": "#8B5CF6", "foliar": "#F59E0B", "comprimir": "#10B981", "word": "#2B579A",
+                   "excel": "#217346", "pagina": "#3B82F6", "perfil": "#EC4899", "apariencia": "#64748B",
+                   "ayuda": "#2563EB", "acerca": "#475569", "novedades": "#F59E0B", "actualizar": "#16A34A",
+                   "ancho": "#475569", "una": "#475569", "continua": "#475569", "dos": "#475569",
+                   "completa": "#475569", "miniaturas": "#475569", "marcadores": "#475569", "zoom_mas": "#475569",
+                   "deshacer": "#475569", "rehacer": "#475569"}
+
+    def icono_cinta_g(glifo_, tam_):
+        k_ = ("g", glifo_, tam_, modo_oscuro())
+        if k_ not in iconos_cinta:
+            c_ = COLOR_CINTA.get(glifo_, "#475569")
+            if modo_oscuro() and c_ == "#475569":
+                c_ = "#CBD5E1"
+            iconos_cinta[k_] = foto_tk(_icono(glifo_, col("tarjeta"), tam_, glifo=_hex(c_), sin_fondo=True))
+        return iconos_cinta[k_]
+
+    def extraer_desde_visor():
+        """Extraer: lo elegido en las miniaturas o, si no hay nada elegido, la pagina que se esta viendo."""
+        if not org.get("sel"):
+            v_ = vista_activa()
+            if v_ and v_.lay:
+                org["sel"] = {min(v_.pag, len(org.get("orden") or [0]) - 1)}
+        extraer_paginas()
+
+    def cinta_grupos(tab):
+        """[(grupo, [(id, nombre, glifo, accion, elegido, 'g' grande / 'p' chico, ayuda)])]"""
+        v_ = vista_activa()
+        t_ = pest_activa()
+        en_visor = app["pagina"] == "visor" and not app["vista_top"]
+        panel = app.get("panel") if en_visor else None
+        try:
+            tmodo = v_tmodo.get()
+        except Exception:
+            tmodo = None
+        sel_ = en_visor and v_herr.get() == "Seleccionar" and not vis["modo_res"] and not panel
+        mano_ = en_visor and v_herr.get() == "Mano" and not vis["modo_res"] and not panel
+        modo_v = (t_ or {}).get("modo_vista", "continua")
+        zoom_ = v_.zoom if v_ else None
+        res_m = v_res_modo.get() if vis["modo_res"] else None
+        n_ = n_resaltes()
+        guardar_ = ("guardar", "Guardar", "guardar", lambda: guardar_resaltados_dialogo() if (n_resaltes() or (
+            pest_activa() and tiene_organizado(pest_activa()))) else v_estado.set("No hay cambios sin guardar."),
+            False, "g", "Guardar los cambios en el PDF (Ctrl+S)" + (f" · {n_} sin guardar" if n_ else ""))
+        texto_ = ("Texto", [("cambiar", "Cambiar texto", "cambiar", lambda: cinta_texto("Cambiar"),
+                             panel == "texto" and tmodo == "Cambiar", "g", "Cambiar texto del PDF (como Acrobat)"),
+                            ("agregar", "Agregar texto", "agregar", lambda: cinta_texto("Agregar"),
+                             panel == "texto" and tmodo == "Agregar", "g", "Escribir texto nuevo en la hoja")])
+        if tab == "INICIO":
+            return [("Herramientas", [("seleccionar", "Seleccionar", "seleccionar", lambda: cinta_herr("Seleccionar"),
+                                       sel_, "p", "Seleccionar texto e imágenes"),
+                                      ("mano", "Mano", "mano", lambda: cinta_herr("Mano"), mano_, "p",
+                                       "Mover la hoja"),
+                                      ("buscar", "Buscar", "buscar", lambda: enfocar_busqueda(), False, "p",
+                                       "Buscar en el documento (Ctrl+F)")]),
+                    ("Archivo", [("abrir", "Abrir", "abrir", lambda: abrir_archivos(), False, "g", "Abrir PDF (Ctrl+O)"),
+                                 guardar_,
+                                 ("imprimir", "Imprimir", "impresora", lambda: abrir_imprimir(), False, "g",
+                                  "Imprimir")]),
+                    ("Vista", [("ancho", "Ajustar ancho", "ancho", lambda: zoom_cinta("Ajustar ancho"),
+                                zoom_ == "Ajustar ancho", "p", "Que la hoja ocupe todo el ancho"),
+                               ("pagina_e", "Página entera", "pagina", lambda: zoom_cinta("Página entera"),
+                                zoom_ == "Página entera", "p", "Ver la hoja completa"),
+                               ("modo", "Modo de vista ▾", {"una": "una", "dos": "dos"}.get(modo_v, "continua"),
+                                lambda: menu_modo(), modo_v != "continua", "p", "Una página, continua, dos páginas…"),
+                               ("completa", "Pantalla completa", "completa", lambda: pantalla_completa(),
+                                bool(app.get("completa")), "g", "Pantalla completa (F11)")]),
+                    ("Comentario", [("resaltar", "Sombrear", "resaltar", lambda: alternar_resaltar(),
+                                     bool(vis["modo_res"]), "g", "Sombrear texto (elegí el texto y el color)"),
+                                    ("firmar", "Firmar", "firmar", lambda: cinta_panel("firmar"), panel == "firmar",
+                                     "g", "Firmar y sellar")]),
+                    texto_]
+        if tab == "EDITAR":
+            return [texto_,
+                    ("Firmas", [("firmar", "Firmar y sellar", "firmar", lambda: cinta_panel("firmar"),
+                                 panel == "firmar", "g", "Poner una firma o un sello")]),
+                    ("Páginas", [("organizar", "Organizar", "organizar_g", lambda: cinta_pagina("organizar"),
+                                  app["pagina"] == "organizar", "g", "Ordenar, copiar, mover y eliminar páginas"),
+                                 ("extraer", "Extraer páginas", "extraer", extraer_desde_visor, False, "g",
+                                  "Las páginas elegidas (o la que estás viendo) a un PDF nuevo (Ctrl+E)"),
+                                 ("unir", "Unir PDFs", "unir", lambda: cinta_unir(), False, "g",
+                                  "Juntar varios PDF en uno"),
+                                 ("girar_izq", "Girar izq.", "girar_izq", lambda: menu_girar(-90), False, "p",
+                                  "Girar a la izquierda"),
+                                 ("girar_der", "Girar der.", "girar_der", lambda: menu_girar(90), False, "p",
+                                  "Girar a la derecha")]),
+                    ("Deshacer", [("deshacer", "Deshacer", "deshacer", cinta_deshacer, False, "p", "Deshacer (Ctrl+Z)"),
+                                  ("rehacer", "Rehacer", "rehacer", lambda: rehacer_edicion(), False, "p",
+                                   "Rehacer (Ctrl+Y)")])]
+        if tab == "REVISAR":
+            return [("Sombrear", [("resaltar", "Sombrear texto", "resaltar", lambda: activar_resaltador("Texto")
+                                   if res_m != "Texto" else alternar_resaltar(), res_m == "Texto", "g",
+                                   "Arrastrá sobre el texto: queda sombreado con el color elegido"),
+                                  ("area", "Área", "area", lambda: activar_resaltador("Área") if res_m != "Área"
+                                   else alternar_resaltar(), res_m == "Área", "p", "Sombrear un recuadro o polilínea"),
+                                  ("libre", "Mano alzada", "libre", lambda: activar_resaltador("Libre")
+                                   if res_m != "Libre" else alternar_resaltar(), res_m == "Libre", "p",
+                                   "Sombrear dibujando")]),
+                    ("Comparar", [("comparar", "Comparar", "comparar", lambda: boton_comparar(), bool(vis["comp"]),
+                                   "g", "Ver dos PDF lado a lado")]),
+                    ("Buscar", [("buscar", "Buscar", "buscar", lambda: enfocar_busqueda(), False, "g",
+                                 "Buscar en el documento (Ctrl+F)")])]
+        if tab == "DOCUMENTO":
+            return [("Páginas", [("organizar", "Organizar", "organizar_g", lambda: cinta_pagina("organizar"),
+                                  app["pagina"] == "organizar", "g", "Ordenar, copiar, mover y eliminar páginas"),
+                                 ("extraer", "Extraer", "extraer", extraer_desde_visor, False, "g",
+                                  "Las páginas elegidas (o la que estás viendo) a un PDF nuevo (Ctrl+E)"),
+                                 ("unir", "Unir PDFs", "unir", lambda: cinta_unir(), False, "g",
+                                  "Juntar varios PDF en uno")]),
+                    ("Procesar", [("foliar", "Foliar", "foliar", lambda: cinta_panel("foliar"), panel == "foliar",
+                                   "g", "Numerar las hojas (folios)"),
+                                  ("aplanar", "Aplanar", "aplanar", lambda: cinta_panel("aplanar"), panel == "aplanar",
+                                   "g", "Aplanar (que nada se pueda editar)"),
+                                  ("comprimir", "Comprimir", "comprimir", lambda: cinta_panel("comprimir"),
+                                   panel == "comprimir", "g", "Achicar el PDF")]),
+                    ("Información", [("documento", "Propiedades", "pagina", lambda: cinta_pagina("documento"),
+                                      app["pagina"] == "documento", "g", "Datos del documento"),
+                                     ("perfiles", "Perfiles", "perfil", lambda: cinta_pagina("perfiles"),
+                                      app["pagina"] == "perfiles", "g", "Perfiles de foliado y proceso")])]
+        if tab == "CONVERTIR":
+            return [("Convertir a", [("word", "A Word", "word", lambda: convertir_documento("word"), False, "g",
+                                      "Convertir el PDF a Word (.docx) y abrirlo"),
+                                     ("excel", "A Excel", "excel", lambda: convertir_documento("excel"), False, "g",
+                                      "Las tablas del PDF a Excel (.xlsx), con las cifras como números")]),
+                    ("Optimizar", [("comprimir", "Comprimir", "comprimir", lambda: cinta_panel("comprimir"),
+                                    panel == "comprimir", "g", "Achicar el PDF"),
+                                   ("aplanar", "Aplanar", "aplanar", lambda: cinta_panel("aplanar"),
+                                    panel == "aplanar", "g", "Aplanar (que nada se pueda editar)")])]
+        if tab == "AYUDA":
+            return [("Ayuda", [("ayuda", "Ayuda y atajos", "ayuda", lambda: ayuda_general(), False, "g", "F1"),
+                               ("novedades", "Novedades", "novedades", lambda: novedades(), False, "g",
+                                "Qué hay de nuevo en esta versión"),
+                               ("actualizar", "Actualizar", "actualizar", lambda: buscar_actualizacion(manual=True),
+                                False, "g", "Buscar una versión nueva")]),
+                    ("PdFOL", [("apariencia", "Apariencia", "apariencia", lambda: cinta_pagina("apariencia"),
+                                app["pagina"] == "apariencia", "g", "Claro, oscuro y tamaño"),
+                               ("acerca", "Acerca de", "acerca", lambda: acerca_de(), False, "g", f"{NOMBRE} {VERSION}")])]
+        return []
+
+    def menu_archivo():
+        """La pestaña ARCHIVO (naranja, como Nitro): un menu con lo del archivo."""
+        m_ = menu_contextual()
+        m_.add_titulo(f"{NOMBRE} {VERSION}")
+        m_.add_command(label="Abrir…", acelerador="Ctrl+O", command=lambda: abrir_archivos())
+        m_.add_command(label="Guardar", acelerador="Ctrl+S", command=lambda: guardar_resaltados_dialogo())
+        m_.add_command(label="Imprimir…", acelerador="Ctrl+P", command=lambda: abrir_imprimir())
+        m_.add_separator()
+        m_.add_command(label="Extraer páginas a un PDF nuevo", acelerador="Ctrl+E", command=extraer_desde_visor)
+        m_.add_command(label="Convertir a Word", command=lambda: convertir_documento("word"), punto="#2B579A")
+        m_.add_command(label="Convertir a Excel", command=lambda: convertir_documento("excel"), punto="#217346")
+        m_.add_separator()
+        m_.add_command(label="Unir PDFs…", command=lambda: cinta_unir())
+        m_.add_command(label="Propiedades del documento", command=lambda: cinta_pagina("documento"))
+        m_.add_separator()
+        m_.add_command(label="Apariencia", command=lambda: cinta_pagina("apariencia"))
+        m_.add_command(label="Salir", command=lambda: al_cerrar())
+        x_, y_ = _pos_cinta("tab:ARCHIVO")
+        m_.tk_popup(x_, y_)
+
+    f_chico = tkfont.Font(family=FAM, size=8)
+    f_medio = tkfont.Font(family=FAM, size=9)
+    f_tabm = tkfont.Font(family=FAM, size=9, weight="bold")
+
+    def _texto_corto(t_, maximo):
+        """Nombre del boton en 1 o 2 renglones (como Office)."""
+        if f_chico.measure(t_) <= maximo or " " not in t_:
+            return [t_]
+        pal = t_.split(" ")
+        mejor = None
+        for k_ in range(1, len(pal)):
+            a_, b_ = " ".join(pal[:k_]), " ".join(pal[k_:])
+            w_ = max(f_chico.measure(a_), f_chico.measure(b_))
+            if mejor is None or w_ < mejor[0]:
+                mejor = (w_, [a_, b_])
+        return mejor[1]
+
     def dibujar_cinta(*_):
         cinta.delete("all")
         w = max(cinta.winfo_width(), 900)
-        h = px(44)
         cinta.configure(bg=col("tarjeta"))
+        alto_ = ALTO_TABS + (0 if app["cinta_min"] else ALTO_CUERPO)
+        if int(cinta.cget("height")) != alto_:
+            cinta.configure(height=alto_)
         try:
-            izq, centro, der = cinta_items()
+            grupos = cinta_grupos(app["cinta_tab"])
         except NameError:  # todavia se esta armando la ventana
             return
         app["cinta_acc"], app["cinta_ayuda"] = {}, {}
         hay_doc = bool(pest) and not app["vista_top"]
+        # --- pestañas
+        x = px(8)
+        h_t = ALTO_TABS
+        f_tab = (FAM, 9, "bold")
+        for tab_ in CINTA_TABS:
+            ancho_ = f_tabm.measure(tab_) + px(22)
+            if tab_ == "ARCHIVO":
+                cinta.create_rectangle(x, px(3), x + ancho_, h_t, fill="#E8590C", outline="", tags=("item", "b:tab:" + tab_))
+                cinta.create_text(x + ancho_ / 2, h_t / 2 + px(1), text=tab_, fill="#FFFFFF", font=f_tab,
+                                  tags=("item", "b:tab:" + tab_))
+                app["cinta_acc"]["tab:" + tab_] = menu_archivo
+            else:
+                elegida = tab_ == app["cinta_tab"] and not app["cinta_min"]
+                if elegida:
+                    cinta.create_rectangle(x, px(3), x + ancho_, h_t + 1, fill=col("tarjeta"), outline=col("borde"))
+                    cinta.create_line(x + 1, h_t, x + ancho_, h_t, fill=col("tarjeta"))
+                    cinta.create_line(x, px(3), x + ancho_, px(3), fill="#E8590C", width=2)
+                cinta.create_text(x + ancho_ / 2, h_t / 2 + px(1), text=tab_,
+                                  fill="#E8590C" if elegida else col("texto"), font=f_tab,
+                                  tags=("item", "b:tab:" + tab_))
+                cinta.create_rectangle(x, px(3), x + ancho_, h_t, outline="", fill="", tags=("item", "b:tab:" + tab_))
+                app["cinta_acc"]["tab:" + tab_] = (lambda t__=tab_: elegir_tab(t__))
+            x += ancho_ + px(2)
+        if not app["cinta_min"]:
+            cinta.create_line(0, h_t, w, h_t, fill=col("borde"))
+        # --- a la derecha de las pestañas: pagina, zoom, deshacer/rehacer, achicar la cinta
+        xd = w - px(8)
 
-        def poner(grupos, x):
-            for g_, grupo in enumerate(grupos):
-                if g_:
-                    cinta.create_line(x + 5, 11, x + 5, h - 11, fill=col("borde"))
-                    x += 10
-                for it_ in grupo:
-                    id_, ayuda_, ico_, color_, acc_, elegido = it_
-                    ancho_ = _ancho_item(it_)
-                    if id_ == "PAG":
-                        if hay_doc:
-                            cinta.create_window(x + px(4), h // 2, window=e_pag_bar, anchor="w")
-                            cinta.create_text(x + px(52), h // 2, text=v_tot_bar.get(), anchor="w", fill=col("texto2"),
-                                              font=(FAM, 10))
-                    elif id_ == "ZOOM":
-                        cinta.create_text(x + ancho_ / 2, h // 2, text=(v_pct_bar.get() + " ▾") if hay_doc else "",
-                                          fill=col("texto"), font=(FAM, 10), tags=("item", "b:zoom_menu"))
-                        cinta.create_rectangle(x, 8, x + ancho_, h - 8, outline="", fill="", tags=("item", "b:zoom_menu"))
-                        app["cinta_acc"]["zoom_menu"] = menu_zoom
-                        app["cinta_ayuda"]["zoom_menu"] = "Zoom"
-                    else:
-                        if elegido:
-                            x0, y0, x1, y1, r = x + 3, 6, x + ancho_ - 3, h - 6, 6
-                            cinta.create_polygon(x0 + r, y0, x1 - r, y0, x1, y0, x1, y0 + r, x1, y1 - r, x1, y1,
-                                                 x1 - r, y1, x0 + r, y1, x0, y1, x0, y1 - r, x0, y0 + r, x0, y0,
-                                                 smooth=True, fill=col("lat_sel"), outline="")
-                        cinta.create_image(x + ancho_ / 2, h // 2, image=icono_cinta(ico_, color_),
-                                           tags=("item", "b:" + id_))
-                        cinta.create_rectangle(x + 3, 6, x + ancho_ - 3, h - 6, outline="", fill="",
-                                               tags=("item", "b:" + id_))
-                        if id_ == "guardar" and n_resaltes():  # puntito: hay cambios sin guardar
-                            cinta.create_oval(x + ancho_ - px(13), px(8), x + ancho_ - px(5), px(16), fill="#F97316",
-                                              outline="")
-                        app["cinta_acc"][id_] = acc_
-                        app["cinta_ayuda"][id_] = ayuda_
+        def chico_d(id_, glifo_, acc_, ayuda_, tam_=px(18)):
+            nonlocal xd
+            xd -= px(28)
+            cinta.create_image(xd + px(14), h_t / 2 + 1, image=icono_cinta_g(glifo_, tam_), tags=("item", "b:" + id_))
+            cinta.create_rectangle(xd + 2, 3, xd + px(26), h_t - 1, outline="", fill="", tags=("item", "b:" + id_))
+            app["cinta_acc"][id_], app["cinta_ayuda"][id_] = acc_, ayuda_
+        cinta.create_text(xd - px(10), h_t / 2 + 1, text="˄" if not app["cinta_min"] else "˅", fill=col("texto2"),
+                          font=(FAM, 11), tags=("item", "b:min"))
+        cinta.create_rectangle(xd - px(20), 3, xd, h_t - 1, outline="", fill="", tags=("item", "b:min"))
+        app["cinta_acc"]["min"] = alternar_cinta_min
+        app["cinta_ayuda"]["min"] = "Achicar o agrandar la cinta (doble clic en una pestaña)"
+        xd -= px(24)
+        chico_d("rehacer", "rehacer", lambda: rehacer_edicion(), "Rehacer (Ctrl+Y)")
+        chico_d("deshacer", "deshacer", cinta_deshacer, "Deshacer (Ctrl+Z)")
+        if hay_doc:
+            xd -= px(10)
+            chico_d("mas", "zoom_mas", lambda: (vista_activa() and vista_activa().zoom_paso(1)), "Acercar")
+            ancho_z = f_item.measure("000 % ▾") + px(10)
+            xd -= ancho_z
+            cinta.create_text(xd + ancho_z / 2, h_t / 2 + 1, text=v_pct_bar.get() + " ▾", fill=col("texto"),
+                              font=(FAM, 10), tags=("item", "b:zoom_menu"))
+            cinta.create_rectangle(xd, 3, xd + ancho_z, h_t - 1, outline="", fill="", tags=("item", "b:zoom_menu"))
+            app["cinta_acc"]["zoom_menu"], app["cinta_ayuda"]["zoom_menu"] = menu_zoom, "Zoom"
+            chico_d("menos", "zoom_menos", lambda: (vista_activa() and vista_activa().zoom_paso(-1)), "Alejar")
+            xd -= px(14)
+            ancho_t = f_item.measure(v_tot_bar.get() or "/ 000") + px(6)
+            xd -= ancho_t
+            cinta.create_text(xd + px(2), h_t / 2 + 1, text=v_tot_bar.get(), anchor="w", fill=col("texto2"),
+                              font=(FAM, 10))
+            xd -= px(46)
+            cinta.create_window(xd, h_t / 2 + 1, window=e_pag_bar, anchor="w")
+            e_pag_bar.configure(height=px(22))
+            chico_d("sig", "sig", lambda: ir_inf("sig"), "Página siguiente")
+            chico_d("ant", "ant", lambda: ir_inf("ant"), "Página anterior")
+        if app["cinta_min"]:
+            return
+        # --- el cuerpo: grupos con botones grandes (icono + nombre) y chicos (en columnas de a tres)
+        y0, y1 = h_t + px(4), h_t + ALTO_CUERPO - px(16)
+        x = px(10)
+        for n_g, (titulo_, items_) in enumerate(grupos):
+            x_ini = x
+            k_ = 0
+            while k_ < len(items_):
+                it_ = items_[k_]
+                if it_[5] == "g":
+                    id_, nom_, gl_, acc_, eleg_, _t, ay_ = it_
+                    lineas_ = _texto_corto(nom_, px(64))
+                    ancho_ = max(px(46), max(f_chico.measure(l_) for l_ in lineas_) + px(14))
+                    if eleg_:
+                        cinta.create_rectangle(x + 1, y0, x + ancho_ - 1, y1, fill=col("lat_sel"), outline="")
+                    cinta.create_image(x + ancho_ / 2, y0 + px(17), image=icono_cinta_g(gl_, px(28)),
+                                       tags=("item", "b:" + id_))
+                    for n_l, l_ in enumerate(lineas_):
+                        cinta.create_text(x + ancho_ / 2, y0 + px(39) + n_l * px(12), text=l_, fill=col("texto"),
+                                          font=(FAM, 8), tags=("item", "b:" + id_))
+                    cinta.create_rectangle(x + 1, y0, x + ancho_ - 1, y1, outline="", fill="", tags=("item", "b:" + id_))
+                    if id_ == "guardar" and n_resaltes():
+                        cinta.create_oval(x + ancho_ / 2 + px(9), y0 + px(3), x + ancho_ / 2 + px(17), y0 + px(11),
+                                          fill="#F97316", outline="")
+                    app["cinta_acc"][id_], app["cinta_ayuda"][id_] = acc_, ay_
                     x += ancho_
-            return x
+                    k_ += 1
+                else:  # columna de hasta tres chicos
+                    col_ = []
+                    while k_ < len(items_) and items_[k_][5] == "p" and len(col_) < 3:
+                        col_.append(items_[k_])
+                        k_ += 1
+                    ancho_ = max(f_medio.measure(c_[1]) for c_ in col_) + px(34)
+                    alto_f = (y1 - y0) / 3
+                    for n_c, (id_, nom_, gl_, acc_, eleg_, _t, ay_) in enumerate(col_):
+                        yy = y0 + n_c * alto_f
+                        if eleg_:
+                            cinta.create_rectangle(x + 1, yy + 1, x + ancho_ - 1, yy + alto_f - 1, fill=col("lat_sel"),
+                                                   outline="")
+                        cinta.create_image(x + px(13), yy + alto_f / 2, image=icono_cinta_g(gl_, px(17)),
+                                           tags=("item", "b:" + id_))
+                        cinta.create_text(x + px(26), yy + alto_f / 2, text=nom_, anchor="w", fill=col("texto"),
+                                          font=(FAM, 9), tags=("item", "b:" + id_))
+                        cinta.create_rectangle(x + 1, yy + 1, x + ancho_ - 1, yy + alto_f - 1, outline="", fill="",
+                                               tags=("item", "b:" + id_))
+                        app["cinta_acc"][id_], app["cinta_ayuda"][id_] = acc_, ay_
+                    x += ancho_ + px(2)
+            ancho_g = max(x - x_ini, f_chico.measure(titulo_) + px(12))
+            x = x_ini + ancho_g
+            cinta.create_text((x_ini + x) / 2, h_t + ALTO_CUERPO - px(8), text=titulo_, fill=col("texto2"),
+                              font=(FAM, 8))
+            x += px(6)
+            cinta.create_line(x, y0 + px(2), x, h_t + ALTO_CUERPO - px(4), fill=col("borde"))
+            x += px(8)
 
-        poner(izq, 10)
-        ancho_c = sum(sum(_ancho_item(i_) for i_ in g) for g in centro) + 10 * (len(centro) - 1)
-        x_c = max(210, (w - ancho_c) // 2)
-        poner(centro, x_c)
-        ancho_d = sum(_ancho_item(i_) for i_ in der[0])
-        poner(der, w - ancho_d - 10)
+    def elegir_tab(tab_):
+        if app["cinta_min"]:
+            app["cinta_min"] = False
+        app["cinta_tab"] = tab_
+        almacen.datos.update(cinta_tab=tab_, cinta_min=app["cinta_min"])
+        dibujar_cinta()
+
+    def alternar_cinta_min(*_):
+        app["cinta_min"] = not app["cinta_min"]
+        almacen.datos["cinta_min"] = app["cinta_min"]
+        dibujar_cinta()
+
+    def doble_clic_cinta(ev):
+        for it in reversed(cinta.find_overlapping(ev.x, ev.y, ev.x, ev.y)):
+            if any(t.startswith("b:tab:") and t != "b:tab:ARCHIVO" for t in cinta.gettags(it)):
+                alternar_cinta_min()
+                return
 
     # ayuda al pasar el mouse (los iconos no tienen texto)
     # v3.2.1: etiqueta comun de tk (las de CustomTkinter multiplican la posicion por la escala de Windows y,
@@ -5139,7 +5599,8 @@ def iniciar_interfaz():
                 if t.startswith("b:"):
                     acc_ = app.get("cinta_acc", {}).get(t[2:])
                     if acc_:
-                        if app["vista_top"] and t[2:] not in ("abrir", "zoom_menu"):
+                        if app["vista_top"] and t[2:] not in ("abrir", "zoom_menu", "min", "ayuda", "novedades",
+                                                              "actualizar", "acerca") and not t[2:].startswith("tab:"):
                             app["vista_top"] = None
                             mostrar_inicio()
                             dibujar_superior()
@@ -5149,6 +5610,7 @@ def iniciar_interfaz():
 
     cinta.bind("<Configure>", dibujar_cinta)
     cinta.bind("<Button-1>", click_cinta)
+    cinta.bind("<Double-Button-1>", doble_clic_cinta)
     cinta.bind("<Motion>", lambda e: ayuda_mover(e, cinta, lambda: app.get("cinta_ayuda", {})))
     cinta.bind("<Leave>", ayuda_esconder)
     dibujar_lateral = dibujar_superior  # nombre de la v1.1 (lo llaman perfiles y apariencia)
@@ -6229,6 +6691,111 @@ def iniciar_interfaz():
         else:
             v_estado.set(f"{len(s)} página(s) copiadas: elegí dónde y presioná «Pegar».")
 
+    conv_ = {"p": None}
+
+    def convertir_documento(tipo):
+        """v4.7: el PDF activo a Word (.docx) o a Excel (.xlsx), en un proceso aparte. Al terminar se abre."""
+        t_ = pest_activa()
+        if not t_:
+            v_estado.set("Abrí un PDF para convertirlo.")
+            return
+        if conv_["p"] is not None and conv_["p"].is_alive():
+            v_estado.set("Ya se está convirtiendo un documento: esperá a que termine.")
+            return
+        ruta_ = t_["ruta"]
+        ext_, nom_ = (".docx", "Word") if tipo == "word" else (".xlsx", "Excel")
+        base_ = os.path.splitext(os.path.basename(ruta_))[0]
+        dest = filedialog.asksaveasfilename(title=f"Convertir a {nom_}", initialdir=os.path.dirname(ruta_),
+                                            initialfile=base_ + ext_, defaultextension=ext_,
+                                            filetypes=[(nom_, "*" + ext_)])
+        if not dest:
+            return
+        cola_ = mp.Queue()
+        pr_ = mp.Process(target=_proceso_convertir, args=(tipo, ruta_, dest, cola_), daemon=True)
+        pr_.start()
+        conv_["p"] = pr_
+        pend_ = bool(n_resaltes())
+        escaneo_ = False
+        try:
+            escaneo_ = all(es_escaneo(ruta_, k_) for k_ in range(min(3, len(vis["med"].get(ruta_) or [0]))))
+        except Exception:
+            pass
+        inicio_ = time.time()
+
+        def esperar(n_=0):
+            try:
+                r_ = cola_.get_nowait()
+            except Exception:
+                r_ = None
+            if r_ is None:
+                if not pr_.is_alive():
+                    r_ = ("error", "el proceso terminó sin avisar")
+                else:
+                    v_estado.set(f"Convirtiendo a {nom_}" + "." * (1 + n_ % 3) + f"  ({int(time.time() - inicio_)} s)")
+                    raiz.after(300, lambda: esperar(n_ + 1))
+                    return
+            if r_[0] == "error":
+                v_estado.set(f"No se pudo convertir a {nom_}: {r_[1]}")
+                return
+            extra_ = ""
+            if tipo == "excel" and not r_[1]:
+                extra_ = " No se encontraron tablas: va el texto de cada página, separado en columnas."
+            if escaneo_:
+                extra_ += " Es un escaneo: para tener el texto, primero reconocelo (OCR)."
+            if pend_:
+                extra_ += " Los cambios sin guardar no se incluyen."
+            v_estado.set(f"Listo: «{os.path.basename(dest)}».{extra_}")
+            try:
+                if os.name == "nt":
+                    os.startfile(dest)  # como Nitro: se abre en Word o en Excel
+            except Exception:
+                pass
+        raiz.after(300, esperar)
+
+    def extraer_paginas(*_):
+        """v4.7: como Nitro: las paginas elegidas (miniaturas u Organizar) en un PDF nuevo, que se abre."""
+        s = sel_ordenada()
+        if not s:
+            v_estado.set("Elegí las páginas a extraer (Ctrl o Shift para varias) y volvé a intentar.")
+            return
+        orden_ = [org["orden"][i] for i in s]
+        fuentes_ = list(org["fuentes"])
+        base_ = fuentes_[orden_[0][0]]
+        nombre_ = os.path.splitext(os.path.basename(base_))[0]
+        rango_ = texto_rangos([i for i in s]).replace(" ", "")
+        sug = f"{nombre_} (pág. {rango_}).pdf" if len(rango_) <= 40 else f"{nombre_} (páginas extraídas).pdf"
+        dest = filedialog.asksaveasfilename(title="Extraer páginas a un PDF nuevo", initialdir=os.path.dirname(base_),
+                                            initialfile=sug, defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
+        if not dest:
+            return
+        if any(os.path.normcase(os.path.abspath(dest)) == os.path.normcase(os.path.abspath(f_)) for f_ in fuentes_):
+            v_estado.set("Elegí otro nombre: no se puede extraer sobre el mismo PDF.")
+            return
+        v_estado.set(f"Extrayendo {len(s)} página(s)…")
+        res_ = {}
+
+        def trabajo():
+            try:
+                armar_organizado(orden_, fuentes_, dest)
+                res_["ok"] = True
+            except Exception as e__:
+                res_["error"] = str(e__)
+
+        def esperar():
+            if th_.is_alive():
+                raiz.after(80, esperar)
+                return
+            if res_.get("error"):
+                v_estado.set("No se pudieron extraer las páginas: " + res_["error"])
+                return
+            pend_ = sum(1 for f_ in set(fuentes_) for _p in (vis["res"].get(f_) or {}).values() for _i in _p)
+            abrir_pestana(dest)
+            v_estado.set(f"{len(s)} página(s) extraídas en «{os.path.basename(dest)}»"
+                         + (" (los cambios sin guardar no se incluyen: guardá antes para que vayan)." if pend_ else "."))
+        th_ = threading.Thread(target=trabajo, daemon=True)
+        th_.start()
+        raiz.after(80, esperar)
+
     def org_pegar(*_):
         if not org["copiado"]:
             return
@@ -6572,6 +7139,8 @@ def iniciar_interfaz():
             org_deshacer()
         elif ctrl and k_ == "y":
             org_rehacer()
+        elif ctrl and k_ == "e":
+            extraer_paginas()
         elif ctrl and k_ == "a":
             org["sel"] = set(range(len(org["orden"])))
             org_dibujar()
@@ -6623,6 +7192,9 @@ def iniciar_interfaz():
         m_.add_command(label="Girar ↺", command=lambda: org_girar(-90), state=hay_sel)
         m_.add_command(label="Girar ↻", command=lambda: org_girar(90), state=hay_sel)
         m_.add_command(label="Mover a…", command=org_mover_dialogo, state=hay_sel)
+        m_.add_separator()
+        m_.add_command(label=f"Extraer página{'s' if n_ > 1 else ''} a un PDF nuevo ({n_})", acelerador="Ctrl+E",
+                       command=extraer_paginas, state=hay_sel, punto="#0EA5E9")
         m_.add_separator()
         m_.add_command(label="Deshacer", acelerador="Ctrl+Z", command=org_deshacer,
                        state="normal" if org["pila"] else "disabled")
@@ -7964,6 +8536,7 @@ def iniciar_interfaz():
         def movido(self):
             self.pedir()
             sincronizar(self)
+            popup_esconder()
 
         def pedir(self, *_):
             if self.job is None:
@@ -8061,6 +8634,27 @@ def iniciar_interfaz():
                 while i + 1 < len(ys) and ys[i + 1] == ys[i] and x > lay["xs"][i] + lay["ws"][i] + ESPACIO_V / 2:
                     i += 1
             return i
+
+        def _seguir_horizontal(self, lay, W, H):
+            """v4.7: con zoom, al pasar de una hoja horizontal a una vertical (o al reves) la hoja nueva queda a
+            la vista: si entra entera, centrada; si no, en la misma parte proporcional que se estaba viendo."""
+            t_ = self.t or {}
+            if lay["cw"] <= W + 2 or t_.get("modo_vista") in ("dos", "mosaico") or len(lay["ws"]) < 2:
+                self._hx = None
+                return
+            xc = self.cv.canvasx(0) + W / 2
+            k = self.pagina_en(self.cv.canvasy(0) + H / 2)
+            ref = getattr(self, "_hx", None)
+            if ref and ref[2] is lay and ref[0] != k:
+                x0_, w_ = lay["xs"][k], lay["ws"][k]
+                if w_ <= W:
+                    nuevo = x0_ + w_ / 2
+                else:
+                    nuevo = min(max(x0_ + ref[1] * w_, x0_ + W / 2), x0_ + w_ - W / 2)
+                if abs(nuevo - xc) > 2:
+                    self._scroll_a(None, nuevo - W / 2)
+                    xc = self.cv.canvasx(0) + W / 2
+            self._hx = (k, (xc - lay["xs"][k]) / max(1, lay["ws"][k]), lay)
 
         def posicion(self):
             """(pagina, fraccion dentro de la pagina) de lo que se ve arriba."""
@@ -8258,6 +8852,7 @@ def iniciar_interfaz():
                 p_, f_ = self.reanclar
                 self.ir_pos(p_, f_)
             self.reanclar = None
+            self._seguir_horizontal(lay, W, H)
             y0, y1 = cv_.canvasy(0), cv_.canvasy(0) + H
             x0v, x1v = cv_.canvasx(0), cv_.canvasx(0) + W
             i0, i1 = self.pagina_en(y0), self.pagina_en(y1)
@@ -8411,8 +9006,10 @@ def iniciar_interfaz():
 
         def _press(self, ev):
             self.activar()
+            popup_esconder()
             self._ed = None
             self._parr = None
+            self._movio = False
             if vis["comp"] and self.t is not None:  # v3.5: comparando, el numero de la hoja la elige
                 i_ins = insignia_en(self, ev)
                 base_ = self._punto_pagina(self.cv.canvasx(ev.x), self.cv.canvasy(ev.y))
@@ -8530,6 +9127,7 @@ def iniciar_interfaz():
                         self.cv.yview_scroll(1, "units")
                     return
                 self.cv.scan_dragto(ev.x, ev.y, gain=1)
+                self._movio = True
                 self.movido()
                 return
             sel, area, trazo = getattr(self, "_sel", None), getattr(self, "_area", None), getattr(self, "_trazo", None)
@@ -8612,9 +9210,17 @@ def iniciar_interfaz():
                 if sel_ and sel_["a"] == sel_["b"] and not getattr(self, "_doble", False):
                     vis["seleccion"] = None  # un clic sin arrastrar no selecciona
                     visor_pedir_dibujo()
+                    hl_ = resaltado_en(self, ev)  # v4.7: clic sobre un sombreado: se elige (color, quitar)
+                    if hl_:
+                        popup_rapido(self, ev, resaltado=hl_)
                 elif sel_:
                     n_ = len(texto_seleccion())
-                    v_estado.set(f"{n_} caracteres seleccionados · Ctrl+C copia · clic derecho: más opciones.")
+                    v_estado.set(f"{n_} caracteres seleccionados · elegí un color para sombrear · Ctrl+C copia.")
+                    popup_rapido(self, ev)  # v4.7: como Acrobat: los colores para sombrear, ahi mismo
+                elif v_herr.get() == "Seleccionar" and not getattr(self, "_movio", False):
+                    hl_ = resaltado_en(self, ev)
+                    if hl_:
+                        popup_rapido(self, ev, resaltado=hl_)
                 self._doble = False
                 return
             sel, area, trazo = getattr(self, "_sel", None), getattr(self, "_area", None), getattr(self, "_trazo", None)
@@ -9149,6 +9755,9 @@ def iniciar_interfaz():
             sub.add_command(label=t_["nombre"], command=lambda k__=k_: copiar_a_pestana(k__))
         m_.add_cascade(label="Copiar a otra pestaña", menu=sub, state="normal" if otras else "disabled")
         m_.add_separator()
+        m_.add_command(label=f"Extraer página{'s' if n_ > 1 else ''} a un PDF nuevo ({n_})", acelerador="Ctrl+E",
+                       command=extraer_paginas, punto="#0EA5E9")
+        m_.add_separator()
         m_.add_command(label="Girar ↺", command=lambda: org_girar(-90))
         m_.add_command(label="Girar ↻", command=lambda: org_girar(90))
         m_.add_command(label=f"Eliminar ({n_})   Supr", command=org_eliminar)
@@ -9369,6 +9978,8 @@ def iniciar_interfaz():
         elif ctrl and k_ == "a":
             org["sel"] = set(range(n))
             mini_dibujar()
+        elif ctrl and k_ == "e" and org.get("sel"):
+            extraer_paginas()
         elif ctrl and k_ in ("c", "x", "v"):
             teclas_paginas(k_)
         elif k_ in ("up", "down", "prior", "next"):
@@ -9926,6 +10537,8 @@ def iniciar_interfaz():
         vis["res_color"] = tuple(int(v_) for v_ in rgb)
         marcar_color_res()
         guardar_pref_res()
+        if vis.get("seleccion"):  # v4.7: lo que ya estaba elegido se sombrea con ese color, sin mas pasos
+            resaltar_seleccion()
         if not vis["modo_res"]:
             activar_resaltador(v_res_modo.get())
 
@@ -9957,6 +10570,9 @@ def iniciar_interfaz():
             cambiar_modo_res()
 
     def alternar_resaltar(*_):
+        popup_esconder()
+        if not vis["modo_res"] and vis.get("seleccion"):
+            resaltar_seleccion()  # v4.7: texto ya elegido + Sombrear: queda sombreado al instante
         vis["modo_res"] = not vis["modo_res"]
         b_resaltar.configure(fg_color=C["acento"] if vis["modo_res"] else C["suave"],
                              text_color="#FFFFFF" if vis["modo_res"] else C["texto"])
@@ -9973,6 +10589,84 @@ def iniciar_interfaz():
         cambiar_modo_res()
         if not vis["modo_res"]:
             v_estado.set("Listo.")
+
+    # ---- v4.7: ventanita rapida (como Acrobat): al elegir texto, los colores para sombrear; sobre un sombreado,
+    # cambiarle el color o quitarlo. Un clic y listo (sin «Aceptar» ni volver a elegir)
+    pop_ = {"w": None, "vista": None}
+
+    def popup_esconder(*_):
+        if pop_["w"] is not None:
+            try:
+                pop_["w"].place_forget()
+                pop_["w"].destroy()
+            except Exception:
+                pass
+            pop_["w"] = None
+
+    def resaltado_en(vista, ev):
+        """El sombreado bajo el mouse: (ruta, pag, item) o None."""
+        base = vista._punto_pagina(vista.cv.canvasx(ev.x), vista.cv.canvasy(ev.y))
+        if not base:
+            return None
+        p_ = fitz.Point(vista._pt(ev, base))
+        for it_ in reversed(vis["res"].get(base[1], {}).get(base[2], [])):
+            if it_["tipo"] in ("texto", "rect") and any(fitz.Rect(r_).contains(p_) for r_ in it_.get("rects", [])):
+                return base[1], base[2], it_
+            if it_["tipo"] in ("poli", "libre") and it_.get("pts"):
+                r_ = fitz.Rect(it_["pts"][0], it_["pts"][0])
+                for q_ in it_["pts"]:
+                    r_ |= fitz.Point(q_)
+                r_ += (-(it_.get("ancho") or 4), -(it_.get("ancho") or 4), it_.get("ancho") or 4, it_.get("ancho") or 4)
+                if r_.contains(p_):
+                    return base[1], base[2], it_
+        return None
+
+    def popup_rapido(vista, ev, resaltado=None):
+        popup_esconder()
+        cv_ = vista.cv
+        w_ = ctk.CTkFrame(cv_, fg_color=C["tarjeta"], corner_radius=10, border_width=1, border_color=C["borde"])
+        if resaltado:
+            ctk.CTkLabel(w_, text="Sombreado", font=F(11), text_color=C["texto2"]).pack(side="left", padx=(10, 4))
+        for hx in COLORES_RES[:6]:
+            rgb_ = _hex(hx)
+            actual = resaltado and tuple(resaltado[2]["color"]) == tuple(rgb_)
+
+            def elegir_(r__=rgb_):
+                popup_esconder()
+                if resaltado:
+                    guardar_historia()
+                    resaltado[2]["color"] = tuple(r__)
+                    tocar(resaltado[2])
+                    vis["res_color"] = tuple(r__)
+                    guardar_pref_res()
+                    actualizar_resaltes()
+                    v_estado.set("Color del sombreado cambiado · Ctrl+Z deshace · Ctrl+S guarda.")
+                else:
+                    vis["res_color"] = tuple(r__)
+                    guardar_pref_res()
+                    resaltar_seleccion()
+            ctk.CTkButton(w_, text="", width=22, height=22, corner_radius=11, fg_color=hx, hover_color=hx,
+                          border_width=3 if actual else 0, border_color=C["acento"], command=elegir_).pack(
+                side="left", padx=3, pady=6)
+        ctk.CTkFrame(w_, width=1, height=20, fg_color=C["borde"]).pack(side="left", padx=4)
+        if resaltado:
+            def quitar_():
+                popup_esconder()
+                quitar_resaltado(*resaltado)
+                v_estado.set("Sombreado quitado · Ctrl+Z lo vuelve a poner.")
+            ctk.CTkButton(w_, text="Quitar", width=60, height=26, corner_radius=7, font=F(11), fg_color="transparent",
+                          hover_color=C["suave_h"], text_color="#EF4444", command=quitar_).pack(side="left", padx=(0, 8))
+        else:
+            ctk.CTkButton(w_, text="Copiar", width=60, height=26, corner_radius=7, font=F(11), fg_color="transparent",
+                          hover_color=C["suave_h"], text_color=C["texto"],
+                          command=lambda: (popup_esconder(), copiar_seleccion())).pack(side="left", padx=(0, 8))
+        w_.update_idletasks()
+        ww_, hh_ = w_.winfo_reqwidth(), w_.winfo_reqheight()
+        x_ = max(4, min(ev.x - ww_ // 2, cv_.winfo_width() - ww_ - 4))
+        y_ = ev.y - hh_ - 14 if ev.y - hh_ - 14 > 4 else ev.y + 18
+        w_.place(x=x_, y=y_)
+        w_.lift()
+        pop_["w"], pop_["vista"] = w_, vista
 
     def caracteres_de(ruta, pag):
         """Letras de la pagina [(x0, y0, x1, y1, renglon, letra)] o None si todavia se estan leyendo."""
@@ -15033,6 +15727,22 @@ def iniciar_interfaz():
             e_.save(prueba_ocr["ruta"])
             if not _carpeta_tessdata():
                 _fallo(RuntimeError, RuntimeError("Faltan los idiomas del OCR (tessdata)"), None)
+            try:  # v4.7: convertir a Word y a Excel (que pdf2docx, python-docx y openpyxl esten en el .exe)
+                import tempfile
+                d__ = fitz.open()
+                d__.new_page().insert_text((72, 72), "PdFOL prueba 1,250.00", fontsize=12)
+                tmp__ = os.path.join(tempfile.gettempdir(), "pdfol_prueba_conv.pdf")
+                d__.save(tmp__)
+                d__.close()
+                convertir_a_word(tmp__, tmp__ + ".docx")
+                convertir_a_excel(tmp__, tmp__ + ".xlsx")
+                for f__ in (tmp__, tmp__ + ".docx", tmp__ + ".xlsx"):
+                    try:
+                        os.remove(f__)
+                    except OSError:
+                        pass
+            except Exception as e__:
+                _fallo(RuntimeError, RuntimeError(f"Convertir a Word/Excel: {e__}"), None)
             try:  # v4.6: cambiar texto con la fuente del PDF necesita fontTools (que este en el .exe)
                 arch_ = _buscar_archivo_fuente("CourierPrime-Regular.ttf", incluida=True)
                 with open(arch_, "rb") as f_:

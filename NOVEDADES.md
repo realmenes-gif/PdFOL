@@ -1,3 +1,13 @@
+## PdFOL v4.7 · by Meneses999
+
+- **Cinta con pestañas** (como Nitro), con nuestros iconos: Archivo, Inicio, Editar, Revisar, Documento, Convertir y Ayuda. Botones grandes con su nombre, agrupados; doble clic en una pestaña la achica.
+- **Extraer páginas**: elegí páginas en las miniaturas del costado o en Organizar, clic derecho → «Extraer» (o Ctrl+E) y se crea un PDF nuevo solo con ellas, que se abre en otra pestaña.
+- **Convertir a Word y a Excel**: el PDF a .docx, o sus tablas a .xlsx con las cifras como números. Al terminar se abre.
+- **Sombrear más simple**: elegís el texto y aparecen los colores ahí mismo (un clic y queda). Clic sobre un sombreado: cambiarle el color o quitarlo.
+- **Zoom y orientación**: con zoom, al pasar de una hoja horizontal a una vertical (o al revés), la hoja nueva queda a la vista.
+
+**Descarga:** `PdFOL_v4.7_portable.zip` (sin instalar) o `PdFOL_v4.7_instalador.exe`.
+
 ## PdFOL v4.6.1 · by Meneses999
 
 - **El párrafo se respeta**: al cambiar texto, el párrafo se arma con los renglones de la hoja (como Acrobat). Con interlineado amplio ya no se toma un solo renglón, y se conservan el interlineado, la sangría y la alineación.

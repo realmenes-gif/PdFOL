@@ -6,11 +6,11 @@ if not "%~1"=="_abierto" (
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
-title Creando PdFOL v4.6.1 portable
+title Creando PdFOL v4.7 portable
 
 echo.
 echo  ==========================================================
-echo    Creando la version PORTABLE de PdFOL v4.6.1
+echo    Creando la version PORTABLE de PdFOL v4.7
 echo    (solo se hace una vez; tarda unos minutos)
 echo  ==========================================================
 echo.
@@ -36,8 +36,8 @@ if errorlevel 1 (
     goto :fin
 )
 
-if not exist "PdFOL_v4.6.1.py" (
-    echo  No encuentro PdFOL_v4.6.1.py en esta carpeta.
+if not exist "PdFOL_v4.7.py" (
+    echo  No encuentro PdFOL_v4.7.py en esta carpeta.
     echo  Descomprimi el .zip completo y ejecuta este .bat desde esa carpeta.
     goto :fin
 )
@@ -59,7 +59,7 @@ if not exist "fuentes\SpecialElite-Regular.ttf" (
 
 echo [1/4] Instalando herramientas (PyMuPDF, pikepdf, Pillow, CustomTkinter, fontTools, PyInstaller)...
 rem Versiones fijas: las probadas con PdFOL (PyMuPDF 2 y CustomTkinter 6 cambian demasiado)
-python -m pip install --upgrade --quiet --disable-pip-version-check "pymupdf>=1.24,<2" pikepdf pillow "customtkinter>=5.2,<6" tkinterdnd2 fonttools pyinstaller
+python -m pip install --upgrade --quiet --disable-pip-version-check "pymupdf>=1.24,<2" pikepdf pillow "customtkinter>=5.2,<6" tkinterdnd2 fonttools pdf2docx openpyxl pyinstaller
 if errorlevel 1 (
     echo  Error instalando las librerias. Revisa tu conexion a internet.
     goto :fin
@@ -67,7 +67,7 @@ if errorlevel 1 (
 
 echo [2/4] Armando el programa (puede tardar 2 a 5 minutos)...
 rem v3.0: la tarjeta de inicio que el .exe muestra al instante
-python "%~dp0PdFOL_v4.6.1.py" --pdfol-crear-splash "%~dp0splash_pdfol.png"
+python "%~dp0PdFOL_v4.7.py" --pdfol-crear-splash "%~dp0splash_pdfol.png"
 python -m PyInstaller --noconfirm --clean --windowed --onedir ^
     --splash "%~dp0splash_pdfol.png" ^
     --manifest "%~dp0PdFOL.manifest" ^
@@ -78,6 +78,8 @@ python -m PyInstaller --noconfirm --clean --windowed --onedir ^
     --collect-all customtkinter ^
     --collect-all tkinterdnd2 ^
     --collect-submodules fontTools ^
+    --collect-submodules pdf2docx ^
+    --collect-data docx ^
     --hidden-import PIL._tkinter_finder ^
     --hidden-import PIL.ImageTk ^
     --hidden-import PIL.JpegImagePlugin ^
@@ -89,7 +91,7 @@ python -m PyInstaller --noconfirm --clean --windowed --onedir ^
     --add-data "%~dp0fuentes;fuentes" ^
     --add-data "%~dp0tessdata;tessdata" ^
     --distpath "%~dp0_dist" --workpath "%~dp0_build" --specpath "%~dp0_build" ^
-    PdFOL_v4.6.1.py
+    PdFOL_v4.7.py
 if errorlevel 1 (
     echo.
     echo  Hubo un error armando el programa. Copia el texto de arriba y envialo.
@@ -142,7 +144,7 @@ goto :sin_inno
 :armar_instalador
 "%ISCC%" /Q "%~dp0PdFOL.iss"
 if errorlevel 1 goto :sin_instalador
-set "INSTALADOR=PdFOL_v4.6.1_instalador.exe"
+set "INSTALADOR=PdFOL_v4.7_instalador.exe"
 goto :listo
 
 :sin_inno_descarga
