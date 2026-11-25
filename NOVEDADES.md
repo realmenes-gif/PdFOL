@@ -1,3 +1,10 @@
+## PdFOL v4.8 · by Meneses999
+
+- **Pestañas debajo de la cinta** (como Nitro); arriba, al centro, el nombre del documento.
+- **Sin la tira de la derecha**: todo está en la cinta. «Todas las herramientas» e «Inicio» están en la pestaña INICIO de la cinta y en ARCHIVO.
+
+**Descarga:** `PdFOL_v4.8_portable.zip` (sin instalar) o `PdFOL_v4.8_instalador.exe`.
+
 ## PdFOL v4.7 · by Meneses999
 
 - **Cinta con pestañas** (como Nitro), con nuestros iconos: Archivo, Inicio, Editar, Revisar, Documento, Convertir y Ayuda. Botones grandes con su nombre, agrupados; doble clic en una pestaña la achica.

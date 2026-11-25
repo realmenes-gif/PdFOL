@@ -363,12 +363,17 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.7"
-VERSION_INTERNA = "4.7"
+VERSION = "v4.8"
+VERSION_INTERNA = "4.8"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.8", [
+        "Las pestañas de los documentos van debajo de la cinta (como Nitro); arriba, al centro, el nombre del documento.",
+        "Sin la tira de iconos de la derecha: todo está en la cinta. «Todas las herramientas» e «Inicio» están en la "
+        "pestaña INICIO de la cinta y en ARCHIVO.",
+    ]),
     ("v4.7", [
         "Cinta nueva con pestañas (como Nitro): Archivo, Inicio, Editar, Revisar, Documento, Convertir y Ayuda, con "
         "botones grandes y su nombre. Doble clic en una pestaña la achica.",
@@ -5058,7 +5063,6 @@ def iniciar_interfaz():
     e_buscar = ctk.CTkEntry(superior, width=220, height=26, corner_radius=13, font=F(12), bg_color=C["lat_ini"],
                             fg_color=C["campo"], border_color=C["borde"], text_color=C["texto"],
                             placeholder_text="Buscar  (Ctrl+F)", placeholder_text_color=C["texto2"])
-    caja_pest = tk.Frame(superior, bd=0, highlightthickness=0, height=34)
     app["vista_top"] = None  # None: el documento · "inicio" · "herr"
     X_PEST = 300
 
@@ -5067,11 +5071,13 @@ def iniciar_interfaz():
         w = max(superior.winfo_width(), 900)
         h = px(36)
         superior.configure(bg=col("lat_ini"))
-        if caja_pest.cget("bg") != col("lat_ini"):
-            try:
+        try:
+            if caja_pest.cget("bg") != col("lat_ini"):
                 tk.Frame.configure(caja_pest, bg=col("lat_ini"))
-            except Exception:
-                pass
+                tk.Frame.configure(fila_pest, bg=col("lat_ini"))
+                fila_pest.winfo_children()[0].configure(bg=col("borde"))
+        except Exception:
+            pass
         superior.create_line(0, h - 1, w, h - 1, fill=col("borde"))
         if app.get("menu_logo"):
             superior.create_rectangle(2, 3, px(40), h - 3, fill=col("lat_sel"), outline="")
@@ -5085,7 +5091,7 @@ def iniciar_interfaz():
             sin_doc = not pest
         except NameError:  # todavia se esta armando la ventana
             sin_doc = True
-        for clave_, txt_ in (("inicio", "Inicio"), ("herr", "Herramientas")):
+        for clave_, txt_ in ():  # v4.8: «Inicio» y «Herramientas» pasaron a la cinta (ARCHIVO e INICIO)
             ancho_ = f_item.measure(txt_) + px(28)
             elegida = app["vista_top"] == clave_ or (clave_ == "inicio" and sin_doc and not app["vista_top"])
             if elegida:
@@ -5095,12 +5101,17 @@ def iniciar_interfaz():
                                  font=(FAM, 10, "bold" if elegida else "normal"), tags=("item", "top:" + clave_))
             superior.create_rectangle(x, px(4), x + ancho_, h, outline="", fill="", tags=("item", "top:" + clave_))
             x += ancho_ + 2
-        superior.create_line(x + 4, 9, x + 4, h - 9, fill=col("borde"))
         app["x_pest"] = x + 12
         ancho_b = 220 if w > 1100 else 170
         e_buscar.configure(width=ancho_b)
         superior.create_window(w - 10, h // 2, window=e_buscar, anchor="e")
-        superior.create_window(app["x_pest"], h, window=caja_pest, anchor="sw")
+        try:  # v4.8: arriba, al centro, el nombre del documento (como Nitro); las pestañas van bajo la cinta
+            t_a = pest_activa()
+        except NameError:
+            t_a = None
+        if t_a:
+            superior.create_text(max(app["x_pest"] + px(150), w / 2), h // 2 + 1,
+                                 text=f"{t_a['nombre']} - {NOMBRE}", fill=col("texto2"), font=(FAM, 10))
         dibujar_cinta()
 
     def ir_top(clave_):
@@ -5131,6 +5142,12 @@ def iniciar_interfaz():
     ALTO_CINTA = px(44)
     cinta = tk.Canvas(barra_pest, height=ALTO_CINTA, highlightthickness=0, bd=0, cursor="hand2")
     cinta.grid(row=0, column=0, sticky="ew")
+    # v4.8: las pestañas de los documentos, debajo de la cinta (como Nitro)
+    fila_pest = tk.Frame(barra_pest, bd=0, highlightthickness=0)
+    fila_pest.grid(row=1, column=0, sticky="ew")
+    tk.Frame(fila_pest, height=1, bd=0).pack(fill="x")  # raya de arriba
+    caja_pest = tk.Frame(fila_pest, bd=0, highlightthickness=0, height=34)
+    caja_pest.pack(fill="x", padx=px(8), pady=(px(4), px(4)))
     ctk.CTkFrame(raiz, height=1, fg_color=C["borde"], corner_radius=0).grid(row=2, column=0, sticky="sew")
     app["cinta"] = "Inicio"
     iconos_cinta = {}
@@ -5230,7 +5247,7 @@ def iniciar_interfaz():
                    "ayuda": "#2563EB", "acerca": "#475569", "novedades": "#F59E0B", "actualizar": "#16A34A",
                    "ancho": "#475569", "una": "#475569", "continua": "#475569", "dos": "#475569",
                    "completa": "#475569", "miniaturas": "#475569", "marcadores": "#475569", "zoom_mas": "#475569",
-                   "deshacer": "#475569", "rehacer": "#475569"}
+                   "deshacer": "#475569", "rehacer": "#475569", "herramientas": "#0EA5E9"}
 
     def icono_cinta_g(glifo_, tam_):
         k_ = ("g", glifo_, tam_, modo_oscuro())
@@ -5295,7 +5312,11 @@ def iniciar_interfaz():
                                      bool(vis["modo_res"]), "g", "Sombrear texto (elegí el texto y el color)"),
                                     ("firmar", "Firmar", "firmar", lambda: cinta_panel("firmar"), panel == "firmar",
                                      "g", "Firmar y sellar")]),
-                    texto_]
+                    texto_,
+                    ("Más", [("herr_todas", "Todas las herramientas", "herramientas", lambda: ir_top("herr"),
+                              app["vista_top"] == "herr", "g", "Ver todas las herramientas de PdFOL"),
+                             ("inicio_p", "Inicio", "inicio", lambda: ir_top("inicio"), app["vista_top"] == "inicio",
+                              "g", "Página de inicio: abrir y recientes")])]
         if tab == "EDITAR":
             return [texto_,
                     ("Firmas", [("firmar", "Firmar y sellar", "firmar", lambda: cinta_panel("firmar"),
@@ -5367,6 +5388,9 @@ def iniciar_interfaz():
         """La pestaña ARCHIVO (naranja, como Nitro): un menu con lo del archivo."""
         m_ = menu_contextual()
         m_.add_titulo(f"{NOMBRE} {VERSION}")
+        m_.add_command(label="Inicio (recientes)", command=lambda: ir_top("inicio"))
+        m_.add_command(label="Todas las herramientas", command=lambda: ir_top("herr"))
+        m_.add_separator()
         m_.add_command(label="Abrir…", acelerador="Ctrl+O", command=lambda: abrir_archivos())
         m_.add_command(label="Guardar", acelerador="Ctrl+S", command=lambda: guardar_resaltados_dialogo())
         m_.add_command(label="Imprimir…", acelerador="Ctrl+P", command=lambda: abrir_imprimir())
@@ -5600,7 +5624,8 @@ def iniciar_interfaz():
                     acc_ = app.get("cinta_acc", {}).get(t[2:])
                     if acc_:
                         if app["vista_top"] and t[2:] not in ("abrir", "zoom_menu", "min", "ayuda", "novedades",
-                                                              "actualizar", "acerca") and not t[2:].startswith("tab:"):
+                                                              "actualizar", "acerca", "herr_todas", "inicio_p") and \
+                                not t[2:].startswith("tab:"):
                             app["vista_top"] = None
                             mostrar_inicio()
                             dibujar_superior()
@@ -8200,7 +8225,7 @@ def iniciar_interfaz():
                 ("apariencia", "Apariencia", lambda: cinta_pagina("apariencia"), "p:apariencia"),
                 ("herramientas", "Todas las herramientas", lambda: ir_top("herr"), "top:herr")]
     riel_der = tk.Canvas(cuerpo, width=px(44), highlightthickness=0, bd=0, cursor="hand2")
-    riel_der.grid(row=0, column=4, sticky="ns")
+    # v4.8: la tira de la derecha ya no se muestra: todo esta en la cinta y en «Todas las herramientas»
     iconos_riel = {}
 
     def riel_elegido(clave_):
@@ -13849,10 +13874,10 @@ def iniciar_interfaz():
             w_.destroy()
         vis["pest_w"] = {}
         if not pest:
-            ctk.CTkLabel(caja_pest, text="Sin documentos abiertos", font=F(12), text_color=C["texto2"]).pack(
-                side="left", padx=8, pady=4)
+            fila_pest.grid_remove()
             return
-        ancho_disp = max(150, superior.winfo_width() - X_PEST - 320)
+        fila_pest.grid()
+        ancho_disp = max(150, barra_pest.winfo_width() - px(40))
         max_txt = max(3, min(34, int((ancho_disp / max(1, len(pest)) - 56) / 7.5)))
         en_comp = {id(v_.t) for v_ in vistas[:2]} if vis["comp"] else set()
         for i, t_ in enumerate(pest):
@@ -13892,7 +13917,7 @@ def iniciar_interfaz():
             raiz.after_cancel(pest_tarea["id"])
         pest_tarea["id"] = raiz.after(60, dibujar_pestanas)
 
-    superior.bind("<Configure>", _barra_vis_cambio, add="+")  # v3.0: las pestanas viven arriba
+    barra_pest.bind("<Configure>", _barra_vis_cambio, add="+")  # v4.8: las pestanas viven bajo la cinta
 
     def soltar_pestana(ev):
         a_ = vis.get("arr_pest")
