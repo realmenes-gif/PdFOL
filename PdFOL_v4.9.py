@@ -363,12 +363,16 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.8"
-VERSION_INTERNA = "4.8"
+VERSION = "v4.9"
+VERSION_INTERNA = "4.9"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v4.9", [
+        "Convertir páginas a imagen (CONVERTIR → «A imagen»): todas, esta página, un rango o las elegidas; formato "
+        "PNG, JPG, TIFF, BMP o WEBP; resolución de 72 a 600 ppp (y calidad en JPG/WEBP).",
+    ]),
     ("v4.8", [
         "Las pestañas de los documentos van debajo de la cinta (como Nitro); arriba, al centro, el nombre del documento.",
         "Sin la tira de iconos de la derecha: todo está en la cinta. «Todas las herramientas» e «Inicio» están en la "
@@ -1877,6 +1881,40 @@ def convertir_a_excel(origen, destino, avance=None):
     wb.save(tmp)
     os.replace(tmp, destino)
     return hojas_tablas
+
+
+FORMATOS_IMG = {"PNG": "png", "JPG": "jpg", "TIFF": "tif", "BMP": "bmp", "WEBP": "webp"}
+
+
+def paginas_a_imagenes(origen, paginas, carpeta, base, formato="PNG", dpi=150, calidad=92, avance=None,
+                       cancelar=None):
+    """v4.8: cada pagina elegida a una imagen (formato y resolucion a eleccion). -> lista de archivos."""
+    ext = FORMATOS_IMG[formato]
+    d_ = fitz.open(origen)
+    out = []
+    try:
+        for n_, k_ in enumerate(paginas):
+            if cancelar is not None and cancelar.is_set():
+                break
+            pix = d_[k_].get_pixmap(dpi=dpi, alpha=False)
+            im_ = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            dest = os.path.join(carpeta, f"{base}_pág{k_ + 1}.{ext}")
+            kw = {"dpi": (dpi, dpi)}
+            if formato == "JPG":
+                kw.update(quality=calidad, optimize=True, subsampling=0 if calidad >= 90 else 2)
+            elif formato == "WEBP":
+                kw.update(quality=calidad)
+            elif formato == "TIFF":
+                kw.update(compression="tiff_lzw")
+            elif formato == "PNG":
+                kw.update(optimize=False)
+            im_.save(dest, **kw)
+            out.append(dest)
+            if avance:
+                avance(n_ + 1, len(paginas))
+    finally:
+        d_.close()
+    return out
 
 
 def _proceso_convertir(tipo, origen, destino, cola):
@@ -3458,6 +3496,8 @@ _ESTRELLA = [(12 + (9 if k % 2 == 0 else 4) * math.cos(math.radians(-90 + 36 * k
               12.5 + (9 if k % 2 == 0 else 4) * math.sin(math.radians(-90 + 36 * k))) for k in range(11)]
 GLIFOS = {
     # v4.7: glifos de la cinta grande (estilo Nitro)
+    "imagen_g": [_rect(3.5, 4.5, 20.5, 19.5), _arco(8.5, 9.5, 1.8, 0, 360, 12), [(3.5, 17), (9, 12), (13, 15.5),
+                                                                                (16, 13), (20.5, 17)]],
     "extraer": [[(14, 7), (14, 3), (4, 3), (4, 21), (14, 21), (14, 17)], [(9, 12), (21, 12)], [(17, 8), (21, 12), (17, 16)]],
     "word": [_rect(4.5, 3, 19.5, 21), [(7.5, 8.5), (9.5, 16), (12, 10.5), (14.5, 16), (16.5, 8.5)]],
     "excel": [_rect(4.5, 3, 19.5, 21), [(8, 8.5), (16, 16.5)], [(16, 8.5), (8, 16.5)]],
@@ -5243,7 +5283,7 @@ def iniciar_interfaz():
                    "firmar": "#7C3AED", "organizar_g": "#06B6D4", "extraer": "#E8590C", "unir": "#0891B2",
                    "girar_izq": "#475569", "girar_der": "#475569", "eliminar": "#DC2626", "comparar": "#0D9488",
                    "aplanar": "#8B5CF6", "foliar": "#F59E0B", "comprimir": "#10B981", "word": "#2B579A",
-                   "excel": "#217346", "pagina": "#3B82F6", "perfil": "#EC4899", "apariencia": "#64748B",
+                   "excel": "#217346", "imagen_g": "#D97706", "pagina": "#3B82F6", "perfil": "#EC4899", "apariencia": "#64748B",
                    "ayuda": "#2563EB", "acerca": "#475569", "novedades": "#F59E0B", "actualizar": "#16A34A",
                    "ancho": "#475569", "una": "#475569", "continua": "#475569", "dos": "#475569",
                    "completa": "#475569", "miniaturas": "#475569", "marcadores": "#475569", "zoom_mas": "#475569",
@@ -5368,7 +5408,9 @@ def iniciar_interfaz():
             return [("Convertir a", [("word", "A Word", "word", lambda: convertir_documento("word"), False, "g",
                                       "Convertir el PDF a Word (.docx) y abrirlo"),
                                      ("excel", "A Excel", "excel", lambda: convertir_documento("excel"), False, "g",
-                                      "Las tablas del PDF a Excel (.xlsx), con las cifras como números")]),
+                                      "Las tablas del PDF a Excel (.xlsx), con las cifras como números"),
+                                     ("imagen_c", "A imagen", "imagen_g", convertir_a_imagen, False, "g",
+                                      "Páginas a imagen: PNG, JPG, TIFF, BMP o WEBP, con la resolución que elijas")]),
                     ("Optimizar", [("comprimir", "Comprimir", "comprimir", lambda: cinta_panel("comprimir"),
                                     panel == "comprimir", "g", "Achicar el PDF"),
                                    ("aplanar", "Aplanar", "aplanar", lambda: cinta_panel("aplanar"),
@@ -5398,6 +5440,7 @@ def iniciar_interfaz():
         m_.add_command(label="Extraer páginas a un PDF nuevo", acelerador="Ctrl+E", command=extraer_desde_visor)
         m_.add_command(label="Convertir a Word", command=lambda: convertir_documento("word"), punto="#2B579A")
         m_.add_command(label="Convertir a Excel", command=lambda: convertir_documento("excel"), punto="#217346")
+        m_.add_command(label="Convertir páginas a imagen…", command=convertir_a_imagen, punto="#D97706")
         m_.add_separator()
         m_.add_command(label="Unir PDFs…", command=lambda: cinta_unir())
         m_.add_command(label="Propiedades del documento", command=lambda: cinta_pagina("documento"))
@@ -6776,6 +6819,137 @@ def iniciar_interfaz():
             except Exception:
                 pass
         raiz.after(300, esperar)
+
+    def convertir_a_imagen(*_):
+        """v4.8: paginas a imagenes: cuales, formato y resolucion (como Nitro «A otro»)."""
+        t_ = pest_activa()
+        if not t_:
+            v_estado.set("Abrí un PDF para convertirlo.")
+            return
+        ruta_ = t_["ruta"]
+        try:
+            n_tot = len(vis["med"].get(ruta_) or []) or fitz.open(ruta_).page_count
+        except Exception:
+            n_tot = 1
+        v_act = vista_activa()
+        actual_ = (v_act.pag if v_act else 0)
+        pref_ = almacen.datos.get("a_imagen") or {}
+        w = ctk.CTkToplevel(raiz)
+        w.title("Convertir páginas a imagen")
+        w.configure(fg_color=C["fondo"])
+        w.resizable(False, False)
+        w.transient(raiz)
+        cuerpo_ = ctk.CTkFrame(w, fg_color=C["tarjeta"], corner_radius=12, border_width=1, border_color=C["borde"])
+        cuerpo_.pack(fill="both", padx=18, pady=(18, 8))
+        ctk.CTkLabel(cuerpo_, text="Convertir páginas a imagen", font=F(16, "bold"), text_color=C["texto"]).grid(
+            row=0, column=0, columnspan=2, sticky="w", padx=16, pady=(14, 10))
+
+        def fila(r_, txt_, wid_):
+            ctk.CTkLabel(cuerpo_, text=txt_, font=F(13), text_color=C["texto"]).grid(row=r_, column=0, sticky="w",
+                                                                                   padx=(16, 12), pady=6)
+            wid_.grid(row=r_, column=1, sticky="w", padx=(0, 16), pady=6)
+        elegidas_ = sorted(org.get("sel") or []) if org.get("orden") else []
+        opciones_p = ["Todas", "Esta página", "Rango"] + (["Las elegidas"] if len(elegidas_) > 1 else [])
+        v_p = tk.StringVar(value="Las elegidas" if len(elegidas_) > 1 else "Todas")
+        v_r = tk.StringVar(value=f"1-{n_tot}")
+        caja_p = ctk.CTkFrame(cuerpo_, fg_color="transparent")
+        menu(caja_p, opciones_p, v_p, 130, cmd=lambda _v: e_r.configure(state="normal" if v_p.get() == "Rango"
+                                                                         else "disabled")).pack(side="left")
+        e_r = entrada(caja_p, v_r, 110, placeholder_text="ej. 1-3, 5")
+        e_r.pack(side="left", padx=(8, 0))
+        e_r.configure(state="disabled")
+        fila(1, "Páginas", caja_p)
+        v_f = tk.StringVar(value=pref_.get("formato", "PNG") if pref_.get("formato") in FORMATOS_IMG else "PNG")
+        fila(2, "Formato", segmentado(cuerpo_, list(FORMATOS_IMG), v_f, cmd=lambda _v: refrescar_()))
+        RES_ = {"72 ppp (pantalla)": 72, "96 ppp": 96, "150 ppp (normal)": 150, "200 ppp": 200,
+                "300 ppp (impresión)": 300, "600 ppp (alta)": 600}
+        v_d = tk.StringVar(value=pref_.get("res", "150 ppp (normal)") if pref_.get("res") in RES_ else "150 ppp (normal)")
+        fila(3, "Resolución", menu(cuerpo_, list(RES_), v_d, 180, cmd=lambda _v: refrescar_()))
+        CAL_ = {"Máxima (95)": 95, "Alta (90)": 90, "Media (80)": 80, "Liviana (70)": 70}
+        v_c = tk.StringVar(value=pref_.get("cal", "Alta (90)") if pref_.get("cal") in CAL_ else "Alta (90)")
+        m_c = menu(cuerpo_, list(CAL_), v_c, 180)
+        l_c = ctk.CTkLabel(cuerpo_, text="Calidad", font=F(13), text_color=C["texto"])
+        l_c.grid(row=4, column=0, sticky="w", padx=(16, 12), pady=6)
+        m_c.grid(row=4, column=1, sticky="w", padx=(0, 16), pady=6)
+        v_info = tk.StringVar(value="")
+        ctk.CTkLabel(cuerpo_, textvariable=v_info, font=F(11), text_color=C["texto2"], justify="left",
+                     wraplength=360).grid(row=5, column=0, columnspan=2, sticky="w", padx=16, pady=(2, 14))
+
+        def refrescar_():
+            con_cal = v_f.get() in ("JPG", "WEBP")
+            for x_ in (l_c, m_c):
+                x_.grid() if con_cal else x_.grid_remove()
+            try:
+                med_ = (vis["med"].get(ruta_) or [(612, 792)])[min(actual_, len(vis["med"].get(ruta_) or [0]) - 1)]
+            except Exception:
+                med_ = (612, 792)
+            dpi_ = RES_[v_d.get()]
+            v_info.set(f"Cada página queda de unos {round(med_[0] / 72 * dpi_)} × {round(med_[1] / 72 * dpi_)} px. "
+                       + {"PNG": "PNG: sin pérdida (ideal para texto y planos).",
+                          "JPG": "JPG: más liviano (ideal para fotos).",
+                          "TIFF": "TIFF: sin pérdida, para archivo o imprenta.",
+                          "BMP": "BMP: sin compresión (pesado).",
+                          "WEBP": "WEBP: liviano y moderno."}[v_f.get()])
+        refrescar_()
+        pie_ = ctk.CTkFrame(w, fg_color="transparent")
+        pie_.pack(fill="x", padx=18, pady=(4, 16))
+
+        def convertir_():
+            if v_p.get() == "Todas":
+                pags_ = list(range(n_tot))
+            elif v_p.get() == "Esta página":
+                pags_ = [actual_]
+            elif v_p.get() == "Las elegidas":
+                pags_ = [org["orden"][i][1] for i in elegidas_ if i < len(org["orden"])
+                         and os.path.normcase(org["fuentes"][org["orden"][i][0]]) == os.path.normcase(ruta_)]
+            else:
+                try:
+                    pags_ = sorted(parsear_paginas(v_r.get(), n_tot))
+                except ValueError:
+                    pags_ = []
+            if not pags_:
+                v_info.set("Escribí qué páginas (por ejemplo 1-3, 5).")
+                return
+            carpeta_ = filedialog.askdirectory(title="Carpeta donde guardar las imágenes",
+                                               initialdir=os.path.dirname(ruta_), parent=w)
+            if not carpeta_:
+                return
+            fmt_, dpi_, cal_ = v_f.get(), RES_[v_d.get()], CAL_[v_c.get()]
+            almacen.datos["a_imagen"] = {"formato": fmt_, "res": v_d.get(), "cal": v_c.get()}
+            almacen.guardar()
+            w.destroy()
+            base_ = os.path.splitext(os.path.basename(ruta_))[0]
+            est_ = {"n": 0, "tot": len(pags_), "res": None, "error": None}
+
+            def trabajo():
+                try:
+                    est_["res"] = paginas_a_imagenes(ruta_, pags_, carpeta_, base_, fmt_, dpi_, cal_,
+                                                     avance=lambda a__, b__: est_.update(n=a__))
+                except Exception as e__:
+                    est_["error"] = str(e__)
+
+            def esperar():
+                if th_.is_alive():
+                    v_estado.set(f"Convirtiendo a {fmt_}… {est_['n']} de {est_['tot']}")
+                    raiz.after(150, esperar)
+                    return
+                if est_["error"]:
+                    v_estado.set("No se pudo convertir a imagen: " + est_["error"])
+                    return
+                v_estado.set(f"Listo: {len(est_['res'])} imagen(es) {fmt_} a {dpi_} ppp en «{carpeta_}».")
+                try:
+                    if os.name == "nt":
+                        os.startfile(carpeta_)  # se abre la carpeta, como Nitro
+                except Exception:
+                    pass
+            th_ = threading.Thread(target=trabajo, daemon=True)
+            th_.start()
+            raiz.after(150, esperar)
+        boton(pie_, "Convertir", primario=True, ancho=120, command=convertir_).pack(side="right")
+        boton(pie_, "Cancelar", ancho=100, command=w.destroy).pack(side="right", padx=(0, 8))
+        w.bind("<Escape>", lambda e: w.destroy())
+        w.after(120, w.focus_force)
+        w.after(150, w.grab_set)
 
     def extraer_paginas(*_):
         """v4.7: como Nitro: las paginas elegidas (miniaturas u Organizar) en un PDF nuevo, que se abre."""

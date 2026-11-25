@@ -1,4 +1,4 @@
-PdFOL v4.8  -  Visor de PDF · Organizar · Unir · Aplanar · Foliar · Comprimir
+PdFOL v4.9  -  Visor de PDF · Organizar · Unir · Aplanar · Foliar · Comprimir
 =============================================================================
 by Meneses999
 
@@ -7,7 +7,7 @@ CREAR EL PORTABLE Y EL INSTALADOR (una sola vez)
 2. Doble clic en "crear_portable.bat" y esperá a que diga LISTO (3 a 6 minutos).
 3. Se crean:
    - la carpeta "PdFOL_portable" con "PdFOL.exe" (portable: se copia y se usa, sin instalar);
-   - "PdFOL_v4.8_instalador.exe" (instalable).
+   - "PdFOL_v4.9_instalador.exe" (instalable).
    (Desde la v2.0 el programa se llama PdFOL.exe, sin número: así se puede actualizar solo.)
    Para el instalador el .bat usa Inno Setup (gratis): si no lo tenés, lo baja e instala
    solo para tu usuario la primera vez. Si no hay internet, el portable igual queda listo.
@@ -40,6 +40,7 @@ VISOR (nuevo en la v2.0)
   o arrastrando uno o varios PDF sobre PdFOL.exe). Si PdFOL ya está abierto, el PDF
   entra como pestaña nueva en la misma ventana. Ctrl+W cierra la pestaña, Ctrl+Tab
   pasa a la siguiente, clic con la rueda sobre la pestaña también la cierra.
+- v4.9: convertir paginas a imagen (PNG, JPG, TIFF, BMP, WEBP) con la resolucion elegida.
 - v4.8: pestanas de documentos bajo la cinta; sin la tira derecha; todas las herramientas en la cinta.
 - v4.7: cinta con pestanas (como Nitro), extraer paginas, convertir a Word y Excel, sombrear mas simple,
   zoom que sigue la hoja al cambiar de orientacion.

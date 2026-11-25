@@ -1,3 +1,9 @@
+## PdFOL v4.9 · by Meneses999
+
+- **Convertir páginas a imagen** (CONVERTIR → «A imagen»): todas, esta página, un rango o las elegidas en las miniaturas; formato PNG, JPG, TIFF, BMP o WEBP; resolución de 72 a 600 ppp (y calidad en JPG/WEBP). Al terminar se abre la carpeta.
+
+**Descarga:** `PdFOL_v4.9_portable.zip` (sin instalar) o `PdFOL_v4.9_instalador.exe`.
+
 ## PdFOL v4.8 · by Meneses999
 
 - **Pestañas debajo de la cinta** (como Nitro); arriba, al centro, el nombre del documento.
