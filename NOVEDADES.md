@@ -1,3 +1,10 @@
+## PdFOL v5.2 · by Meneses999
+
+- **Imágenes del PDF como objetos**: clic para elegirla, arrastrar para moverla, el punto de la esquina la agranda o achica, **Supr** la borra.
+- **Líneas guía con el margen del texto** (bordes de los renglones), no solo con el centro.
+
+**Descarga:** `PdFOL_v5.2_portable.zip` (sin instalar) o `PdFOL_v5.2_instalador.exe`.
+
 ## PdFOL v5.1.2 · by Meneses999
 
 - **Borrar texto como en Nitro**: seleccioná el texto con el mouse y apretá Supr (o «Borrar» en el cuadrito de colores).

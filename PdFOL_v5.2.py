@@ -363,12 +363,18 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.1.2"
-VERSION_INTERNA = "5.1.2"
+VERSION = "v5.2"
+VERSION_INTERNA = "5.2"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.2", [
+        "Imágenes del PDF como objetos (como Nitro): clic para elegirla, arrastrar para moverla, el punto de la "
+        "esquina la agranda o achica, Supr la borra. Ctrl+Z deshace; Ctrl+S lo deja en el PDF.",
+        "Líneas guía también con el margen del texto del PDF (bordes izquierdo y derecho de los renglones), "
+        "no solo con el centro de la hoja.",
+    ]),
     ("v5.1.2", [
         "Borrar texto como en Nitro: seleccioná el texto con el mouse y apretá Supr (o «Borrar» en el cuadrito de "
         "colores). Se borra solo lo seleccionado.",
@@ -9447,6 +9453,9 @@ def iniciar_interfaz():
                         cv_.create_rectangle(x + q_.x0, y + q_.y0, x + q_.x1, y + q_.y1, outline="", fill="#0EA5E9",
                                              stipple="gray25")
                         cv_.create_rectangle(x + q_.x0, y + q_.y0, x + q_.x1, y + q_.y1, outline="#0EA5E9", width=3)
+                        if not s_.get("sello") and len(vis.get("img_sel") or ()) == 1:  # v5.2: tirador (tamano)
+                            cv_.create_oval(x + q_.x1 - 7, y + q_.y1 - 7, x + q_.x1 + 7, y + q_.y1 + 7,
+                                            fill=col("acento"), outline="#FFFFFF", width=2)
                 # resaltados (guardables) y resultados de la busqueda
                 items_ = [it_ for it_ in vis["res"].get(ruta, {}).get(pag, []) if it_["tipo"] != "giro"]
                 if items_:
@@ -9462,7 +9471,8 @@ def iniciar_interfaz():
                             and e_[2]["tipo"] in ("texto_n", "reemplazo")):  # v4.1: recuadro como Word
                         q0_ = fitz.Rect(caja_texto(e_[2])) * M
                         dibujar_marco_word(cv_, x + q0_.x0 - 3, y + q0_.y0 - 3, x + q0_.x1 + 3, y + q0_.y1 + 3, "marco")
-                    elif e_ and e_[0] == ruta and e_[1] == pag and app.get("panel") in ("firmar", "texto") and not ined_:
+                    elif (e_ and e_[0] == ruta and e_[1] == pag and not ined_ and not e_[2].get("borrada")
+                          and (app.get("panel") in ("firmar", "texto") or e_[2].get("img_orig"))):
                         rr_ = fitz.Rect(e_[2]["rect"])
                         qs_ = [q_ * M for q_ in (rr_.tl, rr_.tr, rr_.br, rr_.bl)]
                         cv_.create_rectangle(x + min(q.x for q in qs_) - 2, y + min(q.y for q in qs_) - 2,
@@ -9577,16 +9587,26 @@ def iniciar_interfaz():
                     chars = caracteres_de(base[1], base[2]) if base else None
                     if base and chars == [] and ocr_pedir(base[1], base[2]):  # v4.1: escaneo: se reconoce
                         chars = None
+                    if base and objeto_press(self, ev, base):  # v5.2: imagenes como objetos (mover, tamano, borrar)
+                        return
                     if base:  # v3.4: clic sobre una imagen (no sobre texto): se elige para copiarla
                         pi_ = fitz.Point(self._pt(ev, base))
                         sobre_txt = bool(chars) and any(c_[0] - 1 <= pi_.x <= c_[2] + 1 and c_[1] - 1 <= pi_.y <= c_[3] + 1
                                                         for c_ in chars)
-                        im_ = None if sobre_txt else sello_en(base[1], base[2], pi_)  # v4.4: firma o sello entero
-                        if im_ is None and not sobre_txt and not es_escaneo(base[1], base[2]):
+                        im_ = None
+                        if not sobre_txt and not es_escaneo(base[1], base[2]):  # v5.2: primero la imagen de verdad
                             im_ = imagen_en(base[1], base[2], pi_, sin_fondo=True)
+                            if im_ and img_ya_editada(base[1], base[2], im_["bbox"]):
+                                im_ = None  # esa imagen ya se movio o se borro
+                        if im_ is None and not sobre_txt:
+                            im_ = sello_en(base[1], base[2], pi_)  # v4.4: firma o sello entero (en un escaneo)
                         if im_:
                             vis["seleccion"] = None
                             elegir_imagen(im_, bool(ev.state & 0x4))
+                            if not im_.get("sello") and not (ev.state & 0x4):  # v5.2: arrastrarla la mueve
+                                self._ed = {"it": None, "pend_img": im_, "base": base, "p0": tuple(pi_),
+                                            "r0": tuple(im_["bbox"]), "modo": "mover"}
+                                return
                             self._arrastre_mano = True  # arrastrar igual desplaza la hoja
                             self.cv.scan_mark(ev.x, ev.y)
                             return
@@ -9891,8 +9911,14 @@ def iniciar_interfaz():
                         vis["edit_item"] = (ruta, pag, it__)
                         quitar_editado()
                     m_.add_command(label="Borrar este texto", command=_borrar_t, acelerador="Supr", punto="#EF4444")
+                if toco and toco[-1].get("img_orig"):  # v5.2: imagen del PDF movida
+                    def _borrar_i(it__=toco[-1]):
+                        vis["edit_item"] = (ruta, pag, it__)
+                        quitar_editado()
+                    m_.add_command(label="Borrar imagen", command=_borrar_i, acelerador="Supr", punto="#EF4444")
                 if toco:
-                    que_ = {"firma": "Quitar esta firma o sello", "texto_n": "Quitar este texto",
+                    que_ = {"firma": "Volver a poner la imagen como estaba" if toco[-1].get("img_orig") else
+                            "Quitar esta firma o sello", "texto_n": "Quitar este texto",
                             "reemplazo": "Volver al texto original"}.get(toco[-1]["tipo"], "Quitar este resaltado")
                     m_.add_command(label=que_, command=lambda: quitar_resaltado(ruta, pag, toco[-1]),
                                    punto="#EF4444")
@@ -9922,6 +9948,8 @@ def iniciar_interfaz():
                                    punto="#0EA5E9")
                     m_.add_command(label="Guardar imagen como…" if n_im == 1 else f"Guardar {n_im} imágenes en…",
                                    command=guardar_imagenes_como)
+                    m_.add_command(label="Borrar imagen" if n_im == 1 else f"Borrar {n_im} imágenes",
+                                   command=borrar_imagenes_sel, acelerador="Supr", punto="#EF4444")
                 if len(todas_) > 1 or (todas_ and not n_im):
                     m_.add_command(label=f"Copiar todas las imágenes de esta página ({len(todas_)})",
                                    command=lambda: copiar_imagenes(list(todas_)))
@@ -9986,7 +10014,7 @@ def iniciar_interfaz():
                 else:
                     org_deshacer()
             elif (k_ in ("Left", "Right", "Up", "Down") and not ctrl and vis.get("edit_item")
-                  and app.get("panel") in ("texto", "firmar")):
+                  and (app.get("panel") in ("texto", "firmar") or vis["edit_item"][2].get("img_orig"))):
                 d_ = 10 if ev.state & 0x1 else 1  # Shift: mas rapido
                 mover_editado(*{"Left": (-d_, 0), "Right": (d_, 0), "Up": (0, -d_), "Down": (0, d_)}[k_])
             elif ctrl and k_.lower() == "c" and vis.get("seleccion"):
@@ -10000,6 +10028,9 @@ def iniciar_interfaz():
                 else:
                     cerrar_panel()  # v4.6.1: sin panel al costado, Esc deja de escribir
                     v_estado.set("Listo.")
+            elif k_ == "Escape" and vis.get("edit_item") and vis["edit_item"][2].get("img_orig"):
+                vis["edit_item"] = None
+                visor_pedir_dibujo()
             elif k_ == "Escape" and vis.get("img_sel"):
                 vis["img_sel"] = []
                 visor_pedir_dibujo()
@@ -11382,6 +11413,8 @@ def iniciar_interfaz():
 
     def imagen_item(item, M):
         """Imagen RGBA del resaltado (en pantalla) y su esquina (x, y) relativa a la pagina."""
+        if item.get("img_orig"):  # v5.2: imagen del PDF movida, cambiada de tamano o borrada
+            return imagen_objeto(item, M)
         if item["tipo"] in ("firma", "texto_n", "reemplazo"):
             return imagen_edicion(item, M)
         rgba = tuple(item["color"]) + (int(255 * float(item["op"])),)
@@ -11622,6 +11655,144 @@ def iniciar_interfaz():
 
     def misma_img(a_, b_):
         return a_["ruta"] == b_["ruta"] and a_["pag"] == b_["pag"] and a_["bbox"] == b_["bbox"]
+
+    # ================= v5.2: las imagenes del PDF como objetos: se eligen, se mueven, se agrandan/achican y se borran
+    # (como Nitro). La imagen pasa a ser un objeto de PdFOL (tipo firma con «img_orig»); al guardar se saca la
+    # original de la hoja y se pone la nueva donde quedo
+    cache_sin_img = {}
+
+    def img_ya_editada(ruta, pag, bbox):
+        bb_ = tuple(round(v_, 2) for v_ in bbox)
+        return next((it_ for it_ in vis["res"].get(ruta, {}).get(pag, []) if it_.get("img_orig") and
+                     tuple(round(v_, 2) for v_ in it_["img_orig"]["bbox"]) == bb_), None)
+
+    def item_de_imagen(im_):
+        import tempfile
+        datos, ext, _img = extraer_imagen(im_)
+        carpeta = os.path.join(tempfile.gettempdir(), "PdFOL_objetos")
+        os.makedirs(carpeta, exist_ok=True)
+        vis["n_obj"] = vis.get("n_obj", 0) + 1
+        arch = os.path.join(carpeta, f"obj_{os.getpid()}_{int(time.time())}_{vis['n_obj']}.{'jpg' if ext in ('jpeg', 'jpg') else ext}")
+        with open(arch, "wb") as f_:
+            f_.write(datos)
+        return {"tipo": "firma", "rect": tuple(im_["bbox"]), "archivo": arch, "ruta": im_["ruta"], "pag": im_["pag"],
+                "img_orig": {"bbox": tuple(im_["bbox"]), "xref": im_.get("xref", 0)}}
+
+    def quitar_imagen_pg(pg, io_):
+        """Saca de la hoja (solo de esta) la imagen que estaba en io_['bbox'] (coordenadas como se ve)."""
+        rm = pg.rotation_matrix
+        ob = fitz.Rect(io_["bbox"])
+        m_ = min(1.0, ob.width * 0.1, ob.height * 0.1)
+        adentro = ob + (m_, m_, -m_, -m_)
+        otras = False
+        for inf in pg.get_image_info():
+            r_ = fitz.Rect(inf["bbox"]) * rm
+            igual = all(abs(a_ - b_) < 1.0 for a_, b_ in zip(r_, ob))
+            if not igual and r_.intersects(adentro):
+                otras = True  # otra imagen debajo (un fondo): se borran solo los pixeles de esa zona
+        pg.add_redact_annot(adentro * pg.derotation_matrix, fill=False)
+        pg.apply_redactions(images=fitz.PDF_REDACT_IMAGE_PIXELS if otras else fitz.PDF_REDACT_IMAGE_REMOVE,
+                            graphics=fitz.PDF_REDACT_LINE_ART_NONE, text=getattr(fitz, "PDF_REDACT_TEXT_NONE", 1))
+
+    def fondo_sin_imagen(item, z):
+        ruta, pag = item.get("ruta"), item.get("pag")
+        ob = fitz.Rect(item["img_orig"]["bbox"])
+        k_ = (ruta, pag, ver_arch(ruta), tuple(round(v_, 2) for v_ in ob), round(z, 4))
+        if k_ not in cache_sin_img:
+            img = None
+            try:
+                with fitz.open(ruta) as d_:
+                    d2 = fitz.open()
+                    d2.insert_pdf(d_, from_page=pag, to_page=pag)
+                    p2 = d2[0]
+                    quitar_imagen_pg(p2, item["img_orig"])
+                    pix = p2.get_pixmap(matrix=fitz.Matrix(z, z), clip=ob * p2.derotation_matrix, alpha=False, annots=False)
+                    img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+                    d2.close()
+            except Exception:
+                img = None
+            if len(cache_sin_img) > 40:
+                cache_sin_img.clear()
+            cache_sin_img[k_] = img
+        return cache_sin_img[k_]
+
+    def imagen_objeto(item, M):
+        """Imagen movida o borrada: la hoja sin la original y la imagen donde quedo."""
+        z = math.hypot(M.a, M.b)
+        ang = round(math.degrees(math.atan2(M.b, M.a)) / 90) % 4 * 90
+        ob = fitz.Rect(item["img_orig"]["bbox"])
+        u_ = fitz.Rect(ob)
+        if not item.get("borrada"):
+            u_ |= fitz.Rect(item["rect"])
+        qs = [p_ * M for p_ in (u_.tl, u_.tr, u_.br, u_.bl)]
+        bx, by = min(q.x for q in qs), min(q.y for q in qs)
+        lienzo = Image.new("RGBA", (max(1, round(u_.width * z)), max(1, round(u_.height * z))), (0, 0, 0, 0))
+        fondo_ = fondo_sin_imagen(item, z)
+        if fondo_ is not None:
+            lienzo.paste(fondo_.resize((max(1, round(ob.width * z)), max(1, round(ob.height * z)))).convert("RGBA"),
+                         (round((ob.x0 - u_.x0) * z), round((ob.y0 - u_.y0) * z)))
+        if not item.get("borrada"):
+            r_ = fitz.Rect(item["rect"])
+            k_ = ("img", item["archivo"])
+            if k_ not in cache_firma:
+                try:
+                    cache_firma[k_] = Image.open(item["archivo"]).convert("RGBA")
+                except Exception:
+                    cache_firma[k_] = Image.new("RGBA", (10, 10), (0, 0, 0, 0))
+            im_ = cache_firma[k_].resize((max(1, round(r_.width * z)), max(1, round(r_.height * z))), Image.LANCZOS)
+            lienzo.alpha_composite(im_, (max(0, round((r_.x0 - u_.x0) * z)), max(0, round((r_.y0 - u_.y0) * z))))
+        if ang:
+            lienzo = lienzo.rotate(-ang, expand=True)
+        return int(bx), int(by), lienzo
+
+    def objeto_press(vista, ev, base):
+        """Clic en Seleccionar sobre una imagen ya movida (o su tirador): se elige y se arrastra."""
+        _i, ruta, pag, M, x, y = base
+        cx_, cy_ = vista.cv.canvasx(ev.x), vista.cv.canvasy(ev.y)
+        p_ = vista._pt(ev, base)
+        e_ = vis.get("edit_item")
+        if e_ and e_[0] == ruta and e_[1] == pag and e_[2].get("img_orig") and not e_[2].get("borrada"):
+            q_ = fitz.Point(e_[2]["rect"][2], e_[2]["rect"][3]) * M
+            if abs(q_.x + x - cx_) < 11 and abs(q_.y + y - cy_) < 11:
+                vista._ed = {"it": e_[2], "base": base, "p0": p_, "r0": tuple(e_[2]["rect"]), "modo": "tam"}
+                return True
+        sel_ = [s_ for s_ in vis.get("img_sel") or [] if not s_.get("sello") and s_["ruta"] == ruta and s_["pag"] == pag]
+        if len(sel_) == 1:  # la imagen elegida (todavia sin mover): su tirador cambia el tamano
+            q_ = fitz.Rect(sel_[0]["bbox"]).br * M
+            if abs(q_.x + x - cx_) < 11 and abs(q_.y + y - cy_) < 11:
+                vista._ed = {"it": None, "pend_img": sel_[0], "base": base, "p0": p_, "r0": tuple(sel_[0]["bbox"]),
+                             "modo": "tam"}
+                return True
+        for it_ in reversed(vis["res"].get(ruta, {}).get(pag, [])):
+            if it_.get("img_orig") and not it_.get("borrada") and fitz.Rect(it_["rect"]).contains(fitz.Point(p_)):
+                vis["edit_item"] = (ruta, pag, it_)
+                vis["img_sel"], vis["seleccion"] = [], None
+                vista._ed = {"it": it_, "base": base, "p0": p_, "r0": tuple(it_["rect"]), "modo": "mover"}
+                v_estado.set("Imagen elegida · arrastrala para moverla · el punto de la esquina la agranda o achica "
+                             "· Supr la borra.")
+                visor_pedir_dibujo()
+                return True
+        if e_ and e_[2].get("img_orig"):  # clic afuera: se suelta
+            vis["edit_item"] = None
+            visor_pedir_dibujo()
+        return False
+
+    def borrar_imagenes_sel():
+        lista = [s_ for s_ in vis.get("img_sel") or [] if not s_.get("sello")]
+        if not lista:
+            return False
+        hechos = 0
+        for s_ in lista:
+            if img_ya_editada(s_["ruta"], s_["pag"], s_["bbox"]):
+                continue
+            it_ = {"tipo": "firma", "rect": (s_["bbox"][0], s_["bbox"][1]) * 2, "archivo": "", "ruta": s_["ruta"],
+                   "pag": s_["pag"], "img_orig": {"bbox": tuple(s_["bbox"]), "xref": s_.get("xref", 0)}, "borrada": True}
+            agregar_item(s_["ruta"], s_["pag"], it_)
+            hechos += 1
+        vis["img_sel"], vis["edit_item"] = [], None
+        visor_pedir_dibujo()
+        v_estado.set(f"{hechos} imagen(es) borrada(s) · Ctrl+Z la vuelve · Ctrl+S lo guarda en el PDF.")
+        return True
 
     def elegir_imagen(im_, sumar=False):
         lista = list(vis.get("img_sel") or [])
@@ -13900,6 +14071,24 @@ def iniciar_interfaz():
             return True
         return False
 
+    cache_renglones = {}
+
+    def renglones_de(ruta, pag):
+        """v5.1.2: el recuadro de cada renglon del PDF (para alinear con el margen del texto)."""
+        k_ = (ruta, pag, ver_arch(ruta))
+        if k_ not in cache_renglones:
+            chars = caracteres_de(ruta, pag)
+            if chars is None:
+                return []
+            por = {}
+            for x0, y0, x1, y1, l_, c_ in chars:
+                if c_.strip():
+                    por[l_] = (por[l_] | fitz.Rect(x0, y0, x1, y1)) if l_ in por else fitz.Rect(x0, y0, x1, y1)
+            if len(cache_renglones) > 20:
+                cache_renglones.clear()
+            cache_renglones[k_] = list(por.values())[:400]
+        return cache_renglones[k_]
+
     def guias_mover(vista, ed):
         """v5.1: al mover un texto, una firma o una imagen: lineas de referencia (como PowerPoint) cuando queda
         alineado con el centro o los bordes de la hoja, o con otro texto o imagen de la hoja. Solo mientras se
@@ -13923,8 +14112,18 @@ def iniciar_interfaz():
         try:
             for im_ in imagenes_de(ruta, pag):
                 b_ = fitz.Rect(im_["bbox"])
+                if img_ya_editada(ruta, pag, im_["bbox"]):
+                    continue  # v5.2: (la imagen que se esta moviendo, en su lugar original)
                 if b_.width < pw * 0.9 or b_.height < ph * 0.9:  # (no el escaneo de toda la hoja)
                     refs.append((b_, "item"))
+        except Exception:
+            pass
+        try:  # v5.1.2: tambien los renglones del PDF (sus bordes izquierdo y derecho, arriba y abajo)
+            propio = fitz.Rect(it_["rect_orig"]) if it_.get("rect_orig") else None
+            for b_ in renglones_de(ruta, pag):
+                if propio is not None and b_.intersects(propio):
+                    continue
+                refs.append((b_, "renglon"))
         except Exception:
             pass
         tol = 3.0 / max(0.05, abs(M.a) + abs(M.b))  # 3 px de pantalla, en puntos de la hoja
@@ -13934,6 +14133,8 @@ def iniciar_interfaz():
         for rr_, tipo_ in refs:
             if tipo_ == "hoja":
                 cand_x, cand_y = (pw / 2,), (ph / 2,)  # el centro de la hoja
+            elif tipo_ == "renglon":  # el margen del texto (bordes), no el centro de cada renglon
+                cand_x, cand_y = (rr_.x0, rr_.x1), (rr_.y0, rr_.y1)
             else:
                 cand_x = (rr_.x0, (rr_.x0 + rr_.x1) / 2, rr_.x1)
                 cand_y = (rr_.y0, (rr_.y0 + rr_.y1) / 2, rr_.y1)
@@ -13971,7 +14172,7 @@ def iniciar_interfaz():
                 linea((min(rr_.x0, r2.x0) - 6, cy_), (max(rr_.x1, r2.x1) + 6, cy_), False)
         if mejor_x or mejor_y:  # el recuadro de referencia, apenas marcado
             for g_ in (mejor_x, mejor_y):
-                if g_ and g_[3] == "item":
+                if g_ and g_[3] in ("item", "renglon"):
                     q_ = fitz.Rect(g_[2]) * M
                     cv_.create_rectangle(x + q_.x0, y + q_.y0, x + q_.x1, y + q_.y1, outline=col_g, width=1,
                                          dash=(1, 3), tags="guia")
@@ -13992,6 +14193,19 @@ def iniciar_interfaz():
         dx, dy = p_[0] - ed["p0"][0], p_[1] - ed["p0"][1]
         if abs(dx) + abs(dy) > 1.5:
             ed["movio"] = True
+        if ed.get("pend_img"):  # v5.2: la imagen del PDF pasa a ser un objeto al empezar a moverla
+            if not ed.get("movio"):
+                return
+            im_ = ed.pop("pend_img")
+            try:
+                it_n = item_de_imagen(im_)
+            except Exception as e:
+                v_estado.set(f"No se pudo tomar esa imagen: {e}")
+                vista._ed = {"modo": "nada"}
+                return
+            agregar_item(im_["ruta"], im_["pag"], it_n)
+            vis["img_sel"] = []
+            ed["it"], ed["hist"] = it_n, True
         if ed.get("foto") and ed["it"]["tipo"] in ("texto_n", "reemplazo"):  # v4.1: mover o cambiar el ancho
             if not ed.get("movio"):
                 return
@@ -14096,8 +14310,19 @@ def iniciar_interfaz():
             borrar_seleccion()
             return "break"
         if not e_:
-            return
+            return "break" if borrar_imagenes_sel() else None
         it_ = e_[2]
+        if it_.get("img_orig"):  # v5.2: imagen del PDF: se borra (la original no vuelve)
+            if not it_.get("borrada"):
+                guardar_historia()
+                ob_ = it_["img_orig"]["bbox"]
+                it_["borrada"], it_["rect"] = True, (ob_[0], ob_[1], ob_[0], ob_[1])
+                tocar(it_)
+                v_estado.set("Imagen borrada · Ctrl+Z la vuelve · Ctrl+S lo guarda en el PDF.")
+            vis["edit_item"] = None
+            actualizar_resaltes()
+            visor_pedir_dibujo()
+            return "break"
         if it_.get("tipo") == "reemplazo":  # v5.1.1: Supr BORRA el texto (antes volvia a aparecer el original)
             if (it_.get("txt") or "").strip():
                 guardar_historia()
@@ -14209,6 +14434,9 @@ def iniciar_interfaz():
     def guardar_editables(pg, items_):
         """Escribe en la pagina las firmas, sellos y textos (quedan fijos en el PDF)."""
         dm = pg.derotation_matrix
+        for it_ in items_:  # v5.2: primero se sacan las imagenes originales que se movieron o borraron
+            if it_.get("img_orig"):
+                quitar_imagen_pg(pg, it_["img_orig"])
         reemplazos = [it_ for it_ in items_ if it_["tipo"] == "reemplazo" and not it_.get("ocr")]
         for it_ in [x_ for x_ in items_ if x_["tipo"] == "reemplazo" and x_.get("ocr")]:  # v4.1: escaneo
             fb_ = tuple(v_ / 255 for v_ in it_.get("fondo_borrar", (255, 255, 255)))
@@ -14223,7 +14451,7 @@ def iniciar_interfaz():
             for it_ in reemplazos:
                 dibujar_texto(pg, it_, lambda q_: fitz.Point(q_) * dm, pg.rotation)
         for it_ in items_:
-            if it_["tipo"] == "firma":
+            if it_["tipo"] == "firma" and not it_.get("borrada"):
                 pg.insert_image(fitz.Rect(it_["rect"]) * dm, filename=it_["archivo"], rotate=pg.rotation,
                                 overlay=True)
             elif it_["tipo"] == "texto_n":
