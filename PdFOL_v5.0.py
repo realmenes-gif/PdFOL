@@ -363,12 +363,18 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v4.9.2"
-VERSION_INTERNA = "4.9.2"
+VERSION = "v5.0"
+VERSION_INTERNA = "5.0"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.0", [
+        "Marcar páginas con colores mientras leés (tecla M, la cinta o el clic derecho): rojo, naranja, amarillo, "
+        "verde, azul o morado. Las marcas se quedan aunque navegues, cambies de pestaña o cierres el PDF.",
+        "Clic derecho sobre una página marcada: extraer, copiar, eliminar, convertir a imagen o elegir las de ESE "
+        "color; «Todas las marcadas» junta todos los colores. Ctrl+↓ / Ctrl+↑: siguiente o anterior marcada.",
+    ]),
     ("v4.9.2", [
         "En Inicio y en «Todas las herramientas» ya no quedan las miniaturas del PDF abierto al costado.",
     ]),
@@ -1889,6 +1895,10 @@ def convertir_a_excel(origen, destino, avance=None):
     os.replace(tmp, destino)
     return hojas_tablas
 
+
+COLORES_MARCA = [("Rojo", "#EF4444"), ("Naranja", "#F97316"), ("Amarillo", "#EAB308"), ("Verde", "#22C55E"),
+                 ("Azul", "#3B82F6"), ("Morado", "#A855F7")]
+NOMBRE_MARCA = {h_: n_ for n_, h_ in COLORES_MARCA}
 
 FORMATOS_IMG = {"PNG": "png", "JPG": "jpg", "TIFF": "tif", "BMP": "bmp", "WEBP": "webp"}
 
@@ -3503,6 +3513,7 @@ _ESTRELLA = [(12 + (9 if k % 2 == 0 else 4) * math.cos(math.radians(-90 + 36 * k
               12.5 + (9 if k % 2 == 0 else 4) * math.sin(math.radians(-90 + 36 * k))) for k in range(11)]
 GLIFOS = {
     # v4.7: glifos de la cinta grande (estilo Nitro)
+    "marcar_g": [[(6, 3), (18, 3), (18, 21), (12, 16.5), (6, 21), (6, 3)]],
     "imagen_g": [_rect(3.5, 4.5, 20.5, 19.5), _arco(8.5, 9.5, 1.8, 0, 360, 12), [(3.5, 17), (9, 12), (13, 15.5),
                                                                                 (16, 13), (20.5, 17)]],
     "extraer": [[(14, 7), (14, 3), (4, 3), (4, 21), (14, 21), (14, 17)], [(9, 12), (21, 12)], [(17, 8), (21, 12), (17, 16)]],
@@ -5290,7 +5301,7 @@ def iniciar_interfaz():
                    "firmar": "#7C3AED", "organizar_g": "#06B6D4", "extraer": "#E8590C", "unir": "#0891B2",
                    "girar_izq": "#475569", "girar_der": "#475569", "eliminar": "#DC2626", "comparar": "#0D9488",
                    "aplanar": "#8B5CF6", "foliar": "#F59E0B", "comprimir": "#10B981", "word": "#2B579A",
-                   "excel": "#217346", "imagen_g": "#D97706", "pagina": "#3B82F6", "perfil": "#EC4899", "apariencia": "#64748B",
+                   "excel": "#217346", "imagen_g": "#D97706", "marcar_g": "#EF4444", "pagina": "#3B82F6", "perfil": "#EC4899", "apariencia": "#64748B",
                    "ayuda": "#2563EB", "acerca": "#475569", "novedades": "#F59E0B", "actualizar": "#16A34A",
                    "ancho": "#475569", "una": "#475569", "continua": "#475569", "dos": "#475569",
                    "completa": "#475569", "miniaturas": "#475569", "marcadores": "#475569", "zoom_mas": "#475569",
@@ -5357,6 +5368,14 @@ def iniciar_interfaz():
                                 lambda: menu_modo(), modo_v != "continua", "p", "Una página, continua, dos páginas…"),
                                ("completa", "Pantalla completa", "completa", lambda: pantalla_completa(),
                                 bool(app.get("completa")), "g", "Pantalla completa (F11)")]),
+                    ("Marcas", [("marcar", "Marcar página", "marcar_g", lambda: menu_marcas(
+                        x_=cinta.winfo_rootx() + (app.get("_x_marcar") or 300),
+                        y_=cinta.winfo_rooty() + cinta.winfo_height()), bool(marcadas()), "g",
+                                 "Marcar páginas con colores mientras leés (tecla M)"),
+                                ("marca_sig", "Siguiente", "sig", lambda: ir_marcada(1), False, "p",
+                                 "Ir a la siguiente página marcada (Ctrl+↓)"),
+                                ("marca_ant", "Anterior", "ant", lambda: ir_marcada(-1), False, "p",
+                                 "Ir a la anterior página marcada (Ctrl+↑)")]),
                     ("Comentario", [("resaltar", "Sombrear", "resaltar", lambda: alternar_resaltar(),
                                      bool(vis["modo_res"]), "g", "Sombrear texto (elegí el texto y el color)"),
                                     ("firmar", "Firmar", "firmar", lambda: cinta_panel("firmar"), panel == "firmar",
@@ -5372,6 +5391,11 @@ def iniciar_interfaz():
                                  panel == "firmar", "g", "Poner una firma o un sello")]),
                     ("Páginas", [("organizar", "Organizar", "organizar_g", lambda: cinta_pagina("organizar"),
                                   app["pagina"] == "organizar", "g", "Ordenar, copiar, mover y eliminar páginas"),
+                                 ("marcar", "Marcar página", "marcar_g", lambda: menu_marcas(
+                                     x_=cinta.winfo_rootx() + (app.get("_x_marcar") or 300),
+                                     y_=cinta.winfo_rooty() + cinta.winfo_height()), bool(marcadas()), "g",
+                                  "Marcar páginas con colores mientras leés (tecla M) y después extraer, copiar o "
+                                  "eliminar las de un color"),
                                  ("extraer", "Extraer páginas", "extraer", extraer_desde_visor, False, "g",
                                   "Las páginas elegidas (o la que estás viendo) a un PDF nuevo (Ctrl+E)"),
                                  ("unir", "Unir PDFs", "unir", lambda: cinta_unir(), False, "g",
@@ -5594,6 +5618,8 @@ def iniciar_interfaz():
                         cinta.create_oval(x + ancho_ / 2 + px(9), y0 + px(3), x + ancho_ / 2 + px(17), y0 + px(11),
                                           fill="#F97316", outline="")
                     app["cinta_acc"][id_], app["cinta_ayuda"][id_] = acc_, ay_
+                    if id_ == "marcar":
+                        app["_x_marcar"] = x
                     x += ancho_
                     k_ += 1
                 else:  # columna de hasta tres chicos
@@ -6847,6 +6873,210 @@ def iniciar_interfaz():
                 pass
         raiz.after(300, esperar)
 
+    # ================= v5.0: MARCAR PAGINAS (con colores) =================
+    # Se marca mientras se lee (tecla M, la cinta o el clic derecho); las marcas se quedan aunque se navegue, se
+    # cambie de pestaña o se cierre el PDF. Al final: extraer, copiar, eliminar o pasar a imagen las marcadas.
+    def _marcas_arch(ruta):
+        """{pagina: color} de un archivo (se recuerdan; si el PDF cambio de cantidad de hojas, se olvidan)."""
+        todas_ = almacen.datos.setdefault("marcas_pag", {})
+        k_ = os.path.normcase(os.path.abspath(ruta))
+        n_ = len(vis["med"].get(ruta) or [])
+        reg = todas_.get(k_)
+        if not reg or (n_ and reg.get("n") and reg["n"] != n_):
+            reg = todas_[k_] = {"n": n_, "m": {}}
+        if n_ and not reg.get("n"):
+            reg["n"] = n_
+        return reg["m"]
+
+    def marca_de(ruta, pag):
+        try:
+            return _marcas_arch(ruta).get(str(pag))
+        except Exception:
+            return None
+
+    def _guardar_marcas():
+        try:
+            almacen.guardar()
+        except Exception:
+            pass
+
+    def color_marca_actual():
+        c_ = almacen.datos.get("color_marca")
+        return c_ if c_ in NOMBRE_MARCA else COLORES_MARCA[0][1]
+
+    def redibujar_marcas():
+        for w_ in vistas:
+            w_.pedir()
+        mini_pedir_dibujo()
+        if app["pagina"] == "organizar":
+            org_dibujar()
+        dibujar_cinta()
+
+    def posiciones_a_marcar():
+        """Lo elegido en las miniaturas (si hay varias) o la pagina que se esta viendo."""
+        t_ = pest_activa()
+        if not t_:
+            return []
+        pags_ = paginas_de(t_)
+        if org.get("orden") and len(org.get("sel") or ()) > 1:
+            return sorted(i for i in org["sel"] if i < len(pags_))
+        v_ = vista_activa()
+        return [min(v_.pag, len(pags_) - 1)] if (v_ and pags_) else []
+
+    def marcar_paginas(color=None, posiciones=None):
+        """Marca (o desmarca, si ya tenian ese color) las paginas. color=False: quitar la marca."""
+        t_ = pest_activa()
+        if not t_:
+            v_estado.set("Abrí un PDF para marcar sus páginas.")
+            return
+        pags_ = paginas_de(t_)
+        pos_ = posiciones if posiciones is not None else posiciones_a_marcar()
+        if not pos_:
+            return
+        if color:
+            almacen.datos["color_marca"] = color
+        c_ = color_marca_actual() if color is None else color
+        todas_igual = color is not False and all(marca_de(pags_[i][0], pags_[i][1]) == c_ for i in pos_)
+        for i in pos_:
+            ruta_, pag_ = pags_[i][0], pags_[i][1]
+            m_ = _marcas_arch(ruta_)
+            if color is False or todas_igual:
+                m_.pop(str(pag_), None)
+            else:
+                m_[str(pag_)] = c_
+        _guardar_marcas()
+        redibujar_marcas()
+        n_ = len(marcadas())
+        que_ = f"la página {pos_[0] + 1}" if len(pos_) == 1 else f"{len(pos_)} páginas"
+        if color is False or todas_igual:
+            v_estado.set(f"Marca quitada de {que_} · {n_} marcada(s).")
+        else:
+            v_estado.set(f"{que_[0].upper() + que_[1:]} marcada{'s' if len(pos_) > 1 else ''} en "
+                         f"{NOMBRE_MARCA[c_].lower()} · {n_} marcada(s) · M marca · clic derecho: "
+                         "«Páginas marcadas» para extraer, copiar o eliminar.")
+
+    def marcadas(color=None):
+        """Posiciones (en el orden que se ve) de las paginas marcadas de la pestaña activa."""
+        t_ = pest_activa()
+        if not t_:
+            return []
+        return [i for i, (r_, p_, _g) in enumerate(paginas_de(t_))
+                if marca_de(r_, p_) and (color is None or marca_de(r_, p_) == color)]
+
+    def ir_marcada(d_):
+        v_ = vista_activa()
+        lista_ = marcadas()
+        if not v_ or not lista_:
+            v_estado.set("No hay páginas marcadas en este documento (M marca la página que estás viendo).")
+            return
+        actual_ = v_.pag
+        sig_ = [i for i in lista_ if (i > actual_ if d_ > 0 else i < actual_)]
+        destino_ = (sig_[0] if d_ > 0 else sig_[-1]) if sig_ else (lista_[0] if d_ > 0 else lista_[-1])
+        v_.ir(destino_)
+        v_estado.set(f"Página {destino_ + 1} · marcada {lista_.index(destino_) + 1} de {len(lista_)}")
+
+    def accion_marcadas(accion, color=None):
+        lista_ = marcadas(color)
+        if not lista_:
+            v_estado.set("No hay páginas marcadas" + (f" en {NOMBRE_MARCA[color].lower()}" if color else "") + ".")
+            return
+        if accion == "quitar":
+            marcar_paginas(False, lista_)
+            return
+        if accion == "ir":
+            vista_activa().ir(lista_[0])
+            return
+        org["sel"], org["ancla"] = set(lista_), lista_[0]
+        mini_pedir_dibujo()
+        if accion == "elegir":
+            v_estado.set(f"{len(lista_)} página(s) elegidas: Ctrl+C copia, Ctrl+E extrae, Supr elimina.")
+        elif accion == "extraer":
+            extraer_paginas()
+        elif accion == "copiar":
+            org_copiar()
+            v_estado.set(f"{len(lista_)} página(s) copiadas: andá a otra pestaña o a Organizar y Ctrl+V.")
+        elif accion == "imagen":
+            convertir_a_imagen()
+        elif accion == "eliminar":
+            if not messagebox.askyesno(NOMBRE, f"¿Eliminar las {len(lista_)} página(s) marcadas?\n\n"
+                                              "Se puede deshacer (Ctrl+Z) y no se guarda hasta «Guardar»."):
+                return
+            org_eliminar()
+            for w_ in vistas:
+                w_.lay_k = None
+            visor_pedir_dibujo()
+            mini_pedir_dibujo()
+            v_estado.set(f"{len(lista_)} página(s) eliminadas · Ctrl+Z deshace · «Guardar» (Ctrl+S) lo deja así.")
+
+    PLURAL_MARCA = {"Rojo": "rojas", "Naranja": "naranjas", "Amarillo": "amarillas", "Verde": "verdes",
+                    "Azul": "azules", "Morado": "moradas"}
+
+    def _acciones_marcas(m_, color, sufijo):
+        """Las acciones sobre las marcadas (de un color o todas), como renglones del menu."""
+        n_ = len(marcadas(color))
+        for acc_, nom_ in (("extraer", f"Extraer {sufijo} ({n_}) a un PDF nuevo"), ("copiar", f"Copiar {sufijo} ({n_})"),
+                           ("eliminar", f"Eliminar {sufijo} ({n_})"), ("imagen", f"Convertir {sufijo} a imagen…"),
+                           ("elegir", f"Elegir {sufijo}"), ("quitar", "Quitar las marcas")):
+            m_.add_command(label=nom_, command=lambda a__=acc_, h__=color: accion_marcadas(a__, h__),
+                           punto=color if acc_ == "extraer" and color else ("#EF4444" if acc_ == "eliminar" else
+                                                                            ("#0EA5E9" if acc_ == "extraer" else None)))
+
+    def menu_marcas(m_=None, x_=None, y_=None, pos=None):
+        """v5.0: marcar con colores; sobre una pagina marcada, las opciones son las de SU color (las rojas, las
+        verdes...). «Todas las marcadas» junta todos los colores."""
+        propio = m_ is None
+        if propio:
+            m_ = menu_contextual()
+        pos_ = pos if pos is not None else posiciones_a_marcar()
+        t_ = pest_activa()
+        if not t_ or not pos_:
+            return
+        pags_ = paginas_de(t_)
+        que_ = f"la página {pos_[0] + 1}" if len(pos_) == 1 else f"{len(pos_)} páginas"
+        c_aqui = marca_de(*pags_[pos_[0]][:2]) if len(pos_) == 1 else None
+        sub_c = menu_contextual(m_)
+        for n_, h_ in COLORES_MARCA:
+            sub_c.add_command(label=n_, punto=h_, command=lambda h__=h_, p__=list(pos_): marcar_paginas(h__, p__),
+                              acelerador="M" if h_ == color_marca_actual() else "")
+        if any(marca_de(*pags_[i][:2]) for i in pos_):
+            sub_c.add_separator()
+            sub_c.add_command(label="Quitar la marca", command=lambda p__=list(pos_): marcar_paginas(False, p__))
+        lista_ = marcadas()
+        colores_ = [h_ for _n, h_ in COLORES_MARCA if marcadas(h_)]
+        if c_aqui:  # el puntero esta sobre una pagina marcada: lo de ese color, a mano
+            nom_ = NOMBRE_MARCA[c_aqui]
+            m_.add_titulo(f"Marcada en {nom_.lower()}")
+            _acciones_marcas(m_, c_aqui, "las " + PLURAL_MARCA[nom_])
+            m_.add_cascade(label="Cambiar el color o quitar la marca", menu=sub_c)
+        else:
+            m_.add_cascade(label=f"Marcar {que_}", menu=sub_c)
+        if lista_ and (not c_aqui or len(colores_) > 1):
+            sub_m = menu_contextual(m_)
+            _acciones_marcas(sub_m, None, "todas")
+            if not c_aqui and len(colores_) > 1:
+                for h_ in colores_:
+                    sub_k = menu_contextual(sub_m)
+                    _acciones_marcas(sub_k, h_, "las " + PLURAL_MARCA[NOMBRE_MARCA[h_]])
+                    if not hasattr(sub_m, "_hijos"):
+                        sub_m.add_separator()
+                        sub_m._hijos = True
+                    sub_m.add_cascade(label=f"Solo las {PLURAL_MARCA[NOMBRE_MARCA[h_]]} ({len(marcadas(h_))})",
+                                      menu=sub_k)
+            sub_m.add_separator()
+            sub_m.add_command(label="Ir a la siguiente marcada", acelerador="Ctrl+↓", command=lambda: ir_marcada(1))
+            sub_m.add_command(label="Ir a la anterior marcada", acelerador="Ctrl+↑", command=lambda: ir_marcada(-1))
+            m_.add_cascade(label=f"Todas las marcadas ({len(lista_)})", menu=sub_m)
+        if propio:
+            if x_ is None:
+                x_, y_ = raiz.winfo_pointerx(), raiz.winfo_pointery()
+            m_.tk_popup(x_, y_)
+
+    def dibujar_marca(cv_, x_, y_, color_, tam_=1.0):
+        """La banderita (cinta de libro) de una pagina marcada, en la esquina de arriba a la derecha."""
+        w_, h_ = 16 * tam_, 26 * tam_
+        cv_.create_polygon(x_ - w_, y_, x_, y_, x_, y_ + h_, x_ - w_ / 2, y_ + h_ - 7 * tam_, x_ - w_, y_ + h_,
+                           fill=color_, outline="", tags="marca_pag")
+
     def convertir_a_imagen(*_):
         """v4.8: paginas a imagenes: cuales, formato y resolucion (como Nitro «A otro»)."""
         t_ = pest_activa()
@@ -7142,6 +7372,9 @@ def iniciar_interfaz():
                 etq += f"   (orig. {'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[fid % 26] + '·' if multi else ''}{pag + 1})"
             cv.create_text(cx, y + tam + 20, text=etq, fill=col("acento") if sel else col("texto2"),
                            font=(FAM, 10, "bold" if sel else "normal"), tags=("celda", f"i{i}"))
+            mc_ = marca_de(org["fuentes"][fid], pag) if fid < len(org["fuentes"]) else None
+            if mc_:  # v5.0: pagina marcada
+                dibujar_marca(cv, x + cw - 16, y + 6, mc_, 0.9)
         # limitar memoria de miniaturas
         while len(org["lru"]) > ORG_CACHE:
             org["cache"].pop(org["lru"].pop(0), None)
@@ -7367,6 +7600,8 @@ def iniciar_interfaz():
             org_rehacer()
         elif ctrl and k_ == "e":
             extraer_paginas()
+        elif k_ == "m" and not ctrl and org.get("sel"):
+            marcar_paginas(None, sorted(org["sel"]))
         elif ctrl and k_ == "a":
             org["sel"] = set(range(len(org["orden"])))
             org_dibujar()
@@ -7410,6 +7645,9 @@ def iniciar_interfaz():
         m_.add_command(label="Ver página", command=lambda: org_visor(min(org["sel"])), state=hay_sel)
         m_.add_command(label="Ver en el visor", command=org_al_visor, state="normal" if org["orden"] else "disabled")
         m_.add_separator()
+        if n_:
+            menu_marcas(m_, pos=sorted(org["sel"]) if n_ > 1 else [i if i is not None else min(org["sel"])])  # v5.0
+            m_.add_separator()
         m_.add_command(label=f"Copiar ({n_})", acelerador="Ctrl+C", command=org_copiar, state=hay_sel)
         m_.add_command(label=f"Cortar ({n_})", acelerador="Ctrl+X", command=lambda: org_copiar(True), state=hay_sel)
         m_.add_command(label="Pegar después", acelerador="Ctrl+V", command=org_pegar,
@@ -9132,6 +9370,9 @@ def iniciar_interfaz():
                 if falta and trozos == [None]:
                     cv_.create_text(x + w_ // 2, y + min(h_ // 2, 120), text=f"Página {i + 1}…",
                                     fill="#9AA6B4", font=(FAM, 11))
+                mc_ = marca_de(ruta, pag)
+                if mc_:  # v5.0: pagina marcada
+                    dibujar_marca(cv_, x + w_ - max(10, w_ * 0.03), y, mc_, max(0.8, min(1.6, w_ / 500)))
                 if vis["comp"]:  # v3.5: comparando: numero de la hoja (se toma de ahi) y marco si esta elegida
                     sel_p = i in (org_de(t_).get("sel") or ())
                     if sel_p:
@@ -9557,6 +9798,9 @@ def iniciar_interfaz():
                 i, ruta, pag, M, x, y = pp
                 p_ = fitz.Point(cx_ - x, cy_ - y) * ~M
                 m_.add_titulo(f"Página {i + 1}" + (f" de {len(self.lay['pags'])}" if self.lay else ""))  # v4.2
+                multi_ = org.get("orden") and len(org.get("sel") or ()) > 1 and i in org["sel"]
+                menu_marcas(m_, pos=None if multi_ else [i])  # v5.0: marcar (con colores) y las marcadas
+                m_.add_separator()
                 if vis["comp"] and org.get("orden"):  # v3.5: comparando, la hoja se copia, corta o pega
                     if i not in org["sel"]:
                         org["sel"], org["ancla"] = {i}, i
@@ -9661,6 +9905,10 @@ def iniciar_interfaz():
                 self.zoom_paso(-1)
             elif ctrl and k_ in ("0", "KP_0"):
                 self.poner_zoom("Ajustar ancho")
+            elif k_ in ("m", "M") and not ctrl and not vis.get("ined") and not vis.get("edit_item"):
+                marcar_paginas()  # v5.0: marcar la pagina con el color de siempre (otra vez: se quita)
+            elif ctrl and k_ in ("Down", "Up") and marcadas():
+                ir_marcada(1 if k_ == "Down" else -1)
             elif ctrl and (k_.lower() == "y" or (k_ == "Z" and ev.state & 0x1)):
                 rehacer_edicion()
             elif ctrl and k_.lower() == "z":
@@ -9856,6 +10104,9 @@ def iniciar_interfaz():
                 cvm.create_oval(Wm - 30, y + 8, Wm - 18, y + 20, fill="#FFC800", outline="#C99A00")
             if vis["res"].get(ruta, {}).get(pag):
                 cvm.create_oval(18, y + 8, 30, y + 20, fill="#FFE600", outline="#C9B000")
+            mc_ = marca_de(ruta, pag)
+            if mc_:  # v5.0: pagina marcada
+                dibujar_marca(cvm, cx + MINI_TAM // 2 - 2, y + 4, mc_, 0.8)
             cvm.create_text(cx, y + MINI_TAM + 22, text=str(i + 1),
                             fill=col("acento") if (es_act or es_sel) else col("texto2"),
                             font=(FAM, 10, "bold" if es_act else "normal"))
@@ -9973,6 +10224,8 @@ def iniciar_interfaz():
         n_ = len(org["sel"])
         m_ = menu_contextual()
         m_.add_command(label="Ver", command=lambda: vista_activa().ir(i))
+        m_.add_separator()
+        menu_marcas(m_, pos=sorted(org["sel"]) if n_ > 1 else [i])  # v5.0
         m_.add_separator()
         m_.add_command(label=f"Copiar ({n_})   Ctrl+C", command=org_copiar)
         m_.add_command(label=f"Cortar ({n_})   Ctrl+X", command=lambda: org_copiar(True))
@@ -10209,6 +10462,8 @@ def iniciar_interfaz():
             mini_dibujar()
         elif ctrl and k_ == "e" and org.get("sel"):
             extraer_paginas()
+        elif k_ == "m" and not ctrl and org.get("sel"):
+            marcar_paginas(None, sorted(org["sel"]))
         elif ctrl and k_ in ("c", "x", "v"):
             teclas_paginas(k_)
         elif k_ in ("up", "down", "prior", "next"):

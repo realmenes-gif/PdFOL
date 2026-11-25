@@ -1,3 +1,10 @@
+## PdFOL v5.0 · by Meneses999
+
+- **Marcar páginas con colores** mientras leés: tecla **M**, la cinta (INICIO → Marcas, EDITAR → Páginas) o el clic derecho. Rojo, naranja, amarillo, verde, azul o morado; la banderita se ve en la hoja, en las miniaturas y en Organizar. Las marcas se quedan aunque navegues, cambies de pestaña o cierres el PDF.
+- **Según el color**: clic derecho sobre una página marcada y las opciones son las de ese color: extraer a un PDF nuevo, copiar, eliminar, convertir a imagen o elegir. «Todas las marcadas» junta todos los colores. **Ctrl+↓ / Ctrl+↑**: siguiente o anterior marcada.
+
+**Descarga:** `PdFOL_v5.0_portable.zip` (sin instalar) o `PdFOL_v5.0_instalador.exe`.
+
 ## PdFOL v4.9.2 · by Meneses999
 
 - En **Inicio** y en **Todas las herramientas** ya no quedan las miniaturas del PDF abierto al costado.
