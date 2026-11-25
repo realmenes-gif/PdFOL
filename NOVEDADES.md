@@ -1,3 +1,10 @@
+## PdFOL v5.1.1 · by Meneses999
+
+- **Borrar textos**: Supr (o clic derecho → «Borrar este texto») borra el texto, y ya no vuelve a aparecer el original al tocar ahí. «Volver al texto original» lo recupera.
+- Al empezar a escribir, lo que tecleás entra siempre en el cuadro (antes a veces se iba a la página y quedaba un recuadro celeste).
+
+**Descarga:** `PdFOL_v5.1.1_portable.zip` (sin instalar) o `PdFOL_v5.1.1_instalador.exe`.
+
 ## PdFOL v5.1 · by Meneses999
 
 - **Líneas de referencia al mover** un texto, una firma o un sello (como PowerPoint): aparecen solo mientras lo movés, cuando queda centrado en la hoja (horizontal o vertical) o alineado con el borde o el centro de otro texto o imagen. Sin cuadrícula; un imán muy suave para que quede exacto.

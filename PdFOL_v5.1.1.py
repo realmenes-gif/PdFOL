@@ -363,12 +363,18 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.1"
-VERSION_INTERNA = "5.1"
+VERSION = "v5.1.1"
+VERSION_INTERNA = "5.1.1"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.1.1", [
+        "Borrar textos: Supr (o clic derecho → «Borrar este texto») borra el texto; ya no vuelve a aparecer el "
+        "original al tocar ahí. «Volver al texto original» lo recupera.",
+        "Al empezar a escribir, lo que se teclea entra siempre en el cuadro (antes a veces se iba a la página y "
+        "quedaba un recuadro celeste de texto elegido).",
+    ]),
     ("v5.1", [
         "Líneas de referencia al mover un texto, una firma o un sello (como PowerPoint): aparecen solo mientras "
         "lo movés, cuando queda centrado en la hoja o alineado con otro texto o imagen. Sin cuadrícula; un imán muy "
@@ -9874,9 +9880,14 @@ def iniciar_interfaz():
                                                     visor_pedir_dibujo()))
                     m_.add_separator()
                 toco = [it for it in vis["res"].get(ruta, {}).get(pag, []) if item_contiene(it, p_)]
+                if toco and toco[-1]["tipo"] == "reemplazo" and (toco[-1].get("txt") or "").strip():
+                    def _borrar_t(it__=toco[-1]):
+                        vis["edit_item"] = (ruta, pag, it__)
+                        quitar_editado()
+                    m_.add_command(label="Borrar este texto", command=_borrar_t, acelerador="Supr", punto="#EF4444")
                 if toco:
                     que_ = {"firma": "Quitar esta firma o sello", "texto_n": "Quitar este texto",
-                            "reemplazo": "Deshacer este cambio de texto"}.get(toco[-1]["tipo"], "Quitar este resaltado")
+                            "reemplazo": "Volver al texto original"}.get(toco[-1]["tipo"], "Quitar este resaltado")
                     m_.add_command(label=que_, command=lambda: quitar_resaltado(ruta, pag, toco[-1]),
                                    punto="#EF4444")
                     m_.add_separator()
@@ -12460,6 +12471,8 @@ def iniciar_interfaz():
         """v4.1: donde esta el texto ahora (un parrafo cambiado y movido ya no ocupa su lugar original)."""
         if it_.get("tipo") != "reemplazo":
             return tuple(it_["rect"])
+        if not (it_.get("txt") or "").strip():  # v5.1.1: texto borrado: su lugar (para elegirlo otra vez)
+            return tuple(it_["rect_orig"])
         r_ = None
         for x_, base, _l, _p, w_ in diseno_texto(it_):
             q_ = fitz.Rect(x_, base - it_["tam"], x_ + max(w_, 2) + 1, base + it_["tam"] * 0.3)
@@ -12538,6 +12551,15 @@ def iniciar_interfaz():
             # con interlineado amplio cada renglon venia en un bloque aparte y se cambiaba un solo renglon
             todas_l = [(bi_, ln) for bi_, bl in enumerate(bloques_) for ln in bl.get("lines", [])
                        if "".join(sp["text"] for sp in ln["spans"]).strip()]
+            # v5.1.1: lo que ya se cambio (o se borro) no se vuelve a tomar del PDF: si no, al tocar donde se borro
+            # un texto aparecia otra vez el original
+            ya_ = [fitz.Rect(rb_) for o_ in vis["res"].get(ruta, {}).get(pag, []) if o_.get("tipo") == "reemplazo"
+                   for rb_ in (o_.get("rects_borrar") or [o_["rect_orig"]])]
+            if ya_:
+                def _tapado(ln_):
+                    r_ = fitz.Rect(ln_["bbox"]) * m_
+                    return any(abs(r_ & y_) > abs(r_) * 0.5 for y_ in ya_ if r_.intersects(y_))
+                todas_l = [(b_, l_) for b_, l_ in todas_l if not _tapado(l_)]
             for _uno in (1,):
                 cajas_t = [fitz.Rect(ln["bbox"]) * m_ for _b, ln in todas_l]
                 dentro = [k_ for k_, r_ in enumerate(cajas_t) if r_.contains(pt_)]
@@ -13344,6 +13366,10 @@ def iniciar_interfaz():
         ed["txt"].configure(bg=fondo_, fg=fondo_, insertwidth=0, selectbackground=fondo_,
                             selectforeground=fondo_, inactiveselectbackground=fondo_)
         cv_.create_window(X, Y, window=ed["txt"], anchor="nw", width=1, height=1, tags=("ined", "ined_entrada"))
+        # v5.1.1: al volver a dibujar, el cuadro escondido pierde el foco y lo que se escribia no entraba
+        f_ = raiz.focus_get()
+        if f_ is not ed["txt"] and not (f_ is not None and f_.winfo_class() in ("Entry", "Toplevel")):
+            raiz.after_idle(lambda: vis.get("ined") is ed and ed["txt"].winfo_exists() and ed["txt"].focus_set())
         # v4.1.1: boton «Listo» debajo del recuadro (tambien: clic afuera o Ctrl+Enter)
         bw_, bh_ = px(64), px(24)
         bx_, by_ = X + W + 3 - bw_, Y + H + px(10)
@@ -13937,6 +13963,16 @@ def iniciar_interfaz():
         foco = raiz.focus_get()
         if foco is not None and foco.winfo_class() in ("Entry", "Text"):
             return
+        it_ = e_[2]
+        if it_.get("tipo") == "reemplazo":  # v5.1.1: Supr BORRA el texto (antes volvia a aparecer el original)
+            if (it_.get("txt") or "").strip():
+                guardar_historia()
+                it_["txt"], it_["runs"] = "", None
+                ajustar_reemplazo(it_)
+                tocar(it_)
+                visor_pedir_dibujo()
+                v_estado.set("Texto borrado · Ctrl+Z lo vuelve · clic derecho → «Volver al texto original».")
+            return "break"
         vis["edit_item"] = None
         quitar_resaltado(*e_)
         return "break"
