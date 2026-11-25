@@ -363,12 +363,16 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.0"
-VERSION_INTERNA = "5.0"
+VERSION = "v5.0.1"
+VERSION_INTERNA = "5.0.1"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.0.1", [
+        "«Quitar marcas» (cinta INICIO → Marcas y clic derecho): quitar las de un color (solo aparecen los colores "
+        "que hay, con cuántas) o todas.",
+    ]),
     ("v5.0", [
         "Marcar páginas con colores mientras leés (tecla M, la cinta o el clic derecho): rojo, naranja, amarillo, "
         "verde, azul o morado. Las marcas se quedan aunque navegues, cambies de pestaña o cierres el PDF.",
@@ -3514,6 +3518,7 @@ _ESTRELLA = [(12 + (9 if k % 2 == 0 else 4) * math.cos(math.radians(-90 + 36 * k
 GLIFOS = {
     # v4.7: glifos de la cinta grande (estilo Nitro)
     "marcar_g": [[(6, 3), (18, 3), (18, 21), (12, 16.5), (6, 21), (6, 3)]],
+    "desmarcar": [[(4, 3), (13, 3), (13, 19), (8.5, 15.5), (4, 19), (4, 3)], [(15, 11), (21, 17)], [(21, 11), (15, 17)]],
     "imagen_g": [_rect(3.5, 4.5, 20.5, 19.5), _arco(8.5, 9.5, 1.8, 0, 360, 12), [(3.5, 17), (9, 12), (13, 15.5),
                                                                                 (16, 13), (20.5, 17)]],
     "extraer": [[(14, 7), (14, 3), (4, 3), (4, 21), (14, 21), (14, 17)], [(9, 12), (21, 12)], [(17, 8), (21, 12), (17, 16)]],
@@ -5375,7 +5380,11 @@ def iniciar_interfaz():
                                 ("marca_sig", "Siguiente", "sig", lambda: ir_marcada(1), False, "p",
                                  "Ir a la siguiente página marcada (Ctrl+↓)"),
                                 ("marca_ant", "Anterior", "ant", lambda: ir_marcada(-1), False, "p",
-                                 "Ir a la anterior página marcada (Ctrl+↑)")]),
+                                 "Ir a la anterior página marcada (Ctrl+↑)"),
+                                ("marca_quitar", "Quitar marcas", "desmarcar", lambda: menu_quitar_marcas(
+                                    x_=cinta.winfo_rootx() + (app.get("_x_marcar") or 300),
+                                    y_=cinta.winfo_rooty() + cinta.winfo_height()), False, "p",
+                                 "Quitar las marcas de un color o todas")]),
                     ("Comentario", [("resaltar", "Sombrear", "resaltar", lambda: alternar_resaltar(),
                                      bool(vis["modo_res"]), "g", "Sombrear texto (elegí el texto y el color)"),
                                     ("firmar", "Firmar", "firmar", lambda: cinta_panel("firmar"), panel == "firmar",
@@ -7016,10 +7025,34 @@ def iniciar_interfaz():
         n_ = len(marcadas(color))
         for acc_, nom_ in (("extraer", f"Extraer {sufijo} ({n_}) a un PDF nuevo"), ("copiar", f"Copiar {sufijo} ({n_})"),
                            ("eliminar", f"Eliminar {sufijo} ({n_})"), ("imagen", f"Convertir {sufijo} a imagen…"),
-                           ("elegir", f"Elegir {sufijo}"), ("quitar", "Quitar las marcas")):
+                           ("elegir", f"Elegir {sufijo}"),
+                           ("quitar", f"Quitar las marcas {sufijo.replace('las ', '')}" if color else "Quitar todas las marcas")):
             m_.add_command(label=nom_, command=lambda a__=acc_, h__=color: accion_marcadas(a__, h__),
                            punto=color if acc_ == "extraer" and color else ("#EF4444" if acc_ == "eliminar" else
                                                                             ("#0EA5E9" if acc_ == "extraer" else None)))
+
+    def menu_quitar_marcas(m_=None, x_=None, y_=None):
+        """v5.0.1: «Quitar marcas»: las de un color (solo los colores que hay) o todas."""
+        propio = m_ is None
+        sub_ = menu_contextual() if propio else menu_contextual(m_)
+        lista_ = marcadas()
+        for n_, h_ in COLORES_MARCA:
+            k_ = len(marcadas(h_))
+            if k_:
+                sub_.add_command(label=f"Quitar las {PLURAL_MARCA[n_]} ({k_})", punto=h_,
+                                 command=lambda h__=h_: accion_marcadas("quitar", h__))
+        if lista_:
+            sub_.add_separator()
+            sub_.add_command(label=f"Quitar todas ({len(lista_)})", punto="#EF4444",
+                             command=lambda: accion_marcadas("quitar"))
+        else:
+            sub_.add_titulo("No hay páginas marcadas")
+        if propio:
+            if x_ is None:
+                x_, y_ = raiz.winfo_pointerx(), raiz.winfo_pointery()
+            sub_.tk_popup(x_, y_)
+        else:
+            m_.add_cascade(label=f"Quitar marcas ({len(lista_)})", menu=sub_ if lista_ else None)
 
     def menu_marcas(m_=None, x_=None, y_=None, pos=None):
         """v5.0: marcar con colores; sobre una pagina marcada, las opciones son las de SU color (las rojas, las
@@ -7066,6 +7099,8 @@ def iniciar_interfaz():
             sub_m.add_command(label="Ir a la siguiente marcada", acelerador="Ctrl+↓", command=lambda: ir_marcada(1))
             sub_m.add_command(label="Ir a la anterior marcada", acelerador="Ctrl+↑", command=lambda: ir_marcada(-1))
             m_.add_cascade(label=f"Todas las marcadas ({len(lista_)})", menu=sub_m)
+        if lista_:
+            menu_quitar_marcas(m_)
         if propio:
             if x_ is None:
                 x_, y_ = raiz.winfo_pointerx(), raiz.winfo_pointery()

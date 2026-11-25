@@ -1,3 +1,10 @@
+## PdFOL v5.0.1 · by Meneses999
+
+- **Quitar marcas** (cinta INICIO → Marcas, y clic derecho): quitar las de un color (aparecen solo los colores que hay, con cuántas) o todas.
+- Las marcas se recuerdan en PdFOL: al cerrar y volver a abrir el PDF siguen ahí.
+
+**Descarga:** `PdFOL_v5.0.1_portable.zip` (sin instalar) o `PdFOL_v5.0.1_instalador.exe`.
+
 ## PdFOL v5.0 · by Meneses999
 
 - **Marcar páginas con colores** mientras leés: tecla **M**, la cinta (INICIO → Marcas, EDITAR → Páginas) o el clic derecho. Rojo, naranja, amarillo, verde, azul o morado; la banderita se ve en la hoja, en las miniaturas y en Organizar. Las marcas se quedan aunque navegues, cambies de pestaña o cierres el PDF.
