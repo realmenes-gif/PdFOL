@@ -363,12 +363,16 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.3.1"
-VERSION_INTERNA = "5.3.1"
+VERSION = "v5.3.2"
+VERSION_INTERNA = "5.3.2"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.3.2", [
+        "Al guardar, la hoja se queda donde estaba (misma página y misma parte), también al guardar páginas "
+        "organizadas.",
+    ]),
     ("v5.3.1", [
         "Borrar o mover una imagen ya no deja un hueco blanco: como Nitro, se saca solo esa imagen y el fondo "
         "de abajo queda como el resto.",
@@ -12643,6 +12647,37 @@ def iniciar_interfaz():
             time.sleep(0.05)
         return pr.exitcode == 0 and os.path.isfile(dest)
 
+    def recordar_lugar():
+        """v5.3.1: donde estaba la hoja: que pagina y que parte de ella (para volver ahi despues de guardar)."""
+        v_ = vista_activa()
+        if not v_ or not v_.lay or not v_.lay.get("pags"):
+            return None
+        lay = v_.lay
+        i_ = max(0, min(v_.pag, len(lay["pags"]) - 1))
+        dentro = (v_.cv.canvasy(0) - lay["ys"][i_]) / max(1.0, lay["hs"][i_])
+        return {"v": v_, "pag": i_, "dentro": dentro, "x": v_.cv.xview()[0], "n": len(lay["pags"])}
+
+    def volver_al_lugar(l_, intentos=20):
+        if not l_:
+            return
+        v_ = l_["v"]
+        try:
+            lay = v_.lay
+            if not lay or not lay.get("pags"):
+                if intentos:
+                    raiz.after(150, lambda: volver_al_lugar(l_, intentos - 1))
+                return
+            i_ = min(l_["pag"], len(lay["pags"]) - 1)
+            total = max(lay["total"], v_.cv.winfo_height(), 1)
+            y_ = lay["ys"][i_] + l_["dentro"] * lay["hs"][i_]
+            if abs(v_.cv.canvasy(0) - y_) > 2:
+                v_.cv.yview_moveto(max(0.0, y_ / total))
+                v_.cv.xview_moveto(l_["x"])
+                v_.pag = i_
+                v_.dibujar()
+        except Exception:
+            pass
+
     def guardar_paginas(t_, copia):
         o_ = org_de(t_)
         if not o_.get("orden"):
@@ -12665,6 +12700,7 @@ def iniciar_interfaz():
             else:
                 messagebox.showerror(NOMBRE, f"No se pudo guardar:\n{dest}")
             return
+        lugar_ = recordar_lugar()  # v5.3.1: al guardar no se mueve de pagina
         rutas_t = rutas_de(t_)
         if n_resaltes(rutas_t):  # primero lo dibujado (va en cada PDF de origen, en su pagina)
             guardar_resaltados(False, rutas_t)
@@ -12727,6 +12763,8 @@ def iniciar_interfaz():
         visor_pedir_dibujo()
         mini_pedir_dibujo()
         refrescar_boton_guardar()
+        for ms_ in (250, 700, 1300, 2100):
+            raiz.after(ms_, lambda: volver_al_lugar(lugar_))
         v_estado.set(f"«{t_['nombre']}» guardado con {n_} páginas.")
 
     def guardar_resaltados_dialogo(*_):
@@ -12768,6 +12806,9 @@ def iniciar_interfaz():
         """Agrega los resaltados como anotaciones de resaltado del PDF."""
         if vis.get("ined"):  # v4.1: lo que se estaba escribiendo en la hoja queda puesto
             ined_terminar(True)
+        lugar_ = recordar_lugar()  # v5.3.1: al guardar no se mueve de pagina
+        for ms_ in (200, 600, 1200, 2000):
+            raiz.after(ms_, lambda: volver_al_lugar(lugar_))
         hechos, errores = 0, []
         for ruta, pags in list(vis["res"].items()):
             if rutas is not None and ruta not in rutas:

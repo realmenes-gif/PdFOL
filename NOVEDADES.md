@@ -1,3 +1,10 @@
+## PdFOL v5.3.2 · by Meneses999
+
+- Al guardar, la hoja **se queda donde estaba** (misma página y misma parte).
+- (v5.3.1) Borrar o mover una imagen ya no deja un hueco blanco: el fondo queda como el resto.
+
+**Descarga:** `PdFOL_v5.3.2_portable.zip` (sin instalar) o `PdFOL_v5.3.2_instalador.exe`.
+
 ## PdFOL v5.3.1 · by Meneses999
 
 - Borrar o mover una imagen ya **no deja un hueco blanco**: se saca solo esa imagen y el fondo queda como el resto (como Nitro).
