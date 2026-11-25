@@ -1,3 +1,11 @@
+## PdFOL v5.4.1 · by Meneses999
+
+- Arreglado: **faltaban letras** (o salían otras) al abrir algunos cuadros de texto. Se usa la copia correcta de cada fuente del PDF.
+- Los renglones se arman **letra por letra**, como Nitro: los renglones escritos en pedazos se toman enteros y en orden.
+- Arreglado: fuentes con nombre largo (Palatino Linotype…) salían con otra letra.
+
+**Descarga:** `PdFOL_v5.4.1_portable.zip` (sin instalar) o `PdFOL_v5.4.1_instalador.exe`.
+
 ## PdFOL v5.4 · by Meneses999
 
 - Al tocar un texto toma el **recuadro entero** (títulos de varios renglones, direcciones, firmas, celdas), respetando sus Enter.

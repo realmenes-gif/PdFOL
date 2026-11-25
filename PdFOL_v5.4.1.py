@@ -363,12 +363,20 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.4"
-VERSION_INTERNA = "5.4"
+VERSION = "v5.4.1"
+VERSION_INTERNA = "5.4.1"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.4.1", [
+        "Arreglado: al abrir algunos cuadros de texto faltaban letras o salían otras. Un PDF puede traer varias "
+        "copias recortadas de la misma letra (cada una con otras letras adentro): ahora se usa la copia correcta "
+        "de cada texto, leyendo lo que el propio PDF dice de ella.",
+        "Los renglones se arman letra por letra (como Nitro): un renglón escrito en pedazos (PDF ya editados, Word, "
+        "Canva) se toma entero y en orden.",
+        "Arreglado: nombres de letra largos (Palatino Linotype…) salían con otra letra; guiones especiales.",
+    ]),
     ("v5.4", [
         "Como Nitro: al tocar un texto se toma el RECUADRO entero (títulos de varios renglones, direcciones, "
         "firmas, celdas de tablas), no solo un renglón. Respeta los Enter que tenía.",
@@ -4125,53 +4133,197 @@ def _letras_con_dibujo(buf, mapa):
     return ok
 
 
-def fuente_original_pdf(doc, pag, nombre_span):
+def _hex_u(h):
+    try:
+        return bytes.fromhex(h if len(h) % 2 == 0 else "0" + h).decode("utf-16-be")
+    except Exception:
+        return ""
+
+
+def _tounicode(doc, xref):
+    """v5.4.1: el /ToUnicode de una fuente del PDF: {codigo: letra} (lo que dice el propio PDF de ESA fuente)."""
+    import re as _r
+    try:
+        t_, v_ = doc.xref_get_key(xref, "ToUnicode")
+        if t_ != "xref":
+            return None
+        txt = doc.xref_stream(int(v_.split()[0])).decode("latin-1")
+    except Exception:
+        return None
+    m_ = {}
+    for blk in _r.findall(r"beginbfchar(.*?)endbfchar", txt, _r.S):
+        for a_, b_ in _r.findall(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]*)>", blk):
+            m_.setdefault(int(a_, 16), _hex_u(b_))
+    for blk in _r.findall(r"beginbfrange(.*?)endbfrange", txt, _r.S):
+        for a_, b_, r_ in _r.findall(r"<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(\[[^\]]*\]|<[0-9A-Fa-f]*>)", blk):
+            lo, hi = int(a_, 16), int(b_, 16)
+            if r_.startswith("["):
+                for k_, h_ in enumerate(_r.findall(r"<([0-9A-Fa-f]*)>", r_)):
+                    m_.setdefault(lo + k_, _hex_u(h_))
+            elif r_[1:-1]:
+                h0 = r_[1:-1]
+                for c_ in range(lo, min(hi, lo + 65535) + 1):
+                    m_.setdefault(c_, _hex_u(format(int(h0, 16) + (c_ - lo), "0%dX" % len(h0))))
+    return m_
+
+
+def _mapa_de_fuente(doc, xref, buf):
+    """v5.4.1: {letra: dibujo (glyph id)} de ESA fuente del PDF, sacado de su /ToUnicode (y no del nombre: un PDF
+    puede tener varias copias recortadas de la misma fuente, cada una con otros numeros de dibujo)."""
+    import re
+    tu = _tounicode(doc, xref)
+    sub = (doc.xref_get_key(xref, "Subtype")[1] or "").strip("/")
+    if not tu and sub in ("TrueType", "Type1"):  # sin /ToUnicode: lo dice su /Encoding (WinAnsi + Differences)
+        tu = {}
+        for c_ in range(32, 256):
+            try:
+                tu[c_] = bytes([c_]).decode("cp1252")
+            except Exception:
+                pass
+        try:
+            t_, v_ = doc.xref_get_key(xref, "Encoding")
+            enc_ = doc.xref_object(int(v_.split()[0])) if t_ == "xref" else (v_ or "")
+            dif_ = re.search(r"/Differences\s*\[(.*?)\]", enc_, re.S)
+            if dif_:
+                from fontTools import agl
+                c_ = 0
+                for tok in re.findall(r"\d+|/[^\s/\[\]]+", dif_.group(1)):
+                    if tok[0] == "/":
+                        u_ = agl.toUnicode(tok[1:])
+                        if u_:
+                            tu[c_] = u_
+                        else:
+                            tu.pop(c_, None)
+                        c_ += 1
+                    else:
+                        c_ = int(tok)
+        except Exception:
+            pass
+    if not tu:
+        return None
+    mapa = {}
+    if sub == "Type0":
+        c2g = None
+        try:
+            m_ = re.search(r"(\d+)\s+0\s+R", doc.xref_get_key(xref, "DescendantFonts")[1] or "")
+            t_, v_ = doc.xref_get_key(int(m_.group(1)), "CIDToGIDMap")
+            if t_ == "xref":
+                raw = doc.xref_stream(int(v_.split()[0]))
+                c2g = {k_ // 2: int.from_bytes(raw[k_:k_ + 2], "big") for k_ in range(0, len(raw) - 1, 2)}
+        except Exception:
+            c2g = None
+        for c_, u_ in tu.items():
+            if len(u_) == 1 and ord(u_) >= 32:
+                g_ = c2g.get(c_, 0) if c2g is not None else c_
+                if g_ > 0:
+                    mapa.setdefault(ord(u_), g_)
+    else:
+        try:
+            from fontTools.ttLib import TTFont
+            tt = TTFont(io.BytesIO(buf), lazy=True)
+            tabs = {(t__.platformID, t__.platEncID): t__.cmap for t__ in tt["cmap"].tables} if "cmap" in tt else {}
+        except Exception:
+            return None
+        for c_, u_ in tu.items():
+            if len(u_) != 1 or ord(u_) < 32:
+                continue
+            nombre = None
+            if (3, 1) in tabs:
+                nombre = tabs[(3, 1)].get(ord(u_))
+            if nombre is None and (3, 0) in tabs:
+                nombre = tabs[(3, 0)].get(0xF000 + c_) or tabs[(3, 0)].get(c_)
+            if nombre is None and (1, 0) in tabs and c_ < 128:
+                nombre = tabs[(1, 0)].get(c_)
+            if nombre is not None:
+                try:
+                    g_ = tt.getGlyphID(nombre)
+                except Exception:
+                    g_ = 0
+                if g_ > 0:
+                    mapa.setdefault(ord(u_), g_)
+    return mapa or None
+
+
+def fuente_original_pdf(doc, pag, nombre_span, texto=None):
     """La fuente que trae el PDF (la de ese texto), lista para escribir con ella: clave en _FUENTES_PDF o None.
-    Los PDF guardan solo las letras que usan y casi nunca dicen que letra es cada dibujo; eso se saca de como
-    las usa el documento (get_texttrace) y se le agrega a la fuente."""
+    Los PDF guardan solo las letras que usan; cual letra es cada dibujo se saca de lo que dice el PDF de ESA
+    fuente (/ToUnicode) o, si no lo dice, de como la usa el documento (get_texttrace)."""
     try:
         base_ = (nombre_span or "").split("+")[-1]
-        xref = None
+        cands = []
         for f_ in doc[pag].get_fonts(full=True):
-            if f_[3].split("+")[-1] == base_ and f_[1] in ("ttf", "otf"):
-                xref = f_[0]
-                break
-        if not xref:
+            nb_ = f_[3].split("+")[-1]
+            if (nb_ == base_ or (len(base_) >= 16 and nb_.startswith(base_))) and f_[1] in ("ttf", "otf") \
+                    and f_[0] not in [c_[0] for c_ in cands]:
+                cands.append((f_[0], nb_, f_[3]))
+        if not cands:
             return None
-        clave = f"{doc.name}:{xref}:{base_}"
-        if clave in _FUENTES_PDF:
-            return clave if _FUENTES_PDF[clave] else None
-        _FUENTES_PDF[clave] = None
+        letras_ = {ord(ch) for ch in (texto or "") if not ch.isspace()}
+        mejor = None
+        for xref, nb_, completo_ in cands:  # v5.4.1: varias copias con el mismo nombre: la que tiene ESE texto
+            clave = f"{doc.name}:{xref}:{nb_}"
+            if clave not in _FUENTES_PDF:
+                _FUENTES_PDF[clave] = _armar_fuente_pdf(doc, pag, xref, nb_, completo_, len(cands) == 1)
+            fp_ = _FUENTES_PDF[clave]
+            if not fp_:
+                continue
+            cubre = len(letras_ & fp_["ok"]) if fp_.get("ok") is not None else len(letras_)
+            if mejor is None or cubre > mejor[0]:
+                mejor = (cubre, clave)
+            if cubre == len(letras_):
+                break
+        return mejor[1] if mejor else None
+    except Exception:
+        return None
+
+
+def _armar_fuente_pdf(doc, pag, xref, base_, nombre_completo_, unica):
+    try:
         _n, ext, _t, buf = doc.extract_font(xref)
         if not buf or ext not in ("ttf", "otf"):
             return None
-        votos = {}
-        for k_ in [pag] + [k_ for k_ in range(len(doc)) if k_ != pag][:40]:
-            pg_ = doc[k_]
-            if k_ != pag and not any(f_[0] == xref for f_ in pg_.get_fonts(full=True)):
-                continue
-            for sp_ in pg_.get_texttrace():
-                if sp_["font"].split("+")[-1] != base_:
+        mapa = _mapa_de_fuente(doc, xref, buf)
+        if mapa is None and not unica:
+            return None  # sin /ToUnicode y con varias copias del mismo nombre: no se puede saber
+        if mapa is None:
+            votos = {}
+            for k_ in [pag] + [k_ for k_ in range(len(doc)) if k_ != pag][:40]:
+                pg_ = doc[k_]
+                if k_ != pag and not any(f_[0] == xref for f_ in pg_.get_fonts(full=True)):
                     continue
-                cs_ = sp_["chars"]
-                for n_, c_ in enumerate(cs_):
-                    u_, g_ = c_[0], c_[1]
-                    if g_ <= 0 or u_ < 32 or (n_ + 1 < len(cs_) and cs_[n_ + 1][1] <= 0):
-                        continue  # sin dibujo, o una ligadura (fi, ti...): esa letra sola no se sabe
-                    votos.setdefault(u_, {}).setdefault(g_, 0)
-                    votos[u_][g_] += 1
-        mapa = {u_: max(gs_, key=gs_.get) for u_, gs_ in votos.items()}
+                for sp_ in pg_.get_texttrace():
+                    nt_ = sp_["font"].split("+")[-1]
+                    if nt_ != base_ and not (len(nt_) >= 16 and base_.startswith(nt_)):  # (nombres cortados)
+                        continue
+                    cs_ = sp_["chars"]
+                    for n_, c_ in enumerate(cs_):
+                        u_, g_ = c_[0], c_[1]
+                        if g_ <= 0 or u_ < 32 or (n_ + 1 < len(cs_) and cs_[n_ + 1][1] <= 0):
+                            continue  # sin dibujo, o una ligadura (fi, ti...): esa letra sola no se sabe
+                        votos.setdefault(u_, {}).setdefault(g_, 0)
+                        votos[u_][g_] += 1
+            mapa = {u_: max(gs_, key=gs_.get) for u_, gs_ in votos.items()}
         if not mapa:
             return None
         ft_ = fitz.Font(fontbuffer=buf)
         if not all(ft_.has_glyph(u_) == g_ for u_, g_ in mapa.items()):
             buf = agregar_mapa_letras(buf, mapa)
             ft_ = fitz.Font(fontbuffer=buf)
-        ok_ = _letras_con_dibujo(buf, mapa)
-        if ok_ is not None:  # v5.2: las letras cuyo dibujo el PDF no guardo (vacias) van con la mas parecida
+        import re as _re_f
+        if _re_f.match(r"^[A-Z]{6}\+", nombre_completo_):
+            # v5.4.1: fuente RECORTADA (solo las letras que usa el PDF): solo se confia en las letras que el
+            # documento usa de verdad. Su tabla de letras puede apuntar a dibujos que no son (un espacio que
+            # salia como un garabato) o vacios: esas van con la mas parecida
+            ok_ = set(mapa)
+        else:
+            ok_ = _letras_con_dibujo(buf, mapa)
+        if ok_ is not None:
+            # solo las letras que tienen dibujo de verdad en ESTA copia (las demas van con la mas parecida)
+            con_dib = _letras_con_dibujo(buf, {})
+            if con_dib is not None:
+                ok_ = {u_ for u_ in ok_ if u_ in con_dib}
             _LETRAS_OK[id(ft_)] = ok_
-        _FUENTES_PDF[clave] = {"buf": buf, "font": ft_, "nom": "PdO%X" % (zlib.crc32(buf) & 0xFFFFFF)}
-        return clave
+        return {"buf": buf, "font": ft_, "nom": "PdO%X" % (zlib.crc32(buf) & 0xFFFFFF), "ok": ok_}
     except Exception:
         return None
 
@@ -4332,7 +4484,8 @@ def tramos_texto(it_, a, b):
             o_ = _fuente_original_de(estilos[rid])
             fuentes[rid] = o_[1] if o_ else None
         ch = txt[k_]
-        falta = fuentes[rid] is not None and not ch.isspace() and not tiene_letra(fuentes[rid], ch)
+        falta = (fuentes[rid] is not None and not tiene_letra(fuentes[rid], ch)
+                 and not (ch.isspace() and _LETRAS_OK.get(id(fuentes[rid])) is None))
         clave = (rid, falta, k_ < n_marca)
         if k_ > a and clave != clave_prev:
             out.append((ini, k_, clave_prev))
@@ -4420,6 +4573,97 @@ def paso_renglon(it_):
     if it_["tipo"] == "reemplazo":
         return it_["tam"] * k_ if k_ else it_["inter"]
     return it_["tam"] * (k_ or 1.25)
+
+
+def renglones_de_letras(pg):
+    """v5.4.1: los renglones de la hoja armados LETRA POR LETRA por su linea de base (como Nitro), en vez de los
+    «renglones» que arma MuPDF: un renglon escrito en varios pedazos (PDF editados antes, Word, Canva) queda
+    entero y en orden, sin espacios de relleno que tapan otras letras. -> bloques como get_text("dict")."""
+    raw = pg.get_text("rawdict")
+    letras, otros = [], []
+    n_lin = 0
+    for b_ in raw["blocks"]:
+        for l_ in b_.get("lines", []):
+            dx_, dy_ = l_["dir"]
+            n_lin += 1
+            if abs(dy_) > 0.01 or dx_ <= 0:
+                otros.append(l_)
+                continue
+            for sp in l_["spans"]:
+                meta = {k_: sp[k_] for k_ in ("font", "size", "flags", "color")}
+                for c_ in sp["chars"]:
+                    letras.append((c_["origin"][1], c_["origin"][0], c_, meta, n_lin))
+    letras.sort(key=lambda t_: (t_[0], t_[1]))
+    grupos = []
+    for t_ in letras:
+        if grupos and abs(t_[0] - grupos[-1][0]) <= max(0.6, 0.12 * t_[3]["size"]):
+            grupos[-1][1].append(t_)
+        else:
+            grupos.append([t_[0], [t_]])
+    bloques = []
+    for _y, gr in grupos:
+        gr.sort(key=lambda t_: t_[1])
+        # columnas separadas por un hueco grande: renglones distintos
+        trozos, act = [], []
+        for t_ in gr:
+            llenos_ = [a_ for a_ in act if not a_[2]["c"].isspace()]
+            if llenos_ and not t_[2]["c"].isspace():
+                fin_ = max(fitz.Rect(a_[2]["bbox"]).x1 for a_ in llenos_)
+                hueco = fitz.Rect(t_[2]["bbox"]).x0 - fin_
+                otro_ = t_[4] != llenos_[-1][4]
+                if hueco > 2.5 * t_[3]["size"] or (otro_ and hueco > 0.6 * t_[3]["size"]):
+                    trozos.append(act)  # una columna o celda aparte (o la viñeta de una lista)
+                    act = []
+            act.append(t_)
+        if act:
+            trozos.append(act)
+        for tr in trozos:
+            llenas = [fitz.Rect(t_[2]["bbox"]) for t_ in tr if not t_[2]["c"].isspace()]
+            limpio = []
+            for t_ in tr:  # los espacios de relleno que caen encima de otras letras se sacan
+                if t_[2]["c"].isspace():
+                    r_ = fitz.Rect(t_[2]["bbox"])
+                    if any(abs(r_ & q_) > abs(r_) * 0.4 for q_ in llenas if r_.intersects(q_)):
+                        continue
+                    if limpio and limpio[-1][2]["c"].isspace():
+                        x_fin = fitz.Rect(limpio[-1][2]["bbox"]).x1
+                        if r_.x0 < x_fin - 0.5:
+                            continue  # un espacio encima de otro
+                limpio.append(t_)
+            # entre dos letras separadas (de pedazos distintos) sin espacio: se pone uno
+            final = []
+            for t_ in limpio:
+                if final and not final[-1][2]["c"].isspace() and not t_[2]["c"].isspace():
+                    a_, b_ = fitz.Rect(final[-1][2]["bbox"]), fitz.Rect(t_[2]["bbox"])
+                    if b_.x0 - a_.x1 > 0.18 * t_[3]["size"]:
+                        esp = dict(final[-1][2], c=" ", bbox=(a_.x1, a_.y0, b_.x0, a_.y1),
+                                   origin=(a_.x1, final[-1][2]["origin"][1]))
+                        final.append((t_[0], a_.x1, esp, final[-1][3]))
+                final.append(t_)
+            while final and final[-1][2]["c"].isspace():
+                final.pop()
+            while final and final[0][2]["c"].isspace():
+                final.pop(0)
+            if not final:
+                continue
+            spans = []
+            for t_ in final:
+                c_, meta = t_[2], t_[3]
+                if spans and all(spans[-1][k_] == meta[k_] for k_ in meta):
+                    spans[-1]["text"] += c_["c"]
+                    spans[-1]["bbox"] = tuple(fitz.Rect(spans[-1]["bbox"]) | fitz.Rect(c_["bbox"]))
+                else:
+                    spans.append(dict(meta, text=c_["c"], bbox=tuple(c_["bbox"]), origin=tuple(c_["origin"])))
+            caja = fitz.Rect(spans[0]["bbox"])
+            for sp in spans[1:]:
+                caja |= fitz.Rect(sp["bbox"])
+            bloques.append({"type": 0, "bbox": tuple(caja), "lines": [{"spans": spans, "bbox": tuple(caja),
+                                                                         "dir": (1.0, 0.0), "wmode": 0}]})
+    for l_ in otros:  # (texto inclinado o vertical: como viene)
+        sps = [dict({k_: sp[k_] for k_ in ("font", "size", "flags", "color", "bbox", "origin")},
+                    text="".join(c_["c"] for c_ in sp["chars"])) for sp in l_["spans"]]
+        bloques.append({"type": 0, "bbox": l_["bbox"], "lines": [dict(l_, spans=sps)]})
+    return bloques
 
 
 def parrafo_de_renglones(lineas, cajas, k0, m_, separadores=None):
@@ -4520,7 +4764,7 @@ def parrafo_de_renglones(lineas, cajas, k0, m_, separadores=None):
     return arr_
 
 
-def alineacion_parrafo(cajas, columna, ancho_hoja=None):
+def alineacion_parrafo(cajas, columna, ancho_hoja=None, izquierdas=()):
     """v4.6: (alineacion, sangria, x izquierda, ancho para acomodar o None) de un parrafo, por la forma de sus
     renglones (cajas en coordenadas de la pagina como se ve). columna: (x0, x1) del texto de la hoja."""
     n_ = len(cajas)
@@ -4531,10 +4775,12 @@ def alineacion_parrafo(cajas, columna, ancho_hoja=None):
         r_ = cajas[0]
         c_ = (r_.x0 + r_.x1) / 2
         cx0, cx1 = columna
-        if ancho_hoja and r_.x0 > ancho_hoja * 0.1 and abs(r_.x0 - (ancho_hoja - r_.x1)) < 4:
+        if (ancho_hoja and r_.x0 > max(ancho_hoja * 0.1, cx0 + 20) and abs(r_.x0 - (ancho_hoja - r_.x1)) < 4
+                and sum(1 for x_ in izquierdas if abs(x_ - r_.x0) < 2) <= 1):  # (no empieza en un margen comun)
             return "centro", 0, r_.x0, None  # v5.4: el mismo margen a los dos lados: centrado en la hoja
+        margen_comun = sum(1 for x_ in izquierdas if abs(x_ - r_.x0) < 2) > 1  # (v5.4.1: renglon de una lista)
         if (abs(c_ - (cx0 + cx1) / 2) < 4 or (ancho_hoja and abs(c_ - ancho_hoja / 2) < max(4, ancho_hoja * 0.02)
-                                                 and r_.x1 < cx1 - 20)) and r_.x0 > cx0 + 20:
+                                                 and r_.x1 < cx1 - 20)) and r_.x0 > cx0 + 20 and not margen_comun:
             return "centro", 0, r_.x0, None  # titulo centrado (en la columna o en la hoja)
         if abs(r_.x1 - cx1) < 4 and r_.x0 > (cx0 + cx1) / 2:
             return "der", 0, r_.x0, None  # fecha o firma pegada a la derecha
@@ -13408,7 +13654,7 @@ def iniciar_interfaz():
             pg = d_[pag]
             m_ = pg.rotation_matrix
             pt_ = fitz.Point(p_)
-            bloques_ = pg.get_text("dict")["blocks"]
+            bloques_ = renglones_de_letras(pg)  # v5.4.1: renglones armados letra por letra (como Nitro)
             ocr_r = None
             if not any(sp["text"].strip() for bl in bloques_ for ln in bl.get("lines", []) for sp in ln["spans"]):
                 ocr_r = ocr_de(ruta, pag)  # v4.1: escaneo: el texto reconocido
@@ -13488,6 +13734,8 @@ def iniciar_interfaz():
                             lleno = True  # v4.6: renglon hasta el borde (justificado): sigue el mismo parrafo
                         txt_cortes.append(lleno)
                         txt += " " if lleno else "\n"
+                # v5.4.1: guiones especiales que casi ninguna fuente trae (salian como un punto o no salian)
+                txt = txt.replace("\u2011", "-").replace("\u2010", "-")
                 bases = [(fitz.Point(ln["spans"][0]["origin"]) * m_) for ln in lineas]
                 inter = ((bases[-1].y - bases[0].y) / (len(bases) - 1)) if len(bases) > 1 else sp0["size"] * 1.2
                 n_ = sp0["font"]
@@ -13500,14 +13748,18 @@ def iniciar_interfaz():
                             "origen": (min(b_.x for b_ in bases), bases[0].y), "inter": max(1.0, inter),
                             "ancho": caja.width + 1 if len(lineas) > 1 else None, "fuente_pdf": ""}
 
+                nombres_pg = [f_[3].split("+")[-1] for f_ in pg.get_fonts()]
+
                 def datos_fuente(sp_):
                     """Fuente de un tramo: la misma del PDF (instalada o la que trae adentro) o la mas parecida."""
                     nf_ = sp_["font"]
+                    if nf_ not in nombres_pg:  # v5.4.1: MuPDF corta los nombres largos («... Regula»): el completo
+                        nf_ = next((n__ for n__ in nombres_pg if n__.startswith(nf_)), nf_)
                     ng_ = bool(sp_["flags"] & 16) or any(w_ in nf_.lower() for w_ in ("bold", "black", "heavy"))
                     cr_ = bool(sp_["flags"] & 2) or "italic" in nf_.lower() or "oblique" in nf_.lower()
                     pa_ = familia_de(nf_, sp_["flags"])
                     fs_ = archivo_fuente_sistema(nf_, ng_, cr_)
-                    fp_ = fuente_original_pdf(d_, pag, nf_)
+                    fp_ = fuente_original_pdf(d_, pag, nf_, sp_.get("text"))
                     fm_ = nombre_visible_fuente(nf_) if (fs_ or fp_) else pa_  # en el panel: el nombre del PDF
                     return {"fam": fm_, "neg": ng_, "cur": cr_, "fsis": fs_, "fpdf": fp_, "fam_parecida": pa_,
                             "forig": (fm_, ng_, cr_), "fuente_pdf": nf_,
@@ -13548,7 +13800,8 @@ def iniciar_interfaz():
                 todas_ = [fitz.Rect(ln_["bbox"]) * m_ for bl_ in bloques_ for ln_ in bl_.get("lines", [])
                           if "".join(sp_["text"] for sp_ in ln_["spans"]).strip()]
                 columna_ = (min(r_.x0 for r_ in todas_), max(r_.x1 for r_ in todas_))
-                alin_, sangria_, x_izq, ancho_ = alineacion_parrafo(cajas, columna_, (fitz.Rect(pg.rect) * m_).width)
+                alin_, sangria_, x_izq, ancho_ = alineacion_parrafo(cajas, columna_, (fitz.Rect(pg.rect) * m_).width,
+                                                                     [r_.x0 for r_ in todas_])
                 res_ = {"rect": tuple(caja), "rects_borrar": [tuple(r_) for r_ in cajas], "txt": txt,
                         "tam": round(sp0["size"], 3), "fam": fam_, "neg": neg_, "cur": cur_,
                         "color": ((sp0["color"] >> 16) & 255, (sp0["color"] >> 8) & 255, sp0["color"] & 255),
@@ -13583,8 +13836,8 @@ def iniciar_interfaz():
                             tope = w_ if tope is None else min(tope, w_)
                         pos_ = fin_ + 1
                     if tope is not None and tope - 0.15 >= nat:
-                        if alin_ == "izq":
-                            res_["ancho"] = max(ancho_, tope - 0.15)
+                        if alin_ == "izq":  # (v5.4.1: sin pasarse de la celda o columna de al lado)
+                            res_["ancho"] = max(ancho_, min(tope - 0.15, limite_ - x_izq))
                         else:
                             res_["corte_d"] = (tope - 0.15) - ancho_
                 return res_
