@@ -363,12 +363,17 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.0.2"
-VERSION_INTERNA = "5.0.2"
+VERSION = "v5.1"
+VERSION_INTERNA = "5.1"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.1", [
+        "Líneas de referencia al mover un texto, una firma o un sello (como PowerPoint): aparecen solo mientras "
+        "lo movés, cuando queda centrado en la hoja o alineado con otro texto o imagen. Sin cuadrícula; un imán muy "
+        "suave para que quede exacto.",
+    ]),
     ("v5.0.2", [
         "La cinta usa el azul del programa (ARCHIVO, la pestaña elegida y los avisos) en lugar del naranja; también "
         "el recuadro y el botón «Listo» al escribir texto.",
@@ -9492,6 +9497,12 @@ def iniciar_interfaz():
                 self._previa()
             if vis.get("ined"):  # v4.1: el cuadro de escritura sobre la hoja
                 ined_colocar(self)
+            ed_g = getattr(self, "_ed", None)
+            if ed_g and ed_g.get("modo") == "mover" and ed_g.get("movio") and ed_g.get("base"):
+                try:
+                    guias_mover(self, ed_g)  # v5.1: las lineas de referencia siguen mientras se mueve
+                except Exception:
+                    pass
 
         # ---- raton: arrastrar desplaza; con el resaltador marca (Texto / Área o polilínea / Libre)
         def _punto_pagina(self, cx_, cy_, i=None):
@@ -13734,6 +13745,83 @@ def iniciar_interfaz():
             return True
         return False
 
+    def guias_mover(vista, ed):
+        """v5.1: al mover un texto, una firma o una imagen: lineas de referencia (como PowerPoint) cuando queda
+        alineado con el centro o los bordes de la hoja, o con otro texto o imagen de la hoja. Solo mientras se
+        mueve; sin cuadricula. Un iman muy suave (3 px de pantalla) para que quede exacto. -> (dx, dy) del iman."""
+        cv_ = vista.cv
+        cv_.delete("guia")
+        it_ = ed["it"]
+        i, ruta, pag, M, x, y = ed["base"]
+        lay = vista.lay
+        if not lay or i >= len(lay["pags"]):
+            return 0.0, 0.0
+        r_ = fitz.Rect(caja_texto(it_))
+        pw, ph = dims_vista(lay["dims"][i], lay["pags"][i][2], lay["parar"])
+        refs = [(fitz.Rect(0, 0, pw, ph), "hoja")]
+        for o_ in vis["res"].get(ruta, {}).get(pag, []):
+            if o_ is not it_ and o_.get("tipo") in ("texto_n", "reemplazo", "firma"):
+                try:
+                    refs.append((fitz.Rect(caja_texto(o_)), "item"))
+                except Exception:
+                    pass
+        try:
+            for im_ in imagenes_de(ruta, pag):
+                b_ = fitz.Rect(im_["bbox"])
+                if b_.width < pw * 0.9 or b_.height < ph * 0.9:  # (no el escaneo de toda la hoja)
+                    refs.append((b_, "item"))
+        except Exception:
+            pass
+        tol = 3.0 / max(0.05, abs(M.a) + abs(M.b))  # 3 px de pantalla, en puntos de la hoja
+        mio_x = (r_.x0, (r_.x0 + r_.x1) / 2, r_.x1)
+        mio_y = (r_.y0, (r_.y0 + r_.y1) / 2, r_.y1)
+        mejor_x = mejor_y = None
+        for rr_, tipo_ in refs:
+            if tipo_ == "hoja":
+                cand_x, cand_y = (pw / 2,), (ph / 2,)  # el centro de la hoja
+            else:
+                cand_x = (rr_.x0, (rr_.x0 + rr_.x1) / 2, rr_.x1)
+                cand_y = (rr_.y0, (rr_.y0 + rr_.y1) / 2, rr_.y1)
+            for k_, m_ in enumerate(mio_x):
+                for c_ in cand_x:
+                    d_ = c_ - m_
+                    if abs(d_) <= tol and (mejor_x is None or abs(d_) < abs(mejor_x[0])):
+                        mejor_x = (d_, c_, rr_, tipo_, k_)
+            for k_, m_ in enumerate(mio_y):
+                for c_ in cand_y:
+                    d_ = c_ - m_
+                    if abs(d_) <= tol and (mejor_y is None or abs(d_) < abs(mejor_y[0])):
+                        mejor_y = (d_, c_, rr_, tipo_, k_)
+        ddx = mejor_x[0] if mejor_x else 0.0
+        ddy = mejor_y[0] if mejor_y else 0.0
+        r2 = r_ + (ddx, ddy, ddx, ddy)
+        col_g = "#E11D48"  # una linea fina y discreta, que se distingue de todo lo demas
+
+        def linea(p0_, p1_, centro_hoja):
+            a_ = fitz.Point(p0_) * M
+            b_ = fitz.Point(p1_) * M
+            cv_.create_line(x + a_.x, y + a_.y, x + b_.x, y + b_.y, fill=col_g, width=1,
+                            dash=(6, 3) if centro_hoja else (2, 2), tags="guia")
+        if mejor_x:
+            _d, cx_, rr_, tipo_, _k = mejor_x
+            if tipo_ == "hoja":
+                linea((cx_, 0), (cx_, ph), True)
+            else:
+                linea((cx_, min(rr_.y0, r2.y0) - 6), (cx_, max(rr_.y1, r2.y1) + 6), False)
+        if mejor_y:
+            _d, cy_, rr_, tipo_, _k = mejor_y
+            if tipo_ == "hoja":
+                linea((0, cy_), (pw, cy_), True)
+            else:
+                linea((min(rr_.x0, r2.x0) - 6, cy_), (max(rr_.x1, r2.x1) + 6, cy_), False)
+        if mejor_x or mejor_y:  # el recuadro de referencia, apenas marcado
+            for g_ in (mejor_x, mejor_y):
+                if g_ and g_[3] == "item":
+                    q_ = fitz.Rect(g_[2]) * M
+                    cv_.create_rectangle(x + q_.x0, y + q_.y0, x + q_.x1, y + q_.y1, outline=col_g, width=1,
+                                         dash=(1, 3), tags="guia")
+        return ddx, ddy
+
     def edicion_motion(vista, ev):
         ed = vista._ed
         if ed["modo"] == "nada":
@@ -13760,14 +13848,22 @@ def iniciar_interfaz():
             _volver_foto(it_, ed["foto"])
             if ed["modo"] == "mover":
                 mover_texto(it_, dx, dy)
+                iman_ = guias_mover(vista, ed)
+                if iman_ != (0.0, 0.0):  # v5.1: queda justo alineado
+                    _volver_foto(it_, ed["foto"])
+                    mover_texto(it_, dx + iman_[0], dy + iman_[1])
             else:
                 redimensionar_texto(it_, ed["modo"], dx, dy, ed["r0"])
             if ed.get("ined"):
                 vis["ined"]["movido"] = True
                 ined_colocar(vista)
+                if ed["modo"] == "mover":
+                    guias_mover(vista, ed)
                 return
             tocar(it_)
             vista.dibujar()
+            if ed["modo"] == "mover":
+                guias_mover(vista, ed)
             return
         x0, y0, x1, y1 = ed["r0"]
         if ed["modo"] == "tam":  # misma proporcion
@@ -13775,15 +13871,21 @@ def iniciar_interfaz():
             ed["it"]["rect"] = (x0, y0, x0 + ancho, y0 + ancho * (y1 - y0) / max(0.01, x1 - x0))
         else:
             ed["it"]["rect"] = (x0 + dx, y0 + dy, x1 + dx, y1 + dy)
+            iman_ = guias_mover(vista, ed)  # v5.1: lineas de referencia (y el iman suave)
+            if iman_ != (0.0, 0.0):
+                ed["it"]["rect"] = (x0 + dx + iman_[0], y0 + dy + iman_[1], x1 + dx + iman_[0], y1 + dy + iman_[1])
         if not ed.get("hist"):
             ed["hist"] = True
             guardar_historia()
         tocar(ed["it"])
         vista.dibujar()
+        if ed["modo"] != "tam":
+            guias_mover(vista, ed)
 
     def edicion_release(vista, ev):
         ed = vista._ed
         vista._ed = None
+        vista.cv.delete("guia")  # v5.1: las lineas de referencia, solo mientras se mueve
         if ed and ed.get("editar") and not ed.get("movio"):  # v4.1: clic adentro del texto elegido: a escribir
             e_ = vis.get("edit_item")
             if e_ and e_[2] is ed["it"]:

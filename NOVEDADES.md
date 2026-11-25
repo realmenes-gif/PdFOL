@@ -1,3 +1,9 @@
+## PdFOL v5.1 · by Meneses999
+
+- **Líneas de referencia al mover** un texto, una firma o un sello (como PowerPoint): aparecen solo mientras lo movés, cuando queda centrado en la hoja (horizontal o vertical) o alineado con el borde o el centro de otro texto o imagen. Sin cuadrícula; un imán muy suave para que quede exacto.
+
+**Descarga:** `PdFOL_v5.1_portable.zip` (sin instalar) o `PdFOL_v5.1_instalador.exe`.
+
 ## PdFOL v5.0.2 · by Meneses999
 
 - La cinta usa el **azul del programa** (ARCHIVO, la pestaña elegida y los avisos) en lugar del naranja; también el recuadro y el botón «Listo» al escribir texto.
