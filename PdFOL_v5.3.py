@@ -363,12 +363,19 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.2.1"
-VERSION_INTERNA = "5.2.1"
+VERSION = "v5.3"
+VERSION_INTERNA = "5.3"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.3", [
+        "Nuevo motor de edición de texto (como Nitro): al cambiar o borrar un texto se sacan del contenido del PDF "
+        "SOLO sus letras; todo lo demás queda exactamente igual (sin tapar ni recortar zonas).",
+        "El texto nuevo se escribe con la MISMA fuente que trae el PDF (sin meter otra copia); solo las letras "
+        "que esa fuente no trae van con la más parecida.",
+        "Lo que se ve mientras editás es lo mismo que queda al guardar, y escribir es más fluido.",
+    ]),
     ("v5.2.1", [
         "Copiar y pegar cuadros de texto e imágenes: Ctrl+C (o clic derecho → Copiar) y Ctrl+V lo pega donde "
         "esté el mouse, en esta u otra hoja. Escribiendo, Ctrl+C sin letras elegidas copia el cuadro entero.",
@@ -4589,6 +4596,285 @@ def letras_texto(it_):
     return out
 
 
+# ================= v5.3: MOTOR DE EDICION EN EL CONTENIDO (como Nitro / Acrobat)
+# En vez de tapar o «redactar» una zona, se entra al contenido de la hoja y se sacan SOLO las letras del texto que
+# se cambia, dejando en su lugar el mismo avance (asi todo lo demas queda exactamente donde estaba).
+import re as _re_m
+
+_NUM_RE = _re_m.compile(rb"\[|\]|[-+]?(?:\d+\.?\d*|\.\d+)")
+
+
+def _valor_pdf(doc, xref, clave):
+    """Valor (texto PDF) de una clave de un objeto, resolviendo referencias «n 0 R»."""
+    try:
+        t_, v_ = doc.xref_get_key(xref, clave)
+    except Exception:
+        return None
+    if t_ == "xref":
+        try:
+            return doc.xref_object(int(v_.split()[0]), compressed=False)
+        except Exception:
+            return None
+    return None if t_ == "null" else v_
+
+
+def _numeros(txt):
+    return [float(x_) for x_ in _re_m.findall(r"[-+]?(?:\d+\.?\d*|\.\d+)", txt or "")]
+
+
+def _anchos_cid(txt):
+    """/W de una fuente CID -> {cid: ancho}."""
+    out = {}
+    toks = _NUM_RE.findall((txt or "").encode())
+    i, n = 0, len(toks)
+    while i < n:
+        if toks[i] in (b"[", b"]"):
+            i += 1
+            continue
+        c0 = int(float(toks[i]))
+        if i + 1 < n and toks[i + 1] == b"[":
+            j, k_ = i + 2, 0
+            while j < n and toks[j] != b"]":
+                out[c0 + k_] = float(toks[j])
+                k_ += 1
+                j += 1
+            i = j + 1
+        elif i + 2 < n:
+            c1, w_ = int(float(toks[i + 1])), float(toks[i + 2])
+            for c_ in range(c0, min(c1, c0 + 65535) + 1):
+                out[c_] = w_
+            i += 3
+        else:
+            break
+    return out
+
+
+def _info_fuentes(doc, pg):
+    """{nombre del recurso: datos para medir sus letras} de las fuentes de la hoja (o None si alguna no se sabe)."""
+    out = {}
+    for xr_, _ext, tipo, base, nom, enc, ref in pg.get_fonts(full=True):
+        if ref not in (0, None) or nom in out:
+            continue
+        try:
+            sub = (_valor_pdf(doc, xr_, "Subtype") or "").strip("/")
+            if sub == "Type0":
+                if "Identity" not in (enc or "") and "Identity" not in (_valor_pdf(doc, xr_, "Encoding") or ""):
+                    out[nom] = None
+                    continue
+                if (_valor_pdf(doc, xr_, "Encoding") or "").endswith("-V"):
+                    out[nom] = None  # (escritura vertical)
+                    continue
+                desc = _valor_pdf(doc, xr_, "DescendantFonts") or ""
+                m_ = _re_m.search(r"(\d+)\s+0\s+R", desc)
+                if not m_:
+                    out[nom] = None
+                    continue
+                dx_ = int(m_.group(1))
+                dw_ = _numeros(_valor_pdf(doc, dx_, "DW") or "1000")
+                out[nom] = {"bytes": 2, "w": _anchos_cid(_valor_pdf(doc, dx_, "W")), "dw": dw_[0] if dw_ else 1000.0}
+            elif sub in ("TrueType", "Type1", "MMType1"):
+                fc_ = _numeros(_valor_pdf(doc, xr_, "FirstChar") or "")
+                ws_ = _numeros(_valor_pdf(doc, xr_, "Widths") or "")
+                if fc_ and ws_:
+                    out[nom] = {"bytes": 1, "w": {int(fc_[0]) + k_: w_ for k_, w_ in enumerate(ws_)}, "dw": 0.0}
+                else:  # una de las 14 de siempre (Helvetica, Times...): sus anchos los sabe MuPDF
+                    b_ = (base or "").split("+")[-1]
+                    try:
+                        f_ = fitz.Font(b_ if b_ in fitz.Base14_fontdict.values() else "helv")
+                    except Exception:
+                        out[nom] = None
+                        continue
+                    out[nom] = {"bytes": 1, "w": {c_: f_.glyph_advance(ord(bytes([c_]).decode("cp1252", "replace"))) * 1000
+                                                  for c_ in range(32, 256)}, "dw": 0.0}
+            else:
+                out[nom] = None  # Type3 u otras: no se toca (se usa el metodo de antes)
+        except Exception:
+            out[nom] = None
+    return out
+
+
+def quitar_glifos(doc, pg, rects):
+    """v5.3: saca del contenido de la hoja las letras cuyo centro cae en alguno de los 'rects' (coordenadas de la hoja
+    sin girar). Las demas letras y todo lo demas quedan exactamente igual. -> cantidad de letras sacadas, o None si
+    esa hoja no se puede tocar asi (se usa el metodo de antes)."""
+    import pikepdf
+    rects = [fitz.Rect(r_) for r_ in rects]
+    if not rects:
+        return 0
+    try:
+        datos = pg.read_contents()
+        fuentes = _info_fuentes(doc, pg)
+        pdf_ = pikepdf.new()
+        ops = pikepdf.parse_content_stream(pikepdf.Stream(pdf_, datos))
+    except Exception:
+        return None
+    a_fitz = pg.transformation_matrix
+    I = fitz.Identity
+    ctm, pila = fitz.Matrix(I), []
+    tm = tlm = fitz.Matrix(I)
+    fuente, fs, tc, tw, th, tl, ts = None, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0
+    quitadas, salida, malo = 0, [], False
+
+    def adentro(p_):
+        return any(r_.contains(p_) for r_ in rects)
+
+    def mostrar(partes):
+        """partes: lista de bytes o numeros (como TJ). -> (nuevo arreglo o None si no cambio, letras sacadas)"""
+        nonlocal tm
+        inf = fuentes.get(fuente)
+        if inf is None:
+            raise ValueError("fuente")
+        nb = inf["bytes"]
+        nuevo, cambio, n_q = [], False, 0
+        for p_ in partes:
+            if isinstance(p_, (int, float)):
+                tm = fitz.Matrix(1, 0, 0, 1, -p_ / 1000.0 * fs * th, 0) * tm
+                nuevo.append(p_)
+                continue
+            act = b""
+            for k_ in range(0, len(p_) - nb + 1, nb):
+                cod = p_[k_:k_ + nb]
+                c_ = int.from_bytes(cod, "big")
+                w0 = inf["w"].get(c_, inf["dw"]) / 1000.0
+                esp = tw if (nb == 1 and c_ == 32) else 0.0
+                trm = fitz.Matrix(fs * th, 0, 0, fs, 0, ts) * tm * ctm
+                centro = fitz.Point(w0 * 0.5, 0.3) * trm * a_fitz
+                avance = (w0 * fs + tc + esp) * th
+                if fs and adentro(centro):
+                    if act:
+                        nuevo.append(act)
+                        act = b""
+                    nuevo.append(-(avance / th) * 1000.0 / fs)  # el mismo lugar, sin la letra
+                    cambio = True
+                    n_q += 1
+                else:
+                    act += cod
+                tm = fitz.Matrix(1, 0, 0, 1, avance, 0) * tm
+            if act:
+                nuevo.append(act)
+        return (nuevo if cambio else None), n_q
+
+    def arr(nuevo):
+        return pikepdf.Array([pikepdf.String(x_) if isinstance(x_, bytes) else round(float(x_), 4) for x_ in nuevo])
+
+    try:
+        for ins in ops:
+            if not hasattr(ins, "operator"):
+                salida.append(ins)
+                continue
+            op_, args = str(ins.operator), list(ins.operands)
+            if op_ == "q":
+                pila.append(fitz.Matrix(ctm))
+            elif op_ == "Q":
+                if pila:
+                    ctm = pila.pop()
+            elif op_ == "cm" and len(args) == 6:
+                ctm = fitz.Matrix(*[float(v_) for v_ in args]) * ctm
+            elif op_ == "BT":
+                tm = tlm = fitz.Matrix(I)
+            elif op_ == "Tf" and len(args) == 2:
+                fuente, fs = str(args[0]).lstrip("/"), float(args[1])
+            elif op_ == "Tc":
+                tc = float(args[0])
+            elif op_ == "Tw":
+                tw = float(args[0])
+            elif op_ == "Tz":
+                th = float(args[0]) / 100.0
+            elif op_ == "TL":
+                tl = float(args[0])
+            elif op_ == "Ts":
+                ts = float(args[0])
+            elif op_ in ("Td", "TD"):
+                tx_, ty_ = float(args[0]), float(args[1])
+                if op_ == "TD":
+                    tl = -ty_
+                tlm = fitz.Matrix(1, 0, 0, 1, tx_, ty_) * tlm
+                tm = fitz.Matrix(tlm)
+            elif op_ == "Tm" and len(args) == 6:
+                tlm = fitz.Matrix(*[float(v_) for v_ in args])
+                tm = fitz.Matrix(tlm)
+            elif op_ == "T*":
+                tlm = fitz.Matrix(1, 0, 0, 1, 0, -tl) * tlm
+                tm = fitz.Matrix(tlm)
+            elif op_ in ("Tj", "TJ", "'", '"'):
+                if op_ == '"':
+                    tw, tc = float(args[0]), float(args[1])
+                    salida += [([args[0]], pikepdf.Operator("Tw")), ([args[1]], pikepdf.Operator("Tc"))]
+                    args = args[2:]
+                if op_ in ("'", '"'):
+                    tlm = fitz.Matrix(1, 0, 0, 1, 0, -tl) * tlm
+                    tm = fitz.Matrix(tlm)
+                    salida.append(([], pikepdf.Operator("T*")))
+                if op_ == "TJ":
+                    partes = [bytes(x_) if isinstance(x_, pikepdf.String) else float(x_) for x_ in args[0]]
+                else:
+                    partes = [bytes(args[0])]
+                nuevo, n_q = mostrar(partes)
+                quitadas += n_q
+                if nuevo is not None:
+                    salida.append(([arr(nuevo)], pikepdf.Operator("TJ")))
+                elif op_ in ("'", '"'):
+                    salida.append(([args[0]], pikepdf.Operator("Tj")))
+                else:
+                    salida.append(ins)
+                continue
+            salida.append(ins)
+    except Exception:
+        malo = True
+    if malo:
+        return None
+    if not quitadas:
+        return 0
+    try:
+        nuevo_b = pikepdf.unparse_content_stream(salida)
+        xr_ = doc.get_new_xref()
+        doc.update_object(xr_, "<<>>")
+        doc.update_stream(xr_, nuevo_b, compress=True)
+        pg.set_contents(xr_)
+    except Exception:
+        return None
+    return quitadas
+
+
+def _fuente_original_en_hoja(pg, e_):
+    """v5.3: el recurso de la hoja que ES la fuente original del texto (Type0 Identity-H), para escribir con ella
+    misma (como Nitro: sin meter otra copia de la fuente). -> (nombre, info) o None."""
+    clave = e_.get("fpdf") or ""
+    if not clave or clave not in _FUENTES_PDF or not _FUENTES_PDF[clave]:
+        return None
+    try:
+        _ruta, xr_s, base_ = clave.rsplit(":", 2)
+        xr_ = int(xr_s)
+    except Exception:
+        return None
+    cache_ = pg.__dict__.setdefault("_pdfol_res", {})
+    if "info" not in cache_:
+        try:
+            cache_["info"] = _info_fuentes(pg.parent, pg)
+            cache_["fonts"] = pg.get_fonts(full=True)
+        except Exception:
+            cache_["info"], cache_["fonts"] = {}, []
+    for f_ in cache_["fonts"]:
+        if f_[0] == xr_ and f_[6] in (0, None) and f_[3].split("+")[-1] == base_ and f_[2] == "Type0":
+            inf = cache_["info"].get(f_[4])
+            if inf and inf["bytes"] == 2:
+                return f_[4], inf
+    return None
+
+
+def _escribir_crudo(pg, ops_txt):
+    """Agrega texto al final del contenido de la hoja (con el estado grafico de siempre)."""
+    if not ops_txt:
+        return
+    doc = pg.parent
+    pg.wrap_contents()
+    xr_ = doc.get_new_xref()
+    doc.update_object(xr_, "<<>>")
+    doc.update_stream(xr_, ("q\n" + "\n".join(ops_txt) + "\nQ\n").encode("latin-1"), compress=True)
+    conts = pg.get_contents() + [xr_]
+    doc.xref_set_key(pg.xref, "Contents", "[" + " ".join(f"{c_} 0 R" for c_ in conts) + "]")
+
+
 def dibujar_texto(pg, it_, conv, rot=0):
     """Escribe el texto de un item en la pagina. conv: punto de la vista -> punto de esta pagina.
     v4.6: cada tramo con su fuente, negrita, cursiva y color (como estaba en el PDF)."""
@@ -4600,13 +4886,32 @@ def dibujar_texto(pg, it_, conv, rot=0):
     def escribir(x_, base, a_, b_):
         for a2, b2, e_ in tramos_texto(it_, a_, b_):
             kw = dict(kw_fuente(e_))
+            t_ = it_["txt"][a2:b2]
+            orig_ = _fuente_original_en_hoja(pg, e_) if kw["fontname"].startswith("PdO") and t_.strip() else None
+            if orig_:  # v5.3: con la MISMA fuente del PDF (su recurso de la hoja), como Nitro
+                ft_o = fuente_de_item(e_)[1]
+                cods = [ft_o.has_glyph(ord(ch)) for ch in t_]
+                if all(g_ and g_ in orig_[1]["w"] for g_ in cods):
+                    col_ = tuple(v_ / 255 for v_ in e_["color"])
+                    tmi = ~pg.transformation_matrix
+                    p0_ = fitz.Point(conv((x_, base))) * tmi
+                    p1_ = fitz.Point(conv((x_ + 10, base))) * tmi
+                    dx_, dy_ = (p1_.x - p0_.x) / 10, (p1_.y - p0_.y) / 10
+                    hx_ = "".join("%04X" % g_ for g_ in cods)
+                    crudos.append("BT 0 Tr 0 Tc 0 Tw 100 Tz 0 Ts /%s %.4f Tf %.4f %.4f %.4f rg %.5f %.5f %.5f %.5f %.4f %.4f Tm <%s> Tj ET"
+                                  % (orig_[0], e_["tam"], col_[0], col_[1], col_[2], dx_, dy_, -dy_, dx_, p0_.x, p0_.y, hx_))
+                    w_t = ancho_con(ft_o, t_, e_["tam"]) + _extra_marca(it_, a2, b2)
+                    for marca, dy in (("sub", e_["tam"] * 0.14), ("tach", -e_["tam"] * 0.27)):
+                        if e_.get(marca):
+                            lineas_.append((conv((x_, base + dy)), conv((x_ + w_t, base + dy)), col_, e_["tam"]))
+                    x_ += w_t
+                    continue
             if kw["fontname"] not in puestas:  # la fuente se pone una vez por pagina
                 if "fontbuffer" in kw:
                     pg.insert_font(fontname=kw["fontname"], fontbuffer=kw["fontbuffer"])
                 elif "fontfile" in kw:
                     pg.insert_font(fontname=kw["fontname"], fontfile=kw["fontfile"])
                 puestas.add(kw["fontname"])
-            t_ = it_["txt"][a2:b2]
             col_ = tuple(v_ / 255 for v_ in e_["color"])
             if t_.strip():
                 sh_.insert_text(conv((x_, base)), t_, fontsize=e_["tam"], fontname=kw["fontname"], color=col_,
@@ -4618,6 +4923,7 @@ def dibujar_texto(pg, it_, conv, rot=0):
             x_ += w_t
         return x_
     lineas_ = []
+    crudos = []
     for x_, base, l_, palabras, w_, ini in diseno_texto(it_, True):
         if palabras:
             for n_, (xp, p_, a_) in enumerate(palabras):
@@ -4633,6 +4939,8 @@ def dibujar_texto(pg, it_, conv, rot=0):
         elif l_:
             escribir(x_, base, ini, ini + len(l_))
     sh_.commit()
+    if crudos:
+        _escribir_crudo(pg, crudos)
     for p0_, p1_, col_, t_ in lineas_:
         pg.draw_line(p0_, p1_, color=col_, width=max(0.5, t_ * 0.065))
 
@@ -14499,6 +14807,8 @@ def iniciar_interfaz():
         for r_ in _rects_quitar(item):
             pg.add_redact_annot(r_ * dm, fill=False)
 
+    cache_limpia = {}
+
     def fondo_sin_texto(item, z):
         """Imagen (RGB) de la zona del texto, con la hoja tal cual pero sin las letras originales."""
         ruta, pag = item.get("ruta"), item.get("pag")
@@ -14508,30 +14818,44 @@ def iniciar_interfaz():
         # v5.2: tambien sin las letras de los OTROS textos ya cambiados o borrados de la hoja que caen en esta zona
         # (antes, al tomar el renglon de abajo de uno borrado, volvia a aparecer lo borrado)
         otros = [o_ for o_ in vis["res"].get(ruta, {}).get(pag, []) if o_.get("tipo") == "reemplazo"
-                 and not o_.get("ocr") and any(q_.intersects(r_) for q_ in _rects_quitar(o_))]
-        imgs_ = [o_ for o_ in vis["res"].get(ruta, {}).get(pag, []) if o_.get("img_orig")
-                 and fitz.Rect(o_["img_orig"]["bbox"]).intersects(r_)]
-        k_ = (ruta, pag, ver_arch(ruta), tuple(tuple(round(v_, 2) for v_ in q_) for o_ in [item] + otros
-                                               for q_ in _rects_quitar(o_)),
-              tuple(tuple(o_["img_orig"]["bbox"]) for o_ in imgs_), tuple(round(v_, 2) for v_ in r_), round(z, 4))
+                 and not o_.get("ocr") and o_ is not item]
+        imgs_ = [o_ for o_ in vis["res"].get(ruta, {}).get(pag, []) if o_.get("img_orig")]
+        # v5.3: la hoja «limpia» (sin esas letras ni imagenes) se arma una vez y se guarda: mientras se escribe
+        # solo se recorta la zona (escribir no se traba)
+        kq_ = (ruta, pag, ver_arch(ruta), tuple(sorted(tuple(round(v_, 2) for v_ in q_) for o_ in [item] + otros
+                                                        for q_ in _rects_quitar(o_))),
+               tuple(tuple(o_["img_orig"]["bbox"]) for o_ in imgs_))
+        k_ = (kq_, tuple(round(v_, 2) for v_ in r_), round(z, 4))
         if k_ in cache_fondo:
             return cache_fondo[k_]
         img = None
         try:
-            with fitz.open(ruta) as d_:
-                d2 = fitz.open()
-                d2.insert_pdf(d_, from_page=pag, to_page=pag)
+            d2 = cache_limpia.get(kq_)
+            if d2 is None:
+                with fitz.open(ruta) as d_:
+                    d2 = fitz.open()
+                    d2.insert_pdf(d_, from_page=pag, to_page=pag)
                 p2 = d2[0]
                 for o_ in imgs_:
                     quitar_imagen_pg(p2, o_["img_orig"])
-                quitar_letras(p2, item)
-                for o_ in otros:
-                    quitar_letras(p2, o_)
-                p2.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=fitz.PDF_REDACT_LINE_ART_NONE,
-                                    text=fitz.PDF_REDACT_TEXT_REMOVE)
-                pix = p2.get_pixmap(matrix=fitz.Matrix(z, z), clip=r_, alpha=False, annots=False)
-                img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
-                d2.close()
+                dm2 = p2.derotation_matrix  # v5.3: el mismo motor que al guardar (lo que se ve es lo que queda)
+                if not quitar_glifos(d2, p2, [fitz.Rect(rb_) * dm2 for o_ in [item] + otros
+                                              for rb_ in (o_.get("rects_borrar") or [o_["rect_orig"]])]):
+                    quitar_letras(p2, item)
+                    for o_ in otros:
+                        quitar_letras(p2, o_)
+                    p2.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=fitz.PDF_REDACT_LINE_ART_NONE,
+                                        text=fitz.PDF_REDACT_TEXT_REMOVE)
+                if len(cache_limpia) > 6:
+                    for v_ in cache_limpia.values():
+                        try:
+                            v_.close()
+                        except Exception:
+                            pass
+                    cache_limpia.clear()
+                cache_limpia[kq_] = d2
+            pix = d2[0].get_pixmap(matrix=fitz.Matrix(z, z), clip=r_, alpha=False, annots=False)
+            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
         except Exception:
             img = None
         if len(cache_fondo) > 40:
@@ -14598,10 +14922,15 @@ def iniciar_interfaz():
                 pg.draw_rect(fitz.Rect(rb_) * dm, color=None, fill=fb_, overlay=True)
             dibujar_texto(pg, it_, lambda q_: fitz.Point(q_) * dm, pg.rotation)
         if reemplazos:  # se borra el texto original (sin tocar dibujos ni imagenes) y se escribe el nuevo
-            for it_ in reemplazos:  # v4.3: sin relleno (antes quedaba un rectangulo blanco)
-                quitar_letras(pg, it_)
-            pg.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=fitz.PDF_REDACT_LINE_ART_NONE,
-                                text=fitz.PDF_REDACT_TEXT_REMOVE)
+            # v5.3: como Nitro: se sacan del contenido SOLO las letras de esos renglones (lo demas queda igual).
+            # Si la hoja no se deja (fuentes raras, texto dentro de un formulario), se usa el metodo de antes
+            n_m = quitar_glifos(pg.parent, pg, [fitz.Rect(rb_) * dm for it_ in reemplazos
+                                                for rb_ in (it_.get("rects_borrar") or [it_["rect_orig"]])])
+            if not n_m:
+                for it_ in reemplazos:  # v4.3: sin relleno (antes quedaba un rectangulo blanco)
+                    quitar_letras(pg, it_)
+                pg.apply_redactions(images=fitz.PDF_REDACT_IMAGE_NONE, graphics=fitz.PDF_REDACT_LINE_ART_NONE,
+                                    text=fitz.PDF_REDACT_TEXT_REMOVE)
             for it_ in reemplazos:
                 dibujar_texto(pg, it_, lambda q_: fitz.Point(q_) * dm, pg.rotation)
         for it_ in items_:

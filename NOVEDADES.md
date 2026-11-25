@@ -1,3 +1,11 @@
+## PdFOL v5.3 · by Meneses999
+
+- **Nuevo motor de edición de texto (como Nitro)**: se cambian solo las letras del texto dentro del PDF; lo demás queda exactamente igual.
+- El texto nuevo usa **la misma fuente del PDF**; solo las letras que no trae van con la más parecida.
+- Lo que ves mientras editás es lo que queda al guardar.
+
+**Descarga:** `PdFOL_v5.3_portable.zip` (sin instalar) o `PdFOL_v5.3_instalador.exe`.
+
 ## PdFOL v5.2.1 · by Meneses999
 
 - **Copiar y pegar** cuadros de texto e imágenes: Ctrl+C / Ctrl+V (se pega donde esté el mouse, en esta u otra hoja).
