@@ -363,12 +363,18 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.1.1"
-VERSION_INTERNA = "5.1.1"
+VERSION = "v5.1.2"
+VERSION_INTERNA = "5.1.2"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.1.2", [
+        "Borrar texto como en Nitro: seleccioná el texto con el mouse y apretá Supr (o «Borrar» en el cuadrito de "
+        "colores). Se borra solo lo seleccionado.",
+        "Los sombreados que ya estaban guardados en el PDF ahora se pueden quitar o cambiar de color (clic encima).",
+        "Al borrar un texto ya no queda el recuadro punteado.",
+    ]),
     ("v5.1.1", [
         "Borrar textos: Supr (o clic derecho → «Borrar este texto») borra el texto; ya no vuelve a aparecer el "
         "original al tocar ahí. «Volver al texto original» lo recupera.",
@@ -9741,7 +9747,7 @@ def iniciar_interfaz():
                         popup_rapido(self, ev, resaltado=hl_)
                 elif sel_:
                     n_ = len(texto_seleccion())
-                    v_estado.set(f"{n_} caracteres seleccionados · elegí un color para sombrear · Ctrl+C copia.")
+                    v_estado.set(f"{n_} caracteres seleccionados · elegí un color para sombrear · Supr borra · Ctrl+C copia.")
                     popup_rapido(self, ev)  # v4.7: como Acrobat: los colores para sombrear, ahi mismo
                 elif v_herr.get() == "Seleccionar" and not getattr(self, "_movio", False):
                     hl_ = resaltado_en(self, ev)
@@ -11166,7 +11172,120 @@ def iniciar_interfaz():
                 r_ += (-(it_.get("ancho") or 4), -(it_.get("ancho") or 4), it_.get("ancho") or 4, it_.get("ancho") or 4)
                 if r_.contains(p_):
                     return base[1], base[2], it_
+        a_ = anot_pdf_en(base[1], base[2], p_)  # v5.1.1: un sombreado ya guardado en el PDF tambien se elige
+        return (base[1], base[2], a_) if a_ else None
+
+    TIPOS_ANOT_SOMB = (fitz.PDF_ANNOT_HIGHLIGHT, fitz.PDF_ANNOT_UNDERLINE, fitz.PDF_ANNOT_STRIKE_OUT,
+                       fitz.PDF_ANNOT_SQUIGGLY, fitz.PDF_ANNOT_INK, fitz.PDF_ANNOT_POLYGON, fitz.PDF_ANNOT_SQUARE)
+
+    def anot_pdf_en(ruta, pag, p_):
+        """v5.1.1: el sombreado (anotacion) que ya esta guardado en el PDF bajo el punto, o None."""
+        try:
+            with fitz.open(ruta) as d_:
+                pg = d_[pag]
+                m_ = pg.rotation_matrix
+                for a_ in reversed(list(pg.annots(types=TIPOS_ANOT_SOMB))):
+                    rs_ = [fitz.Rect(a_.rect)]
+                    vt_ = a_.vertices or []
+                    if a_.type[0] in (fitz.PDF_ANNOT_HIGHLIGHT, fitz.PDF_ANNOT_UNDERLINE, fitz.PDF_ANNOT_STRIKE_OUT,
+                                      fitz.PDF_ANNOT_SQUIGGLY) and len(vt_) >= 4:
+                        rs_ = [fitz.Quad(*vt_[k_:k_ + 4]).rect for k_ in range(0, len(vt_) - 3, 4)]
+                    if any((r_ * m_).contains(fitz.Point(p_)) for r_ in rs_):
+                        c_ = (a_.colors or {}).get("stroke") or (a_.colors or {}).get("fill") or (1, 1, 0)
+                        return {"tipo": "anot_pdf", "xref": a_.xref, "clase": a_.type[0], "arect": tuple(a_.rect),
+                                "color": tuple(int(round(v_ * 255)) for v_ in c_[:3])}
+        except Exception:
+            pass
         return None
+
+    def anot_pdf_cambiar(ruta, pag, it_, color=None):
+        """v5.1.1: quita (o cambia de color) un sombreado ya guardado en el PDF. Va directo al archivo."""
+        orig = original_de(ruta)
+        errores = []
+        for dest in [ruta] + ([orig] if orig != ruta else []):
+            try:
+                soltar_archivo(dest)
+                d = fitz.open(dest)
+                pg = d[pag]
+                a_ = None
+                for b_ in pg.annots(types=(it_["clase"],)):
+                    if b_.xref == it_["xref"] or fitz.Rect(b_.rect).contains(fitz.Rect(it_["arect"]) + (-0.5, -0.5, 0.5, 0.5)) \
+                            and fitz.Rect(it_["arect"]).contains(fitz.Rect(b_.rect) + (0.5, 0.5, -0.5, -0.5)):
+                        a_ = b_
+                        if b_.xref == it_["xref"]:
+                            break
+                if a_ is not None:
+                    if color is None:
+                        pg.delete_annot(a_)
+                    else:
+                        c_ = tuple(v_ / 255 for v_ in color)
+                        if it_["clase"] in (fitz.PDF_ANNOT_POLYGON, fitz.PDF_ANNOT_SQUARE) and (a_.colors or {}).get("fill"):
+                            a_.set_colors(stroke=c_, fill=c_)
+                        else:
+                            a_.set_colors(stroke=c_)
+                        a_.update()
+                    if d.can_save_incrementally():
+                        d.saveIncr()
+                        d.close()
+                    else:
+                        tmp = dest + ".pdfol_tmp"
+                        d.save(tmp, garbage=1, deflate=True)
+                        d.close()
+                        os.replace(tmp, dest)
+                    vis["ver_arch"][dest] = ver_arch(dest) + 1
+                else:
+                    d.close()
+            except Exception as e:
+                errores.append(f"{os.path.basename(dest)}: {e}")
+        vis["ult"] = vis["ult_mini"] = None
+        visor_pedir_dibujo()
+        mini_pedir_dibujo()
+        if errores:
+            messagebox.showerror(NOMBRE, "No se pudo cambiar el sombreado:\n\n" + "\n".join(errores))
+        else:
+            v_estado.set("Sombreado quitado del PDF." if color is None else "Color del sombreado cambiado en el PDF.")
+
+    def borrar_seleccion():
+        """v5.1.1: el texto seleccionado con el mouse se BORRA (Supr o «Borrar»): cada renglon tocado se cambia
+        por lo que queda de el (como Acrobat/Nitro)."""
+        sel_ = vis.get("seleccion")
+        if not sel_:
+            return
+        ruta, pag = sel_["base"][1], sel_["base"][2]
+        chars = caracteres_de(ruta, pag) or []
+        if not chars:
+            return
+        a_, b_ = sorted((sel_["a"], sel_["b"]))
+        b_ = min(b_, len(chars) - 1)
+        por_lin = {}
+        for k_, ch_ in enumerate(chars):
+            por_lin.setdefault(ch_[4], []).append(k_)
+        hechos = 0
+        for l_ in sorted({chars[k_][4] for k_ in range(a_, b_ + 1)}, key=lambda l__: por_lin[l__][0]):
+            ks_ = por_lin[l_]
+            elegidas = [k_ for k_ in ks_ if a_ <= k_ <= b_ and chars[k_][5].strip()]
+            if not elegidas:
+                continue
+            k0 = elegidas[len(elegidas) // 2]
+            x0, y0, x1, y1 = chars[k0][:4]
+            sp_ = texto_en(ruta, pag, ((x0 + x1) / 2, (y0 + y1) / 2), False)
+            if not isinstance(sp_, dict):
+                continue
+            resto = "".join(chars[k_][5] for k_ in ks_ if not a_ <= k_ <= b_)
+            resto = " ".join(resto.split()) if not resto.strip() else resto.strip()
+            it_ = dict(sp_, tipo="reemplazo", txt=resto.strip(), orig=sp_["txt"], rect_orig=sp_["rect"], ruta=ruta, pag=pag)
+            it_["runs"] = None
+            ajustar_reemplazo(it_)
+            agregar_item(ruta, pag, it_)
+            hechos += 1
+        vis["seleccion"] = None
+        vis["edit_item"] = None
+        popup_esconder()
+        visor_pedir_dibujo()
+        if hechos:
+            v_estado.set("Texto borrado · Ctrl+Z lo vuelve · «Guardar cambios» (Ctrl+S) lo deja en el PDF.")
+        else:
+            v_estado.set("Ese texto no se puede borrar así (probá con Texto → Cambiar).")
 
     def popup_rapido(vista, ev, resaltado=None):
         popup_esconder()
@@ -11180,7 +11299,9 @@ def iniciar_interfaz():
 
             def elegir_(r__=rgb_):
                 popup_esconder()
-                if resaltado:
+                if resaltado and resaltado[2].get("tipo") == "anot_pdf":
+                    anot_pdf_cambiar(resaltado[0], resaltado[1], resaltado[2], tuple(r__))
+                elif resaltado:
                     guardar_historia()
                     resaltado[2]["color"] = tuple(r__)
                     tocar(resaltado[2])
@@ -11199,6 +11320,9 @@ def iniciar_interfaz():
         if resaltado:
             def quitar_():
                 popup_esconder()
+                if resaltado[2].get("tipo") == "anot_pdf":
+                    anot_pdf_cambiar(*resaltado)
+                    return
                 quitar_resaltado(*resaltado)
                 v_estado.set("Sombreado quitado · Ctrl+Z lo vuelve a poner.")
             ctk.CTkButton(w_, text="Quitar", width=60, height=26, corner_radius=7, font=F(11), fg_color="transparent",
@@ -11206,7 +11330,10 @@ def iniciar_interfaz():
         else:
             ctk.CTkButton(w_, text="Copiar", width=60, height=26, corner_radius=7, font=F(11), fg_color="transparent",
                           hover_color=C["suave_h"], text_color=C["texto"],
-                          command=lambda: (popup_esconder(), copiar_seleccion())).pack(side="left", padx=(0, 8))
+                          command=lambda: (popup_esconder(), copiar_seleccion())).pack(side="left", padx=(0, 2))
+            ctk.CTkButton(w_, text="Borrar", width=60, height=26, corner_radius=7, font=F(11), fg_color="transparent",
+                          hover_color=C["suave_h"], text_color="#EF4444",
+                          command=borrar_seleccion).pack(side="left", padx=(0, 8))
         w_.update_idletasks()
         ww_, hh_ = w_.winfo_reqwidth(), w_.winfo_reqheight()
         x_ = max(4, min(ev.x - ww_ // 2, cv_.winfo_width() - ww_ - 4))
@@ -13581,6 +13708,8 @@ def iniciar_interfaz():
             else:
                 ajustar_reemplazo(it_)
             tocar(it_)
+        if it_["tipo"] == "reemplazo" and not txt.strip():  # v5.1.1: texto borrado: no queda recuadro elegido
+            vis["edit_item"] = None
         n_c = n_resaltes()
         v_estado.set(f"Texto listo · {n_c} cambio(s) sin guardar · «Guardar cambios» (Ctrl+S) lo deja en el PDF."
                      if n_c else "Listo.")
@@ -13958,10 +14087,15 @@ def iniciar_interfaz():
 
     def quitar_editado(*_):
         e_ = vis.get("edit_item")
-        if not e_ or app["pagina"] != "visor":
+        if app["pagina"] != "visor":
             return
         foco = raiz.focus_get()
         if foco is not None and foco.winfo_class() in ("Entry", "Text"):
+            return
+        if vis.get("seleccion") and not vis.get("ined"):  # v5.1.1: texto seleccionado + Supr: se borra
+            borrar_seleccion()
+            return "break"
+        if not e_:
             return
         it_ = e_[2]
         if it_.get("tipo") == "reemplazo":  # v5.1.1: Supr BORRA el texto (antes volvia a aparecer el original)
@@ -13972,6 +14106,8 @@ def iniciar_interfaz():
                 tocar(it_)
                 visor_pedir_dibujo()
                 v_estado.set("Texto borrado · Ctrl+Z lo vuelve · clic derecho → «Volver al texto original».")
+            vis["edit_item"] = None  # sin recuadro: ya no queda nada elegido
+            visor_pedir_dibujo()
             return "break"
         vis["edit_item"] = None
         quitar_resaltado(*e_)

@@ -1,3 +1,11 @@
+## PdFOL v5.1.2 · by Meneses999
+
+- **Borrar texto como en Nitro**: seleccioná el texto con el mouse y apretá Supr (o «Borrar» en el cuadrito de colores).
+- Los **sombreados ya guardados** en el PDF se pueden quitar o cambiar de color (clic encima).
+- Al borrar un texto ya no queda el recuadro punteado.
+
+**Descarga:** `PdFOL_v5.1.2_portable.zip` (sin instalar) o `PdFOL_v5.1.2_instalador.exe`.
+
 ## PdFOL v5.1.1 · by Meneses999
 
 - **Borrar textos**: Supr (o clic derecho → «Borrar este texto») borra el texto, y ya no vuelve a aparecer el original al tocar ahí. «Volver al texto original» lo recupera.
