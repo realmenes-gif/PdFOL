@@ -1,3 +1,11 @@
+## PdFOL v5.4 · by Meneses999
+
+- Al tocar un texto toma el **recuadro entero** (títulos de varios renglones, direcciones, firmas, celdas), respetando sus Enter.
+- Reconoce la **alineación** (centrado, derecha, justificado, izquierda) y al borrar o agregar texto lo acomoda igual.
+- Arreglado: palabras pegadas al cambiar un párrafo justificado.
+
+**Descarga:** `PdFOL_v5.4_portable.zip` (sin instalar) o `PdFOL_v5.4_instalador.exe`.
+
 ## PdFOL v5.3.2 · by Meneses999
 
 - Al guardar, la hoja **se queda donde estaba** (misma página y misma parte).

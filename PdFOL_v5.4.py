@@ -363,12 +363,19 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.3.2"
-VERSION_INTERNA = "5.3.2"
+VERSION = "v5.4"
+VERSION_INTERNA = "5.4"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.4", [
+        "Como Nitro: al tocar un texto se toma el RECUADRO entero (títulos de varios renglones, direcciones, "
+        "firmas, celdas de tablas), no solo un renglón. Respeta los Enter que tenía.",
+        "Reconoce mejor cómo estaba alineado: centrado (también en la hoja), a la derecha, justificado o a la "
+        "izquierda; al borrar o agregar texto lo vuelve a acomodar igual.",
+        "Arreglado: en un párrafo justificado, al cambiar el texto podían quedar palabras pegadas.",
+    ]),
     ("v5.3.2", [
         "Al guardar, la hoja se queda donde estaba (misma página y misma parte), también al guardar páginas "
         "organizadas.",
@@ -4376,7 +4383,9 @@ def renglones_indices(txt, it_, ancho=None):
         if not ancho:
             out.append((pos, parr, True))
         else:
-            lim = ancho + (it_.get("corte_d") or 0)
+            # v5.4: el margen extra (para cortar igual que el original) es chico: si no, al cambiar el texto un
+            # renglon justificado podia quedar sin espacios entre palabras
+            lim = ancho + min(it_.get("corte_d") or 0, it_.get("tam", 10) * 0.5)
             ini, fin = pos, None
             k_ = pos
             for pal in parr.split(" "):
@@ -4413,7 +4422,7 @@ def paso_renglon(it_):
     return it_["tam"] * (k_ or 1.25)
 
 
-def parrafo_de_renglones(lineas, cajas, k0, m_):
+def parrafo_de_renglones(lineas, cajas, k0, m_, separadores=None):
     """v4.6.1: los renglones (indices) del parrafo al que pertenece el renglon k0, por su forma en la hoja:
     misma columna, mismo tamaño de letra, el mismo interlineado, y el renglon de arriba lleno hasta el margen
     (si quedo corto, ahi termino el parrafo). Una viñeta o un numero al empezar un renglon abre otro parrafo."""
@@ -4444,19 +4453,34 @@ def parrafo_de_renglones(lineas, cajas, k0, m_):
     der_col = max(cajas[k_].x1 for k_ in col)
     vineta = re.compile(r"^(\(?\d{1,3}[.)]|[a-zA-Z][.)]|[•·▪◦●○\-–—*])\s")
 
-    def sigue(a_, b_, salto_par):
-        """¿El renglon b_ (debajo de a_) sigue el mismo parrafo?"""
+    def sigue(a_, b_, salto_par, a_es_tope=True):
+        """¿El renglon b_ (debajo de a_) sigue el mismo parrafo (el mismo recuadro de texto)?"""
         ta, tb = tam_(a_), tam_(b_)
         if abs(ta - tb) > 0.8:
             return False
         salto = base_(b_) - base_(a_)
         if not (0.6 * ta < salto <= 2.4 * max(ta, tb)):
             return False
-        if salto_par and abs(salto - salto_par) > 0.2 * salto_par:
+        if salto_par and abs(salto - salto_par) > max(1.0, 0.08 * salto_par):
             return False  # otro interlineado (o un espacio entre parrafos)
         if vineta.match(texto_(b_)):
             return False
         ra, rb = cajas[a_], cajas[b_]
+        for s_ in separadores or ():  # v5.4: una raya entre los dos (una tabla): son recuadros distintos
+            if ra.y1 - 1 <= s_.y0 and s_.y1 <= rb.y0 + 1 and s_.x0 < min(ra.x1, rb.x1) and s_.x1 > max(ra.x0, rb.x0):
+                return False
+        # v5.4: como Nitro: el recuadro de texto entero, no solo lo que llena el renglon: un bloque centrado,
+        # pegado a la derecha o alineado a la izquierda (direcciones, firmas, titulos de varios renglones)
+        tol_c = max(2.5, 0.25 * max(ta, tb))
+        mismo_izq = abs(ra.x0 - rb.x0) < 2.5
+        if not mismo_izq and abs((ra.x0 + ra.x1) / 2 - (rb.x0 + rb.x1) / 2) < tol_c:
+            return True  # centrado
+        if not mismo_izq and abs(ra.x1 - rb.x1) < 2.0:
+            return True  # a la derecha
+        if mismo_izq:
+            return True
+        if rb.x0 < ra.x0 - 3 and not a_es_tope:
+            return False  # v5.4: el de abajo empieza mas a la izquierda: otro parrafo (salvo la sangria del primero)
         lleno = ra.x1 >= der_col - 3 or ra.x1 >= rb.x1 - 2
         if not lleno:  # izquierda sin justificar: ¿la primera palabra de abajo entraba arriba?
             pal = texto_(b_).split(" ")[0]
@@ -4469,8 +4493,14 @@ def parrafo_de_renglones(lineas, cajas, k0, m_):
         return True
     i0 = col.index(k0)
     arr_ = [k0]
+    # v5.4: el interlineado del parrafo: el mas chico de arriba / abajo (entre parrafos suele haber mas espacio)
+    cand_ = []
+    if i0 > 0 and sigue(col[i0 - 1], k0, None):
+        cand_.append(base_(k0) - base_(col[i0 - 1]))
+    if i0 < len(col) - 1 and sigue(k0, col[i0 + 1], None):
+        cand_.append(base_(col[i0 + 1]) - base_(k0))
+    salto_p = min(cand_) if cand_ else None
     # hacia arriba
-    salto_p = None
     j = i0
     while j > 0:
         a_, b_ = col[j - 1], col[j]
@@ -4482,7 +4512,7 @@ def parrafo_de_renglones(lineas, cajas, k0, m_):
     j = i0
     while j < len(col) - 1:
         a_, b_ = col[j], col[j + 1]
-        if not sigue(a_, b_, salto_p):
+        if not sigue(a_, b_, salto_p, a_ == arr_[0]):
             break
         salto_p = salto_p or (base_(b_) - base_(a_))
         arr_.append(b_)
@@ -4490,7 +4520,7 @@ def parrafo_de_renglones(lineas, cajas, k0, m_):
     return arr_
 
 
-def alineacion_parrafo(cajas, columna):
+def alineacion_parrafo(cajas, columna, ancho_hoja=None):
     """v4.6: (alineacion, sangria, x izquierda, ancho para acomodar o None) de un parrafo, por la forma de sus
     renglones (cajas en coordenadas de la pagina como se ve). columna: (x0, x1) del texto de la hoja."""
     n_ = len(cajas)
@@ -4501,8 +4531,11 @@ def alineacion_parrafo(cajas, columna):
         r_ = cajas[0]
         c_ = (r_.x0 + r_.x1) / 2
         cx0, cx1 = columna
-        if abs(c_ - (cx0 + cx1) / 2) < 4 and r_.x0 > cx0 + 20:
-            return "centro", 0, r_.x0, None  # titulo centrado
+        if ancho_hoja and r_.x0 > ancho_hoja * 0.1 and abs(r_.x0 - (ancho_hoja - r_.x1)) < 4:
+            return "centro", 0, r_.x0, None  # v5.4: el mismo margen a los dos lados: centrado en la hoja
+        if (abs(c_ - (cx0 + cx1) / 2) < 4 or (ancho_hoja and abs(c_ - ancho_hoja / 2) < max(4, ancho_hoja * 0.02)
+                                                 and r_.x1 < cx1 - 20)) and r_.x0 > cx0 + 20:
+            return "centro", 0, r_.x0, None  # titulo centrado (en la columna o en la hoja)
         if abs(r_.x1 - cx1) < 4 and r_.x0 > (cx0 + cx1) / 2:
             return "der", 0, r_.x0, None  # fecha o firma pegada a la derecha
         return "izq", 0, r_.x0, None
@@ -4513,11 +4546,12 @@ def alineacion_parrafo(cajas, columna):
     izq_ok = all(abs(x - x_izq) < tol for x in izq[1:]) and (sangria or abs(izq[0] - x_izq) < tol)
     der_ok = all(abs(x - x_der) < tol for x in der[:-1])
     centros = [(a + b) / 2 for a, b in zip(izq, der)]
+    tol_c = max(2.5, 0.25 * max(1.0, min(r_.height for r_ in cajas)))
+    if max(izq) - min(izq) > 3 and all(abs(c - centros[0]) < tol_c for c in centros):
+        return "centro", 0, min(izq), max(der) - min(izq) + 0.3  # v5.4: (antes se tomaba por sangria)
     if izq_ok and der_ok and (n_ >= 3 or abs(x_der - columna[1]) < 3):
         return "just", sangria, x_izq, ancho
-    if not izq_ok and all(abs(c - centros[0]) < tol for c in centros):
-        return "centro", 0, min(izq), max(der) - min(izq) + 0.3
-    if not izq_ok and all(abs(x - x_der) < tol for x in der):
+    if not izq_ok and all(abs(x - x_der) < 2.5 for x in der):
         return "der", 0, min(izq), max(der) - min(izq) + 0.3
     return "izq", sangria, x_izq, ancho
 
@@ -4563,7 +4597,7 @@ def diseno_texto(it_, con_indices=False):
                 fijo = w_pre - ancho_idx(it_, 0, len(lista[0][1]))
             n_huecos = len(palabras) - 1 - (1 if fijo else 0)
             libre = disp - sum(ancho_idx(it_, a_, a_ + len(p_)) for a_, p_ in lista) - fijo
-            hueco = libre / max(1, n_huecos)
+            hueco = max(libre / max(1, n_huecos), ancho_con(fuente_de_item(it_)[1], " ", tam) * 0.6)
             xs, x_ = [], xl
             for n_, (a_, p_) in enumerate(lista):
                 xs.append((x_, p_, a_))
@@ -4961,9 +4995,16 @@ def dibujar_texto(pg, it_, conv, rot=0):
                     p0_ = fitz.Point(conv((x_, base))) * tmi
                     p1_ = fitz.Point(conv((x_ + 10, base))) * tmi
                     dx_, dy_ = (p1_.x - p0_.x) / 10, (p1_.y - p0_.y) / 10
-                    hx_ = "".join("%04X" % g_ for g_ in cods)
-                    crudos.append("BT 0 Tr 0 Tc 0 Tw 100 Tz 0 Ts /%s %.4f Tf %.4f %.4f %.4f rg %.5f %.5f %.5f %.5f %.4f %.4f Tm <%s> Tj ET"
-                                  % (orig_[0], e_["tam"], col_[0], col_[1], col_[2], dx_, dy_, -dy_, dx_, p0_.x, p0_.y, hx_))
+                    # cada letra avanza lo mismo que en la vista (el ancho de la fuente, no el /W del PDF)
+                    partes_ = []
+                    for ch, g_ in zip(t_, cods):
+                        partes_.append("<%04X>" % g_)
+                        dif_ = orig_[1]["w"].get(g_, orig_[1]["dw"]) - ft_o.text_length(ch, fontsize=1) * 1000
+                        if abs(dif_) > 0.05:
+                            partes_.append("%.3f" % dif_)
+                    crudos.append("BT 0 Tr 0 Tc 0 Tw 100 Tz 0 Ts /%s %.4f Tf %.4f %.4f %.4f rg %.5f %.5f %.5f %.5f %.4f %.4f Tm [%s] TJ ET"
+                                  % (orig_[0], e_["tam"], col_[0], col_[1], col_[2], dx_, dy_, -dy_, dx_, p0_.x, p0_.y,
+                                     " ".join(partes_)))
                     w_t = ancho_con(ft_o, t_, e_["tam"]) + _extra_marca(it_, a2, b2)
                     for marca, dy in (("sub", e_["tam"] * 0.14), ("tach", -e_["tam"] * 0.27)):
                         if e_.get(marca):
@@ -13396,7 +13437,21 @@ def iniciar_interfaz():
                 elif ocr_r:  # escaneo: el OCR ya junta los renglones en parrafos
                     elegidas = [k_ for k_, (b_, _l) in enumerate(todas_l) if b_ == todas_l[dentro[0]][0]]
                 else:
-                    elegidas = parrafo_de_renglones([ln for _b, ln in todas_l], cajas_t, dentro[0], m_)
+                    seps_ = []  # v5.4: rayas horizontales (tablas): un recuadro de texto no las cruza
+                    try:
+                        for dr_ in pg.get_drawings():
+                            for it__ in dr_["items"]:
+                                if it__[0] == "l" and abs(it__[1].y - it__[2].y) < 1:
+                                    q__ = fitz.Rect(it__[1], it__[2]) * m_
+                                elif it__[0] == "re" and it__[1].height < 2.5 and it__[1].width > 10:
+                                    q__ = fitz.Rect(it__[1]) * m_
+                                else:
+                                    continue
+                                q__.normalize()
+                                seps_.append(q__ + (0, -0.3, 0, 0.3))
+                    except Exception:
+                        seps_ = []
+                    elegidas = parrafo_de_renglones([ln for _b, ln in todas_l], cajas_t, dentro[0], m_, seps_)
                 lineas = [todas_l[k_][1] for k_ in elegidas]
                 cajas = [cajas_t[k_] for k_ in elegidas]
                 d0 = fitz.Point(lineas[0]["dir"]) * m_ - fitz.Point(0, 0) * m_
@@ -13408,13 +13463,28 @@ def iniciar_interfaz():
                 for r_ in cajas[1:]:
                     caja |= r_
                 textos = ["".join(sp["text"] for sp in ln["spans"]).strip() for ln in lineas]
+                # v5.4: hasta donde podia llegar el renglon: el margen del texto de la hoja, o lo que tiene a la
+                # derecha (la columna de al lado de una tabla)
+                limite_ = max(r_.x1 for r_ in cajas_t)
+                for k2_, r2_ in enumerate(cajas_t):
+                    if k2_ not in elegidas and r2_.x0 >= caja.x1 - 1 and r2_.y0 < caja.y1 and r2_.y1 > caja.y0:
+                        limite_ = min(limite_, r2_.x0 - 3)
+                alin_pre = alineacion_parrafo(cajas, (min(r_.x0 for r_ in cajas_t), limite_))[0] if len(cajas) > 1 else "izq"
+                centrado_ = alin_pre in ("centro", "der")
                 txt = ""
                 txt_cortes = []
                 for k_, t_ in enumerate(textos):  # se unen los renglones cortados por el ancho del parrafo
                     txt += t_
                     if k_ < len(textos) - 1:
-                        lleno = cajas[k_].x1 >= caja.x0 + caja.width * 0.8 and not t_.endswith((".", ":", ";"))
-                        if abs(cajas[k_].x1 - caja.x1) < 1.6 and abs(cajas[k_ + 1].x0 - caja.x0) < 1.6:
+                        # v5.4: el renglon se corto solo (sigue el texto) si la primera palabra de abajo NO entraba
+                        # arriba; si entraba, ahi habia un Enter (direcciones, firmas, titulos)
+                        pal_ = (textos[k_ + 1].split(" ") or [""])[0]
+                        prom_ = cajas[k_].width / max(1, len(t_))
+                        if centrado_:
+                            lleno = cajas[k_].width + prom_ * (len(pal_) + 1) > caja.width + 0.5
+                        else:
+                            lleno = cajas[k_].x1 + prom_ * (len(pal_) + 1) > limite_ + 0.5
+                        if alin_pre == "just" and abs(cajas[k_].x1 - caja.x1) < 1.6 and abs(cajas[k_ + 1].x0 - caja.x0) < 1.6:
                             lleno = True  # v4.6: renglon hasta el borde (justificado): sigue el mismo parrafo
                         txt_cortes.append(lleno)
                         txt += " " if lleno else "\n"
@@ -13478,7 +13548,7 @@ def iniciar_interfaz():
                 todas_ = [fitz.Rect(ln_["bbox"]) * m_ for bl_ in bloques_ for ln_ in bl_.get("lines", [])
                           if "".join(sp_["text"] for sp_ in ln_["spans"]).strip()]
                 columna_ = (min(r_.x0 for r_ in todas_), max(r_.x1 for r_ in todas_))
-                alin_, sangria_, x_izq, ancho_ = alineacion_parrafo(cajas, columna_)
+                alin_, sangria_, x_izq, ancho_ = alineacion_parrafo(cajas, columna_, (fitz.Rect(pg.rect) * m_).width)
                 res_ = {"rect": tuple(caja), "rects_borrar": [tuple(r_) for r_ in cajas], "txt": txt,
                         "tam": round(sp0["size"], 3), "fam": fam_, "neg": neg_, "cur": cur_,
                         "color": ((sp0["color"] >> 16) & 255, (sp0["color"] >> 8) & 255, sp0["color"] & 255),
