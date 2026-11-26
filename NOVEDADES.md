@@ -1,3 +1,10 @@
+## PdFOL v5.4.4 · by Meneses999
+
+- Arreglado: **«Acceso denegado» al guardar en el mismo PDF** (Windows).
+- Organizar: botón **«Guardar»** (y Ctrl+S) para guardar lo organizado **sin procesar**.
+
+**Descarga:** `PdFOL_v5.4.4_portable.zip` (sin instalar) o `PdFOL_v5.4.4_instalador.exe`.
+
 ## PdFOL v5.4.3 · by Meneses999
 
 - Arreglado: **cuadritos después de guardar** un texto editado (Windows).

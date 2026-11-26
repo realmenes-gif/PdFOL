@@ -363,12 +363,19 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.4.3"
-VERSION_INTERNA = "5.4.3"
+VERSION = "v5.4.4"
+VERSION_INTERNA = "5.4.4"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.4.4", [
+        "Arreglado: «Acceso denegado» al guardar en el mismo PDF (Windows). La vista previa del folio lo tenía "
+        "abierto; ahora todos lo sueltan, se espera a que lo suelten y, si otro programa lo tiene abierto, se "
+        "escribe encima sin borrar el archivo.",
+        "Organizar: botón «Guardar» (y Ctrl+S) para guardar lo organizado sin procesar (sin aplanar, foliar ni "
+        "comprimir).",
+    ]),
     ("v5.4.3", [
         "Arreglado: después de guardar un texto editado salían cuadritos (en Windows). El recorte de fuentes de "
         "PyMuPDF mezclaba copias de la misma fuente y dejaba letras sin dibujo; ahora PdFOL pone cada fuente de "
@@ -3363,6 +3370,10 @@ class Previsualizador(threading.Thread):
     def pedir(self, ruta, idx, cfg, texto, girar=False):
         self.pedidos.put((ruta, idx, dict(cfg), texto, girar))
 
+    def soltar(self, ruta=None):
+        """v5.4.4: suelta el PDF (para poder guardarlo encima en Windows)."""
+        self.pedidos.put(("__soltar__", ruta))
+
     def run(self):
         fitz.TOOLS.mupdf_display_errors(False)
         while True:
@@ -3372,6 +3383,15 @@ class Previsualizador(threading.Thread):
                     pedido = self.pedidos.get_nowait()
             except queue.Empty:
                 pass
+            if pedido and pedido[0] == "__soltar__":
+                try:
+                    if self._doc is not None and (pedido[1] is None or pedido[1] == self._ruta):
+                        self._doc.close()
+                        self._doc = self._dl = None
+                        self._ruta = self._idx = None
+                except Exception:
+                    pass
+                continue
             try:
                 self.salida(("preview",) + self._generar(*pedido))
             except Exception as e:
@@ -7456,7 +7476,8 @@ def iniciar_interfaz():
     def sep(f_):
         ctk.CTkFrame(f_, width=1, height=40, fg_color=C["borde"]).pack(side="left", padx=3)
 
-    BOTONES_ORG = (("abrir", "Abrir PDF", "abrir", "#2563EB"), ("unir", "Unir PDF", "unir", "#2563EB"), ("|",),
+    BOTONES_ORG = (("abrir", "Abrir PDF", "abrir", "#2563EB"), ("unir", "Unir PDF", "unir", "#2563EB"),
+                   ("guardar", "Guardar", "guardar", "#2563EB"), ("|",),
                    ("ver", "Ver página", "ver", "#06B6D4"), ("visor_v", "En el visor", "visor", "#06B6D4"), ("|",),
                    ("rot_i", "Girar izq.", "girar_i", "#8B5CF6"), ("rot_d", "Girar der.", "girar_d", "#8B5CF6"),
                    ("|",),
@@ -8369,6 +8390,7 @@ def iniciar_interfaz():
                        ("todo", hay and org["orden"] != org.get("original")),
                        ("unir", hay and not org["preparando"]),
                        ("limpiar", hay and not org["preparando"] and not app["ocupado"]), ("abrir", not org["preparando"] and not hay),
+                       ("guardar", hay and not org["preparando"] and not app["ocupado"]),
                        ):
             if k_ in b_org and b_org[k_].cget("state") != ("normal" if ok else "disabled"):
                 b_org[k_].configure(state="normal" if ok else "disabled", image=img_org[k_][0 if ok else 1])
@@ -9206,8 +9228,22 @@ def iniciar_interfaz():
                    ("izq", lambda: org_paso(-1)), ("der", lambda: org_paso(1)), ("mover_a", org_mover_dialogo),
                    ("rot_i", lambda: org_girar(-90)), ("rot_d", lambda: org_girar(90)),
                    ("deshacer", org_deshacer), ("rehacer", org_rehacer), ("todo", org_original),
-                   ("limpiar", org_limpiar), ("ayuda", lambda: ayuda_organizar())):
+                   ("limpiar", org_limpiar), ("ayuda", lambda: ayuda_organizar()),
+                   ("guardar", lambda: org_guardar_sin_procesar())):
         cmd_org[k_] = f_
+
+    def org_guardar_sin_procesar():
+        """v5.4.4: en Organizar se guarda lo organizado tal cual (sin aplanar, foliar ni comprimir)."""
+        t_ = pest_activa()
+        if not t_:
+            v_estado.set("Abrí un PDF para guardar.")
+            return
+        if tiene_organizado(t_):
+            dialogo_guardar_paginas(t_)
+        elif n_resaltes():
+            guardar_resaltados_dialogo()
+        else:
+            v_estado.set("No hay cambios para guardar.")
     raiz.after(300, org_recibir)
 
     # ================================================== VISOR (pestanas + miniaturas + documento)
@@ -9274,9 +9310,55 @@ def iniciar_interfaz():
     def soltar_archivo(ruta):
         """Los procesos sueltan el PDF (para poder guardarle los resaltados)."""
         soltar_ayuda(ruta)
+        try:
+            prev.soltar(ruta)  # v5.4.4: la vista previa del folio tambien lo tenia abierto
+        except Exception:
+            pass
         for q_ in (q_pag, q_min, q_bus):
             q_.put(("cerrar", ruta))
         org_pedidos.put(("cerrar", ruta, None, None))
+
+    def reemplazar_archivo(tmp, dest):
+        """v5.4.4: deja «tmp» en el lugar de «dest» (guardar ENCIMA del mismo PDF). En Windows el PDF puede
+        seguir abierto unos instantes (la vista, las miniaturas, la busqueda): se espera a que lo suelten; si
+        otro programa lo tiene abierto, se escribe el contenido encima (sin borrar el archivo)."""
+        import gc
+        soltar_archivo(dest)
+        ult = None
+        for k_ in range(50):
+            try:
+                os.replace(tmp, dest)
+                return
+            except PermissionError as e:
+                ult = e
+            except OSError as e:
+                if getattr(e, "winerror", None) not in (5, 32, 33):
+                    raise
+                ult = e
+            if k_ in (3, 15):
+                gc.collect()
+                soltar_archivo(dest)
+            try:
+                raiz.update()
+            except Exception:
+                pass
+            time.sleep(0.08)
+        try:
+            with open(tmp, "rb") as f_:
+                datos_ = f_.read()
+            with open(dest, "r+b") as f_:
+                f_.seek(0)
+                f_.write(datos_)
+                f_.truncate()
+            try:
+                os.remove(tmp)
+            except Exception:
+                pass
+            return
+        except Exception:
+            pass
+        raise PermissionError("El PDF está abierto en otro programa (Adobe, Nitro, el navegador o la vista previa "
+                              f"del Explorador). Cerralo ahí y volvé a guardar.\n\n({ult})")
 
     visor.grid_columnconfigure(0, weight=1)
     visor.grid_rowconfigure(1, weight=1)
@@ -12145,7 +12227,7 @@ def iniciar_interfaz():
                         tmp = dest + ".pdfol_tmp"
                         d.save(tmp, garbage=1, deflate=True)
                         d.close()
-                        os.replace(tmp, dest)
+                        reemplazar_archivo(tmp, dest)
                     vis["ver_arch"][dest] = ver_arch(dest) + 1
                 else:
                     d.close()
@@ -13197,17 +13279,10 @@ def iniciar_interfaz():
                 fs_[fs_.index(ruta)] = snap
                 org_de(x).setdefault("origen", {})[snap] = original_de(ruta)
             org["copiado"] = [((snap if c_[0] == ruta else c_[0]),) + tuple(c_[1:]) for c_ in org.get("copiado") or []]
-        soltar_archivo(ruta)
-        for _ in range(60):  # Windows: esperar a que todos suelten el archivo
-            try:
-                os.replace(tmp, ruta)
-                break
-            except PermissionError:
-                raiz.update()
-                time.sleep(0.1)
-        else:
-            messagebox.showerror(NOMBRE, f"El PDF está abierto en otro programa; no se pudo reemplazar:\n{ruta}\n\n"
-                                         f"Quedó guardado como:\n{tmp}")
+        try:  # Windows: se espera a que todos suelten el archivo (v5.4.4: o se escribe encima)
+            reemplazar_archivo(tmp, ruta)
+        except Exception as e:
+            messagebox.showerror(NOMBRE, f"No se pudo guardar encima de:\n{ruta}\n\n{e}\n\nQuedó guardado como:\n{tmp}")
             return
         vis["ver_arch"][ruta] = ver_arch(ruta) + 1
         vis["med"].pop(ruta, None)
@@ -13242,7 +13317,7 @@ def iniciar_interfaz():
         if vis.get("ined"):  # v4.1: lo que se estaba escribiendo en la hoja queda puesto
             ined_terminar(True)
         t_g = pest_activa()
-        if t_g and tiene_organizado(t_g) and app["pagina"] == "visor":  # v3.5: paginas copiadas o movidas
+        if t_g and tiene_organizado(t_g) and app["pagina"] in ("visor", "organizar"):  # v3.5 (v5.4.4: tambien en Organizar)
             return dialogo_guardar_paginas(t_g)
         if not n_resaltes():
             return "break"
@@ -13346,7 +13421,7 @@ def iniciar_interfaz():
                         tmp = fuente + ".pdfol_tmp"
                         d.save(tmp, garbage=1, deflate=True)
                         d.close()
-                        os.replace(tmp, fuente)
+                        reemplazar_archivo(tmp, fuente)
                         d = None
                     if d is not None:
                         d.close()
@@ -16858,7 +16933,7 @@ def iniciar_interfaz():
             with pikepdf.open(ruta_) as pdf_:
                 n_ = quitar_folios_pdfol(pdf_)
                 pdf_.save(tmp_)
-            os.replace(tmp_, ruta_)
+            reemplazar_archivo(tmp_, ruta_)
         except Exception as e:
             messagebox.showerror(NOMBRE, f"No se pudo quitar el folio:\n{e}")
             return
