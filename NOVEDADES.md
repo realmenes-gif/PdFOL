@@ -1,3 +1,10 @@
+## PdFOL v5.4.3 · by Meneses999
+
+- Arreglado: **cuadritos después de guardar** un texto editado (Windows).
+- Foliar: **«Quitar el folio anterior»** (refoliar sin doble folio) y botón **«Quitar folio»**.
+
+**Descarga:** `PdFOL_v5.4.3_portable.zip` (sin instalar) o `PdFOL_v5.4.3_instalador.exe`.
+
 ## PdFOL v5.4.2 · by Meneses999
 
 - **«Cancelar» en todos los procesos**: convertir (Word, Excel, imagen), extraer páginas, guardar páginas organizadas e imprimir muestran arriba el avance con su «Cancelar», en cualquier pantalla.

@@ -363,12 +363,19 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.4.2"
-VERSION_INTERNA = "5.4.2"
+VERSION = "v5.4.3"
+VERSION_INTERNA = "5.4.3"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.4.3", [
+        "Arreglado: después de guardar un texto editado salían cuadritos (en Windows). El recorte de fuentes de "
+        "PyMuPDF mezclaba copias de la misma fuente y dejaba letras sin dibujo; ahora PdFOL pone cada fuente de "
+        "Windows ya recortada a las letras de la hoja, con nombre propio.",
+        "Foliar: «Quitar el folio anterior» (refoliar sin que quede doble) y botón «Quitar folio» para sacar "
+        "el folio de PdFOL de un PDF foliado sin querer.",
+    ]),
     ("v5.4.2", [
         "«Cancelar» en todos los procesos: convertir a Word/Excel/imagen, extraer páginas, guardar páginas "
         "organizadas e imprimir muestran arriba una franja con el avance y su «Cancelar», en cualquier pantalla.",
@@ -1282,6 +1289,36 @@ def _heredado(obj, clave):
     return None
 
 
+def quitar_folios_pdfol(pdf):
+    """v5.4.3: saca los folios que puso PdFOL (la capa /PdFOL... de cada hoja). -> cantidad de hojas."""
+    n = 0
+    for pg in pdf.pages:
+        try:
+            res = pg.obj.get("/Resources")
+            xo = res.get("/XObject") if res is not None else None
+            if xo is None or not any(str(k_).startswith("/PdFOL") for k_ in xo.keys()):
+                continue
+            ops = pikepdf.parse_content_stream(pg)
+            nuevos, usados = [], set()
+            for ins in ops:
+                op_ = getattr(ins, "operator", None)
+                if op_ is not None and str(op_) == "Do" and ins.operands and str(ins.operands[0]).startswith("/PdFOL"):
+                    usados.add(str(ins.operands[0]))
+                    continue
+                nuevos.append(ins)
+            if usados:
+                pg.obj.Contents = pdf.make_stream(pikepdf.unparse_content_stream(nuevos))
+                for k_ in usados:
+                    try:
+                        del xo[k_]
+                    except Exception:
+                        pass
+                n += 1
+        except Exception:
+            pass
+    return n
+
+
 def aplicar_folios(pdf, cfg, estado=None, cancelar=None):
     """Agrega los folios al PDF abierto con pikepdf (como capa vectorial)."""
     estado = estado or (lambda m: None)
@@ -1752,6 +1789,10 @@ def procesar(ruta, pesadas=(), dpi=DPI_DEFECTO, nucleos=None, texto=True,
 
         # ---- 2. foliar
         if folio is not None:
+            if folio.get("quitar_ant"):  # v5.4.3: refoliar: el folio anterior de PdFOL se quita (no queda doble)
+                n_q = quitar_folios_pdfol(pdf)
+                if n_q:
+                    estado(f"Folio anterior quitado de {n_q} página(s).")
             foliadas = aplicar_folios(pdf, folio, estado=estado, cancelar=cancelar)
 
         # ---- 3. comprimir estructura y guardar
@@ -5225,6 +5266,43 @@ def _escribir_crudo(pg, ops_txt):
     doc.xref_set_key(pg.xref, "Contents", "[" + " ".join(f"{c_} 0 R" for c_ in conts) + "]")
 
 
+_RECORTADAS = {}
+
+
+def _fuente_recortada(archivo, letras):
+    """v5.4.3: la fuente del archivo con SOLO esas letras (fontTools), lista para insert_font. -> (nombre, buf)."""
+    letras = frozenset(ch for ch in letras if ch not in "\n\r\t") | {" "}
+    k_ = (archivo, letras)
+    if k_ in _RECORTADAS:
+        return _RECORTADAS[k_]
+    res = None
+    try:
+        from fontTools import subset
+        from fontTools.ttLib import TTFont
+        tt = TTFont(archivo, fontNumber=0, lazy=False)
+        op = subset.Options()
+        op.layout_features = []
+        op.name_IDs = ["*"]
+        op.name_languages = ["*"]
+        op.notdef_outline = True
+        op.hinting = False
+        op.recalc_bounds = True
+        sb = subset.Subsetter(op)
+        sb.populate(unicodes=[ord(ch) for ch in letras])
+        sb.subset(tt)
+        o_ = io.BytesIO()
+        tt.save(o_)
+        buf = o_.getvalue()
+        fitz.Font(fontbuffer=buf)  # (que se pueda abrir)
+        res = ("PdR%X" % (zlib.crc32(buf) & 0xFFFFFF), buf)
+    except Exception:
+        res = None
+    if len(_RECORTADAS) > 200:
+        _RECORTADAS.clear()
+    _RECORTADAS[k_] = res
+    return res
+
+
 def dibujar_texto(pg, it_, conv, rot=0):
     """Escribe el texto de un item en la pagina. conv: punto de la vista -> punto de esta pagina.
     v4.6: cada tramo con su fuente, negrita, cursiva y color (como estaba en el PDF)."""
@@ -5263,6 +5341,16 @@ def dibujar_texto(pg, it_, conv, rot=0):
                             lineas_.append((conv((x_, base + dy)), conv((x_ + w_t, base + dy)), col_, e_["tam"]))
                     x_ += w_t
                     continue
+            letras_hoja = pg.__dict__.get("_pdfol_letras")
+            if letras_hoja is not None and "fontfile" in kw:
+                # v5.4.3: al guardar, la fuente de Windows va recortada por PdFOL a las letras de la hoja, con
+                # un nombre nuevo (nunca se reusa una copia vieja que no tiene las letras nuevas)
+                sub_ = _fuente_recortada(kw["fontfile"], letras_hoja | set(t_))
+                if sub_ is not None:
+                    kw = {"fontname": sub_[0]}
+                    if sub_[0] not in puestas:
+                        pg.insert_font(fontname=sub_[0], fontbuffer=sub_[1])
+                        puestas.add(sub_[0])
             if kw["fontname"] not in puestas:  # la fuente se pone una vez por pagina
                 if "fontbuffer" in kw:
                     pg.insert_font(fontname=kw["fontname"], fontbuffer=kw["fontbuffer"])
@@ -5807,7 +5895,7 @@ def iniciar_interfaz():
     # ---------------- variables
     V = {
         "ruta": tk.StringVar(),
-        "apl": tk.BooleanVar(value=True), "fol": tk.BooleanVar(value=False), "comp": tk.BooleanVar(value=True),
+        "apl": tk.BooleanVar(value=True), "fol": tk.BooleanVar(value=False), "refoliar": tk.BooleanVar(value=True), "comp": tk.BooleanVar(value=True),
         "dpi": tk.StringVar(value=str(DPI_DEFECTO)), "texto": tk.BooleanVar(value=True),
         "nucleos": tk.StringVar(value="Automático"), "extra": tk.StringVar(), "excluir": tk.StringVar(),
         "nivel": tk.StringVar(value="Equilibrada"),
@@ -6956,6 +7044,10 @@ def iniciar_interfaz():
         t = Tarjeta(p, 0, padx=(36, 12))
         sw_fol = switch(t, V["fol"])
         t.fila("Foliar páginas", sw_fol, "Número de folio como texto nítido (también en planos aplanados).")
+        t.fila("Quitar el folio anterior", switch(t, V["refoliar"]),
+               "Si ya tiene folio de PdFOL, se quita y se vuelve a foliar (no queda doble).")
+        t.fila("Borrar el folio", boton(t, "Quitar folio", ancho=120, command=quitar_folios_ui),
+               "Saca el folio de PdFOL del PDF abierto (por si se folió sin querer).")
         seccion(p, "Numeración", 1)
         t = Tarjeta(p, 2, padx=(36, 12))
         c_inicio = Contador(t, V["inicio"], 0, 99999999, ancho=90)
@@ -13244,11 +13336,8 @@ def iniciar_interfaz():
                             pg.set_rotation((pg.rotation + giro_) % 360)
                             if giro_ % 180:
                                 hubo_giro.append(pag)
-                    if con_fuentes:  # v2.7: de las fuentes de Windows solo quedan las letras usadas (PDF liviano)
-                        try:
-                            d.subset_fonts()
-                        except Exception:
-                            pass
+                    # v5.4.3: ya no se usa subset_fonts() de PyMuPDF al guardar: en Windows dejaba cuadritos (mezclaba
+                    # copias de una fuente y recortaba letras que se usaban). Las fuentes ya van recortadas por PdFOL
                     if copia:
                         d.save(dest, garbage=3, deflate=True)
                     elif d.can_save_incrementally() and not con_fuentes:
@@ -15430,6 +15519,10 @@ def iniciar_interfaz():
     def guardar_editables(pg, items_):
         """Escribe en la pagina las firmas, sellos y textos (quedan fijos en el PDF)."""
         dm = pg.derotation_matrix
+        # v5.4.3: las letras de todos los textos de la hoja: las fuentes de Windows se ponen recortadas a esas
+        # letras por PdFOL mismo (el recorte de PyMuPDF las dejaba como cuadritos en Windows)
+        pg.__dict__["_pdfol_letras"] = {ch for it_ in items_ if it_["tipo"] in ("texto_n", "reemplazo")
+                                        for ch in (it_.get("txt") or "")}
         for it_ in items_:  # v5.2: primero se sacan las imagenes originales que se movieron o borraron
             if it_.get("img_orig"):
                 quitar_imagen_pg(pg, it_["img_orig"])
@@ -16736,6 +16829,47 @@ def iniciar_interfaz():
         except Exception:
             return defecto
 
+    def quitar_folios_ui():
+        """v5.4.3: quita del PDF abierto el folio que puso PdFOL (se guarda en el mismo archivo)."""
+        t_ = pest_activa()
+        if not t_:
+            v_estado.set("Abrí el PDF al que le querés quitar el folio.")
+            return
+        ruta_ = t_["ruta"]
+        try:
+            with pikepdf.open(ruta_) as pdf_:
+                hay = sum(1 for pg in pdf_.pages if pg.obj.get("/Resources") is not None
+                          and pg.obj.Resources.get("/XObject") is not None
+                          and any(str(k_).startswith("/PdFOL") for k_ in pg.obj.Resources.XObject.keys()))
+        except Exception as e:
+            messagebox.showerror(NOMBRE, f"No se pudo leer el PDF:\n{e}")
+            return
+        if not hay:
+            messagebox.showinfo(NOMBRE, "Este PDF no tiene folio puesto por PdFOL.\n\n(Si se aplanó después de foliar, "
+                                        "el folio quedó dentro de la imagen y ya no se puede quitar.)")
+            return
+        if not messagebox.askyesno(NOMBRE, f"Se encontró el folio de PdFOL en {hay} página(s).\n\n¿Quitarlo? "
+                                           "Se guarda en este mismo PDF."):
+            return
+        lugar_ = recordar_lugar()
+        try:
+            soltar_archivo(ruta_)
+            tmp_ = ruta_ + ".pdfol_tmp"
+            with pikepdf.open(ruta_) as pdf_:
+                n_ = quitar_folios_pdfol(pdf_)
+                pdf_.save(tmp_)
+            os.replace(tmp_, ruta_)
+        except Exception as e:
+            messagebox.showerror(NOMBRE, f"No se pudo quitar el folio:\n{e}")
+            return
+        vis["ver_arch"][ruta_] = ver_arch(ruta_) + 1
+        vis["ult"] = vis["ult_mini"] = None
+        visor_pedir_dibujo()
+        mini_pedir_dibujo()
+        for ms_ in (300, 1000):
+            raiz.after(ms_, lambda: volver_al_lugar(lugar_))
+        v_estado.set(f"Folio quitado de {n_} página(s). Ahora podés volver a foliar.")
+
     def cfg_folio():
         c = folio_por_defecto()
         c["inicio"] = entero(V["inicio"], 1, 0)
@@ -16752,6 +16886,7 @@ def iniciar_interfaz():
         c["posicion"] = V["pos"].get()
         c["margen_h_mm"] = decimal(V["mh"], 10.0, -300, 300)
         c["margen_v_mm"] = decimal(V["mv"], 10.0, 0, 300)
+        c["quitar_ant"] = bool(V["refoliar"].get())
         return c
 
     # ---------------- perfiles: capturar / aplicar configuracion
