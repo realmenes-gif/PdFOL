@@ -363,12 +363,16 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.4.6"
-VERSION_INTERNA = "5.4.6"
+VERSION = "v5.4.7"
+VERSION_INTERNA = "5.4.7"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.4.7", [
+        "Arreglado: en un monitor externo, las ventanitas (Guardar, avisos) salían grandes y después se "
+        "achicaban. Ahora nacen ya con el tamaño de ese monitor y encima de PdFOL.",
+    ]),
     ("v5.4.6", [
         "Arreglado: en tablas de Microsoft Project / «Imprimir a PDF» el texto no se reconocía bien al editar "
         "(quedaban letras viejas debajo). Se leen bien los anchos de sus letras.",
@@ -5916,6 +5920,23 @@ def iniciar_interfaz():
     # redibuja todo MIENTRAS se arrastra (se ve transparente y se pega). Ese control lo hace PdFOL: espera a
     # que se suelte la ventana y ajusta una sola vez (ver revisar_monitor)
     ctk.ScalingTracker.check_dpi_scaling = classmethod(lambda cls: None)
+    # v5.4.7: cada ventanita (Guardar, avisos...) nace con la escala del monitor donde esta PdFOL y encima de
+    # el. Antes nacia con la del monitor principal y despues se ajustaba (en otro monitor: grande y luego chica)
+    _tl_init_orig = ctk.CTkToplevel.__init__
+
+    def _tl_init(self, *a_, **k_):
+        _tl_init_orig(self, *a_, **k_)
+        try:
+            T_ = ctk.ScalingTracker
+            m_ = self.master.winfo_toplevel() if self.master is not None else None
+            if m_ is not None and m_ in T_.window_dpi_scaling_dict:
+                if T_.window_dpi_scaling_dict.get(self) != T_.window_dpi_scaling_dict[m_]:
+                    T_.window_dpi_scaling_dict[self] = T_.window_dpi_scaling_dict[m_]
+                    T_.update_scaling_callbacks_for_window(self)
+                self.geometry(f"+{m_.winfo_rootx() + 80}+{m_.winfo_rooty() + 80}")
+        except Exception:
+            pass
+    ctk.CTkToplevel.__init__ = _tl_init
 
     pdfs_arg = [a_ for a_ in sys.argv[1:] if os.path.isfile(a_) and a_.lower().endswith(".pdf")]
     instancia = instancia_unica(pdfs_arg) if not os.environ.get("PDFOL_PRUEBA") else False

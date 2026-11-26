@@ -1,3 +1,9 @@
+## PdFOL v5.4.7 · by Meneses999
+
+- Arreglado: en un **monitor externo** las ventanitas (Guardar, avisos) salían grandes y luego se achicaban.
+
+**Descarga:** `PdFOL_v5.4.7_portable.zip` (sin instalar) o `PdFOL_v5.4.7_instalador.exe`.
+
 ## PdFOL v5.4.6 · by Meneses999
 
 - Arreglado: editar **tablas** de Microsoft Project / «Imprimir a PDF» (quedaban letras viejas debajo).
