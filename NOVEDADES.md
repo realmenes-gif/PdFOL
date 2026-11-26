@@ -1,3 +1,10 @@
+## PdFOL v5.5.1 · by Meneses999
+
+- Arreglado: en un monitor externo la ventanita de **Guardar** salía cortada.
+- **Buscar** marca solo el resultado actual (el anterior se quita); **Esc** sale de la búsqueda.
+
+**Descarga:** `PdFOL_v5.5.1_portable.zip` (sin instalar) o `PdFOL_v5.5.1_instalador.exe`.
+
 ## PdFOL v5.5 · by Meneses999
 
 - **Convertir a Excel con el formato del PDF**: una hoja por página, celdas combinadas, anchos y altos, colores de fondo, bordes, letra y alineación; el texto en su lugar; logos y sellos como imágenes.

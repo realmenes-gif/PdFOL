@@ -363,12 +363,17 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.5"
-VERSION_INTERNA = "5.5"
+VERSION = "v5.5.1"
+VERSION_INTERNA = "5.5.1"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.5.1", [
+        "Arreglado: en un monitor externo la ventanita de Guardar salía cortada (no se veían los botones).",
+        "Buscar: solo se marca el resultado actual; al ir al siguiente se quita el anterior. Esc sale de la "
+        "búsqueda y quita lo marcado.",
+    ]),
     ("v5.5", [
         "Convertir a Excel mantiene el formato del PDF: una hoja por página, tablas con celdas combinadas, "
         "anchos de columna y alto de filas, colores de fondo, bordes, letra (fuente, tamaño, negrita, cursiva, "
@@ -6130,9 +6135,11 @@ def iniciar_interfaz():
             m_ = self.master.winfo_toplevel() if self.master is not None else None
             if m_ is not None and m_ in T_.window_dpi_scaling_dict:
                 if T_.window_dpi_scaling_dict.get(self) != T_.window_dpi_scaling_dict[m_]:
+                    # v5.5.1: solo el numero de escala (antes de poner nada adentro). NO se llama a los avisos de
+                    # escala: eso fijaba la ventana en 200 x 200 y se cortaba (no se veian los botones)
                     T_.window_dpi_scaling_dict[self] = T_.window_dpi_scaling_dict[m_]
-                    T_.update_scaling_callbacks_for_window(self)
-                self.geometry(f"+{m_.winfo_rootx() + 80}+{m_.winfo_rooty() + 80}")
+                    self._CTkScalingBaseClass__window_scaling = T_.window_dpi_scaling_dict[m_]
+                self.wm_geometry(f"+{m_.winfo_rootx() + 80}+{m_.winfo_rooty() + 80}")
         except Exception:
             pass
     ctk.CTkToplevel.__init__ = _tl_init
@@ -10801,9 +10808,10 @@ def iniciar_interfaz():
                         cv_.create_image(x + bx_, y + by_, anchor="nw", image=self._ft_sel)
                 capas_ = []
                 if busq and i in busq["por_pos"]:
+                    # v5.5.1: solo el resultado actual se marca (al ir al siguiente, se quita el anterior)
                     act_ = busq["hits"][busq["i"]] if 0 <= busq["i"] < len(busq["hits"]) else None
-                    for r_ in busq["por_pos"][i]:
-                        capas_.append((r_, NARANJA if act_ and act_[0] == i and act_[1] == r_ else AMARILLO))
+                    if act_ and act_[0] == i:
+                        capas_.append((act_[1], NARANJA))
                 if capas_:
                     M = matriz_vista(lay["dims"][i][0], lay["dims"][i][1], z, rot, parar)
                     for r_, color_ in capas_:
@@ -11343,6 +11351,8 @@ def iniciar_interfaz():
                 copiar_imagenes()
                 if len(vis["img_sel"]) == 1:  # v5.2: y queda para pegarla en el PDF (Ctrl+V)
                     copiar_obj(img=vis["img_sel"][0])
+            elif k_ == "Escape" and vis.get("busq"):  # v5.5.1: Esc sale de la busqueda (y quita lo marcado)
+                busq_cerrar()
             elif k_ == "Escape" and app.get("panel") == "texto" and not vis.get("ined"):
                 if vis.get("edit_item"):
                     vis["edit_item"] = None
