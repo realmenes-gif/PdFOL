@@ -1,3 +1,10 @@
+## PdFOL v5.5.2 · by Meneses999
+
+- Arreglado: textos escritos varias veces encima (como **BORRADOR**) ya no salen «BBBBOOOORRRR» al editar.
+- Arreglado: **firmas y sellos** ya no quedan con **fondo negro** al moverlos.
+
+**Descarga:** `PdFOL_v5.5.2_portable.zip` (sin instalar) o `PdFOL_v5.5.2_instalador.exe`.
+
 ## PdFOL v5.5.1 · by Meneses999
 
 - Arreglado: en un monitor externo la ventanita de **Guardar** salía cortada.

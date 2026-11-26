@@ -363,12 +363,18 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.5.1"
-VERSION_INTERNA = "5.5.1"
+VERSION = "v5.5.2"
+VERSION_INTERNA = "5.5.2"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.5.2", [
+        "Arreglado: al editar un texto escrito varias veces encima (negrita «falsa», como BORRADOR) salía "
+        "«BBBBOOOORRRR». Ahora se toma una sola vez y queda en negrita.",
+        "Arreglado: al mover firmas o sellos salían con el fondo negro. Ahora se mantiene su transparencia "
+        "(máscaras de todo tipo).",
+    ]),
     ("v5.5.1", [
         "Arreglado: en un monitor externo la ventanita de Guardar salía cortada (no se veían los botones).",
         "Buscar: solo se marca el resultado actual; al ir al siguiente se quita el anterior. Esc sale de la "
@@ -5004,6 +5010,14 @@ def renglones_de_letras(pg, verticales=None):
             llenas = [fitz.Rect(t_[2]["bbox"]) for t_ in tr if not t_[2]["c"].isspace()]
             limpio = []
             for t_ in tr:  # los espacios de relleno que caen encima de otras letras se sacan
+                if not t_[2]["c"].isspace():
+                    # v5.5.2: la misma letra escrita varias veces encima (negrita «falsa»: BBBBOOOORRRR): una
+                    r_ = fitz.Rect(t_[2]["bbox"])
+                    dup_ = next((p_ for p_ in limpio[-6:] if p_[2]["c"] == t_[2]["c"]
+                                 and abs(r_ & fitz.Rect(p_[2]["bbox"])) > abs(r_) * 0.5), None)
+                    if dup_ is not None:
+                        dup_[3]["flags"] = dup_[3]["flags"] | 16  # (se veia en negrita: queda en negrita)
+                        continue
                 if t_[2]["c"].isspace():
                     r_ = fitz.Rect(t_[2]["bbox"])
                     if any(abs(r_ & q_) > abs(r_) * 0.4 for q_ in llenas if r_.intersects(q_)):
@@ -13229,6 +13243,53 @@ def iniciar_interfaz():
                 return img.transpose(op), True
         return img, False
 
+    def _imagen_con_transparencia(d_, xref, smask, mask_):
+        """v5.5.2: la imagen del PDF CON su transparencia (firmas y sellos sin el fondo negro): mascara suave
+        (/SMask), mascara de recorte (/Mask) o color transparente (/Mask [..])."""
+        base = fitz.Pixmap(d_, xref)
+        if base.alpha:
+            base = fitz.Pixmap(base, 0)
+        if base.colorspace and base.colorspace.n not in (1, 3):
+            base = fitz.Pixmap(fitz.csRGB, base)
+        im_ = Image.frombytes("L" if base.n == 1 else "RGB", (base.width, base.height), base.samples).convert("RGB")
+        alfa = None
+        try:
+            if smask:
+                m_ = fitz.Pixmap(d_, smask)
+                if m_.alpha:
+                    m_ = fitz.Pixmap(m_, 0)
+                if m_.n != 1:
+                    m_ = fitz.Pixmap(fitz.csGRAY, m_)
+                alfa = Image.frombytes("L", (m_.width, m_.height), m_.samples)
+            elif mask_[0] == "xref":  # mascara de recorte: 1 = se tapa
+                m_ = fitz.Pixmap(d_, int(mask_[1].split()[0]))
+                if m_.n != 1:
+                    m_ = fitz.Pixmap(fitz.csGRAY, m_)
+                alfa = Image.frombytes("L", (m_.width, m_.height), m_.samples)
+                import re as _r
+                obj_ = d_.xref_object(int(mask_[1].split()[0])) or ""
+                if not _r.search(r"/Decode\s*\[\s*1\s+0\s*\]", obj_):
+                    from PIL import ImageOps
+                    alfa = ImageOps.invert(alfa)
+            elif mask_[0] == "array":  # color transparente
+                rangos = [int(float(x_)) for x_ in mask_[1].strip("[] ").split()]
+                if len(rangos) >= 6 and im_.mode == "RGB":
+                    import numpy as np
+                    a_ = np.asarray(im_)
+                    fuera = ((a_[..., 0] >= rangos[0]) & (a_[..., 0] <= rangos[1]) & (a_[..., 1] >= rangos[2]) &
+                             (a_[..., 1] <= rangos[3]) & (a_[..., 2] >= rangos[4]) & (a_[..., 2] <= rangos[5]))
+                    alfa = Image.fromarray(np.where(fuera, 0, 255).astype("uint8"), "L")
+        except Exception:
+            alfa = None
+        if alfa is not None:
+            if alfa.size != im_.size:
+                alfa = alfa.resize(im_.size, Image.LANCZOS)
+            im_ = im_.convert("RGBA")
+            im_.putalpha(alfa)
+        b_ = io.BytesIO()
+        im_.save(b_, "PNG")
+        return b_.getvalue()
+
     def extraer_imagen(s_):
         """-> (bytes del archivo, extension, imagen PIL). Se usa la imagen original (mejor calidad)."""
         if s_.get("sello"):  # v4.4: firma o sello del PDF: en alta resolucion y sin el papel
@@ -13243,16 +13304,10 @@ def iniciar_interfaz():
                 try:
                     inf = d_.extract_image(s_["xref"])
                     datos, ext = inf["image"], inf["ext"].lower()
-                    if inf.get("smask") or ext not in ("jpeg", "jpg", "png") or inf.get("colorspace", 3) >= 4:
-                        pix = fitz.Pixmap(d_, s_["xref"])
-                        if inf.get("smask"):
-                            try:
-                                pix = fitz.Pixmap(pix, fitz.Pixmap(d_, inf["smask"]))
-                            except Exception:
-                                pass
-                        if pix.colorspace and pix.colorspace.n not in (1, 3):
-                            pix = fitz.Pixmap(fitz.csRGB, pix)
-                        datos, ext = pix.tobytes("png"), "png"
+                    t_m, v_m = d_.xref_get_key(s_["xref"], "Mask")
+                    if inf.get("smask") or t_m in ("xref", "array") or ext not in ("jpeg", "jpg", "png") \
+                            or inf.get("colorspace", 3) >= 4:
+                        datos, ext = _imagen_con_transparencia(d_, s_["xref"], inf.get("smask"), (t_m, v_m)), "png"
                     img = Image.open(io.BytesIO(datos))
                     img.load()
                     img, girada = _orientar(img, s_["tr"])
