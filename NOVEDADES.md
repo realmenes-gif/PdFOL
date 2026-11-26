@@ -1,3 +1,9 @@
+## PdFOL v5.4.5 · by Meneses999
+
+- **Buscar** encuentra en todas las páginas: sin importar **tildes**, mayúsculas ni **espacios raros** (portadas de Canva/Word, renglones en pedazos).
+
+**Descarga:** `PdFOL_v5.4.5_portable.zip` (sin instalar) o `PdFOL_v5.4.5_instalador.exe`.
+
 ## PdFOL v5.4.4 · by Meneses999
 
 - Arreglado: **«Acceso denegado» al guardar en el mismo PDF** (Windows).

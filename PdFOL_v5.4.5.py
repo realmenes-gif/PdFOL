@@ -363,12 +363,17 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.4.4"
-VERSION_INTERNA = "5.4.4"
+VERSION = "v5.4.5"
+VERSION_INTERNA = "5.4.5"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.4.5", [
+        "Buscar encuentra en TODAS las páginas: ya no importan las tildes (estimacion = ESTIMACIÓN), las "
+        "mayúsculas ni los espacios raros (portadas de Canva/Word con espacios especiales, letras separadas o "
+        "renglones escritos en pedazos).",
+    ]),
     ("v5.4.4", [
         "Arreglado: «Acceso denegado» al guardar en el mismo PDF (Windows). La vista previa del folio lo tenía "
         "abierto; ahora todos lo sueltan, se espera a que lo suelten y, si otro programa lo tiene abierto, se "
@@ -2863,6 +2868,73 @@ def _rects_pagina(page, rects):
     return [tuple(fitz.Rect(r) * m) for r in rects]
 
 
+_NORM_CACHE = {}
+_BUSQ_CACHE = {}
+
+
+def _norm_letra(c):
+    """v5.4.5: la letra «normalizada» para buscar: sin tildes, minuscula, guiones y comillas comunes."""
+    r_ = _NORM_CACHE.get(c)
+    if r_ is None:
+        import unicodedata
+        if c.isspace() or c in "\xa0\u2007\u202f\u200b":
+            r_ = " "
+        elif c in "\u2010\u2011\u2012\u2013\u2014\u2212":
+            r_ = "-"
+        elif c in "\u2018\u2019\u201a\u00b4`":
+            r_ = "'"
+        elif c in "\u201c\u201d\u201e\u00ab\u00bb":
+            r_ = '"'
+        else:
+            d_ = unicodedata.normalize("NFKD", c)
+            r_ = "".join(x_ for x_ in d_ if not unicodedata.combining(x_)).lower()
+        _NORM_CACHE[c] = r_
+    return r_
+
+
+def buscar_en_pagina(pg, texto):
+    """v5.4.5: busca como Nitro/Acrobat: sin importar mayusculas, tildes ni espacios (espacios raros, letras
+    separadas, renglones partidos en pedazos). -> rectangulos (sin girar) de cada hallazgo, por renglon."""
+    q_ = "".join(_norm_letra(c) for c in texto)
+    q_ = "".join(q_.split())
+    if not q_:
+        return []
+    k_c = (pg.parent.name, pg.number)
+    if k_c in _BUSQ_CACHE:
+        letras, plano = _BUSQ_CACHE[k_c]
+        return _hallar(letras, plano, q_)
+    letras = []  # (letra normalizada, bbox, renglon)
+    lid = 0
+    for bl in pg.get_text("rawdict")["blocks"]:
+        for ln in bl.get("lines", []):
+            lid += 1
+            for sp in ln["spans"]:
+                for ch in sp["chars"]:
+                    n_ = _norm_letra(ch["c"])
+                    if not n_.strip():
+                        continue
+                    for x_ in n_:
+                        letras.append((x_, ch["bbox"], lid))
+    plano = "".join(l_[0] for l_ in letras)
+    if len(_BUSQ_CACHE) > 1500:
+        _BUSQ_CACHE.clear()
+    _BUSQ_CACHE[k_c] = (letras, plano)
+    return _hallar(letras, plano, q_)
+
+
+def _hallar(letras, plano, q_):
+    out = []
+    i_ = plano.find(q_)
+    while i_ >= 0:
+        por = {}
+        for x_, bb, l_ in letras[i_:i_ + len(q_)]:
+            r_ = fitz.Rect(bb)
+            por[l_] = por[l_] | r_ if l_ in por else r_
+        out.extend(por.values())
+        i_ = plano.find(q_, i_ + len(q_))
+    return out
+
+
 def _proceso_buscar(entrada, salida):
     """Busca texto y palabras en otro proceso. Recibe:
          ("buscar", id, texto, [(ruta, pag), ...])  -> ("hallazgos", id, [(pos, [rects])], fin, hechas, total)
@@ -2887,6 +2959,8 @@ def _proceso_buscar(entrada, salida):
                 trabajo = None
             elif msg[0] == "cerrar":
                 d = docs.pop(msg[1], None)
+                for k__ in [k__ for k__ in _BUSQ_CACHE if k__[0] == msg[1]]:
+                    _BUSQ_CACHE.pop(k__, None)  # (el PDF cambio)
                 if d is not None:
                     orden_docs.remove(msg[1])
                     d.close()
@@ -2933,7 +3007,7 @@ def _proceso_buscar(entrada, salida):
             ruta, pag = t["lista"][t["k"]]
             try:
                 pg = _abrir_cache(docs, orden_docs, ruta)[pag]
-                rs = pg.search_for(t["texto"])
+                rs = buscar_en_pagina(pg, t["texto"])  # v5.4.5: sin tildes, mayusculas ni espacios
                 if rs:
                     t["lote"].append((t["k"], _rects_pagina(pg, rs)))
             except Exception:
