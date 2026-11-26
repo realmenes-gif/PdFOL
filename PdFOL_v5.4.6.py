@@ -363,12 +363,18 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.4.5"
-VERSION_INTERNA = "5.4.5"
+VERSION = "v5.4.6"
+VERSION_INTERNA = "5.4.6"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.4.6", [
+        "Arreglado: en tablas de Microsoft Project / «Imprimir a PDF» el texto no se reconocía bien al editar "
+        "(quedaban letras viejas debajo). Se leen bien los anchos de sus letras.",
+        "Tablas: cada celda es su propio cuadro de texto (no se juntan columnas vecinas) y se respeta cómo está "
+        "alineada: centrada en su celda o a la derecha como los demás números de la columna.",
+    ]),
     ("v5.4.5", [
         "Buscar encuentra en TODAS las páginas: ya no importan las tildes (estimacion = ESTIMACIÓN), las "
         "mayúsculas ni los espacios raros (portadas de Canva/Word con espacios especiales, letras separadas o "
@@ -4346,9 +4352,8 @@ def _mapa_de_fuente(doc, xref, buf):
     if sub == "Type0":
         c2g = None
         try:
-            m_ = re.search(r"(\d+)\s+0\s+R", doc.xref_get_key(xref, "DescendantFonts")[1] or "")
-            t_, v_ = doc.xref_get_key(int(m_.group(1)), "CIDToGIDMap")
-            if t_ == "xref":
+            v_ = _descendiente(doc, xref)[2]  # v5.4.6: (tambien con el descendiente metido adentro)
+            if v_:
                 raw = doc.xref_stream(int(v_.split()[0]))
                 c2g = {k_ // 2: int.from_bytes(raw[k_:k_ + 2], "big") for k_ in range(0, len(raw) - 1, 2)}
         except Exception:
@@ -4716,7 +4721,31 @@ def paso_renglon(it_):
     return it_["tam"] * (k_ or 1.25)
 
 
-def renglones_de_letras(pg):
+def _verticales_pg(pg):
+    """v5.4.6: rayas verticales de la hoja (sin girar): bordes de celdas de tablas."""
+    vs_ = []
+    try:
+        for dr_ in pg.get_drawings():
+            for it__ in dr_["items"]:
+                if it__[0] == "l":
+                    q__ = fitz.Rect(it__[1], it__[2])
+                    q__.normalize()
+                    if q__.width < 1 and q__.height > 4:
+                        vs_.append(q__)
+                elif it__[0] == "re":
+                    q__ = fitz.Rect(it__[1])
+                    q__.normalize()
+                    if q__.width < 2.5 and q__.height > 4:
+                        vs_.append(q__)
+                    elif q__.width > 6 and q__.height > 6:
+                        vs_.append(fitz.Rect(q__.x0, q__.y0, q__.x0, q__.y1))
+                        vs_.append(fitz.Rect(q__.x1, q__.y0, q__.x1, q__.y1))
+    except Exception:
+        pass
+    return vs_
+
+
+def renglones_de_letras(pg, verticales=None):
     """v5.4.1: los renglones de la hoja armados LETRA POR LETRA por su linea de base (como Nitro), en vez de los
     «renglones» que arma MuPDF: un renglon escrito en varios pedazos (PDF editados antes, Word, Canva) queda
     entero y en orden, sin espacios de relleno que tapan otras letras. -> bloques como get_text("dict")."""
@@ -4744,6 +4773,8 @@ def renglones_de_letras(pg):
     bloques = []
     for _y, gr in grupos:
         gr.sort(key=lambda t_: t_[1])
+        # v5.4.6: las rayas verticales que cruzan este renglon (celdas de una tabla)
+        vs_l = [v_ for v_ in (verticales or ()) if v_.y0 - 1 <= _y <= v_.y1 + 1]
         # columnas separadas por un hueco grande: renglones distintos
         trozos, act = [], []
         for t_ in gr:
@@ -4752,7 +4783,10 @@ def renglones_de_letras(pg):
                 fin_ = max(fitz.Rect(a_[2]["bbox"]).x1 for a_ in llenos_)
                 hueco = fitz.Rect(t_[2]["bbox"]).x0 - fin_
                 otro_ = t_[4] != llenos_[-1][4]
-                if hueco > 2.5 * t_[3]["size"] or (otro_ and hueco > 0.6 * t_[3]["size"]):
+                x_sig = fitz.Rect(t_[2]["bbox"]).x0
+                raya_ = vs_l and hueco > 0.05 * t_[3]["size"] and any(fin_ - 0.5 <= (v_.x0 + v_.x1) / 2 <= x_sig + 0.5
+                                                                      for v_ in vs_l)
+                if hueco > 2.5 * t_[3]["size"] or (otro_ and hueco > 0.6 * t_[3]["size"]) or raya_:
                     trozos.append(act)  # una columna o celda aparte (o la viñeta de una lista)
                     act = []
             act.append(t_)
@@ -5078,6 +5112,43 @@ def _anchos_cid(txt):
     return out
 
 
+def _descendiente(doc, xr_):
+    """v5.4.6: (W, DW, CIDToGIDMap) de una fuente Type0, este su descendiente aparte («n 0 R») o metido
+    adentro («[<< ... >>]», como Microsoft Print to PDF / Project)."""
+    desc = _valor_pdf(doc, xr_, "DescendantFonts") or ""
+    m_ = _re_m.match(r"\s*\[\s*(\d+)\s+0\s+R\s*\]", desc)
+    if m_:
+        dx_ = int(m_.group(1))
+        t_c, v_c = doc.xref_get_key(dx_, "CIDToGIDMap")
+        return _valor_pdf(doc, dx_, "W"), _valor_pdf(doc, dx_, "DW"), (v_c if t_c == "xref" else None)
+    w_ = None
+    m_w = _re_m.search(r"/W\s+(\d+)\s+0\s+R", desc)
+    if m_w:
+        try:
+            w_ = doc.xref_object(int(m_w.group(1)), compressed=False)
+        except Exception:
+            w_ = None
+    else:
+        k_ = desc.find("/W")
+        while k_ >= 0 and desc[k_ + 2:k_ + 3].isalpha():
+            k_ = desc.find("/W", k_ + 2)
+        if k_ >= 0:
+            a_ = desc.find("[", k_)
+            if a_ >= 0:
+                prof, b_ = 0, a_
+                for b_ in range(a_, len(desc)):
+                    if desc[b_] == "[":
+                        prof += 1
+                    elif desc[b_] == "]":
+                        prof -= 1
+                        if prof == 0:
+                            break
+                w_ = desc[a_:b_ + 1]
+    m_d = _re_m.search(r"/DW\s+([\d.]+)", desc)
+    m_g = _re_m.search(r"/CIDToGIDMap\s+(\d+\s+0\s+R)", desc)
+    return w_, (m_d.group(1) if m_d else None), (m_g.group(1) if m_g else None)
+
+
 def _info_fuentes(doc, pg):
     """{nombre del recurso: datos para medir sus letras} de las fuentes de la hoja (o None si alguna no se sabe)."""
     out = {}
@@ -5093,14 +5164,9 @@ def _info_fuentes(doc, pg):
                 if (_valor_pdf(doc, xr_, "Encoding") or "").endswith("-V"):
                     out[nom] = None  # (escritura vertical)
                     continue
-                desc = _valor_pdf(doc, xr_, "DescendantFonts") or ""
-                m_ = _re_m.search(r"(\d+)\s+0\s+R", desc)
-                if not m_:
-                    out[nom] = None
-                    continue
-                dx_ = int(m_.group(1))
-                dw_ = _numeros(_valor_pdf(doc, dx_, "DW") or "1000")
-                out[nom] = {"bytes": 2, "w": _anchos_cid(_valor_pdf(doc, dx_, "W")), "dw": dw_[0] if dw_ else 1000.0}
+                w_txt, dw_txt, _c2g = _descendiente(doc, xr_)
+                dw_ = _numeros(dw_txt or "1000")
+                out[nom] = {"bytes": 2, "w": _anchos_cid(w_txt), "dw": dw_[0] if dw_ else 1000.0}
             elif sub in ("TrueType", "Type1", "MMType1"):
                 fc_ = _numeros(_valor_pdf(doc, xr_, "FirstChar") or "")
                 ws_ = _numeros(_valor_pdf(doc, xr_, "Widths") or "")
@@ -13984,7 +14050,37 @@ def iniciar_interfaz():
             pg = d_[pag]
             m_ = pg.rotation_matrix
             pt_ = fitz.Point(p_)
-            bloques_ = renglones_de_letras(pg)  # v5.4.1: renglones armados letra por letra (como Nitro)
+            bloques_ = renglones_de_letras(pg, _verticales_pg(pg))  # v5.4.1: letra por letra (v5.4.6: por celda)
+            rayas_c = {}
+
+            def rayas_():
+                """(rayas horizontales, rayas verticales) de la hoja, como se ve (tablas, celdas)."""
+                if "r" not in rayas_c:
+                    hs_, vs_ = [], []
+                    try:
+                        for dr_ in pg.get_drawings():
+                            for it__ in dr_["items"]:
+                                if it__[0] == "l":
+                                    q__ = fitz.Rect(it__[1], it__[2]) * m_
+                                    q__.normalize()
+                                    if q__.height < 1:
+                                        hs_.append(q__ + (0, -0.3, 0, 0.3))
+                                    elif q__.width < 1:
+                                        vs_.append(q__ + (-0.3, 0, 0.3, 0))
+                                elif it__[0] == "re":
+                                    q__ = fitz.Rect(it__[1]) * m_
+                                    q__.normalize()
+                                    if q__.height < 2.5 and q__.width > 10:
+                                        hs_.append(q__ + (0, -0.3, 0, 0.3))
+                                    elif q__.width < 2.5 and q__.height > 6:
+                                        vs_.append(q__)
+                                    elif q__.width > 6 and q__.height > 6:  # una celda dibujada como rectangulo
+                                        vs_.append(fitz.Rect(q__.x0, q__.y0, q__.x0, q__.y1))
+                                        vs_.append(fitz.Rect(q__.x1, q__.y0, q__.x1, q__.y1))
+                    except Exception:
+                        pass
+                    rayas_c["r"] = (hs_, vs_)
+                return rayas_c["r"]
             ocr_r = None
             if not any(sp["text"].strip() for bl in bloques_ for ln in bl.get("lines", []) for sp in ln["spans"]):
                 ocr_r = ocr_de(ruta, pag)  # v4.1: escaneo: el texto reconocido
@@ -14013,20 +14109,7 @@ def iniciar_interfaz():
                 elif ocr_r:  # escaneo: el OCR ya junta los renglones en parrafos
                     elegidas = [k_ for k_, (b_, _l) in enumerate(todas_l) if b_ == todas_l[dentro[0]][0]]
                 else:
-                    seps_ = []  # v5.4: rayas horizontales (tablas): un recuadro de texto no las cruza
-                    try:
-                        for dr_ in pg.get_drawings():
-                            for it__ in dr_["items"]:
-                                if it__[0] == "l" and abs(it__[1].y - it__[2].y) < 1:
-                                    q__ = fitz.Rect(it__[1], it__[2]) * m_
-                                elif it__[0] == "re" and it__[1].height < 2.5 and it__[1].width > 10:
-                                    q__ = fitz.Rect(it__[1]) * m_
-                                else:
-                                    continue
-                                q__.normalize()
-                                seps_.append(q__ + (0, -0.3, 0, 0.3))
-                    except Exception:
-                        seps_ = []
+                    seps_ = rayas_()[0]  # v5.4: rayas horizontales (tablas): un recuadro de texto no las cruza
                     elegidas = parrafo_de_renglones([ln for _b, ln in todas_l], cajas_t, dentro[0], m_, seps_)
                 lineas = [todas_l[k_][1] for k_ in elegidas]
                 cajas = [cajas_t[k_] for k_ in elegidas]
@@ -14132,6 +14215,35 @@ def iniciar_interfaz():
                 columna_ = (min(r_.x0 for r_ in todas_), max(r_.x1 for r_ in todas_))
                 alin_, sangria_, x_izq, ancho_ = alineacion_parrafo(cajas, columna_, (fitz.Rect(pg.rect) * m_).width,
                                                                      [r_.x0 for r_ in todas_])
+                if alin_ == "izq" and len(cajas) == 1:  # v5.4.6: un renglon en una columna de tabla
+                    # como los demas de su columna: todos terminan igual (numeros), todos centrados o todos
+                    # empiezan igual
+                    c0_ = (caja.x0 + caja.x1) / 2
+                    col_ = [r_ for r_ in todas_ if r_.x0 < caja.x1 and r_.x1 > caja.x0 and not r_.intersects(caja)]
+                    n_der = sum(1 for r_ in col_ if abs(r_.x1 - caja.x1) < 1 and abs(r_.x0 - caja.x0) > 2)
+                    n_izq = sum(1 for r_ in col_ if abs(r_.x0 - caja.x0) < 1 and abs(r_.x1 - caja.x1) > 2)
+                    n_cen = sum(1 for r_ in col_ if abs((r_.x0 + r_.x1) / 2 - c0_) < 1 and abs(r_.x0 - caja.x0) > 2)
+                    mejor_ = max((n_der, "der"), (n_cen - 1, "centro"), (n_izq, "izq"))
+                    if mejor_[0] >= 2 and mejor_[1] != "izq" and mejor_[0] > n_izq:
+                        alin_, sangria_, x_izq, ancho_ = mejor_[1], 0, caja.x0, None
+                if alin_ == "izq" and len(cajas) == 1 and n_izq < 2:  # v5.4.6: un renglon en una celda
+                    try:
+                        vs_ = rayas_()[1]
+                        izq_c = [v_.x1 for v_ in vs_ if v_.x1 <= caja.x0 + 0.5 and v_.y0 <= caja.y1 and v_.y1 >= caja.y0]
+                        der_c = [v_.x0 for v_ in vs_ if v_.x0 >= caja.x1 - 0.5 and v_.y0 <= caja.y1 and v_.y1 >= caja.y0]
+                        if izq_c and der_c:
+                            L_, R_ = max(izq_c), min(der_c)
+                            ml_, mr_ = caja.x0 - L_, R_ - caja.x1
+                            celda_w = R_ - L_
+                            if celda_w < (fitz.Rect(pg.rect) * m_).width * 0.6 and ml_ > 1.5:
+                                if abs(ml_ - mr_) < max(2.0, 0.08 * celda_w):
+                                    alin_, sangria_ = "centro", 0
+                                    x_izq, ancho_ = min(r_.x0 for r_ in cajas), (None if len(cajas) == 1 else max(r_.x1 for r_ in cajas) - min(r_.x0 for r_ in cajas) + 0.3)
+                                elif mr_ < ml_ * 0.5 and mr_ < max(8.0, sp0["size"]):
+                                    alin_, sangria_ = "der", 0
+                                    x_izq, ancho_ = min(r_.x0 for r_ in cajas), (None if len(cajas) == 1 else max(r_.x1 for r_ in cajas) - min(r_.x0 for r_ in cajas) + 0.3)
+                    except Exception:
+                        pass
                 res_ = {"rect": tuple(caja), "rects_borrar": [tuple(r_) for r_ in cajas], "txt": txt,
                         "tam": round(sp0["size"], 3), "fam": fam_, "neg": neg_, "cur": cur_,
                         "color": ((sp0["color"] >> 16) & 255, (sp0["color"] >> 8) & 255, sp0["color"] & 255),

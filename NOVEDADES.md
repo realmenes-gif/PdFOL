@@ -1,3 +1,10 @@
+## PdFOL v5.4.6 · by Meneses999
+
+- Arreglado: editar **tablas** de Microsoft Project / «Imprimir a PDF» (quedaban letras viejas debajo).
+- Cada **celda** es su propio cuadro y respeta su alineación (centrada o a la derecha como los números de la columna).
+
+**Descarga:** `PdFOL_v5.4.6_portable.zip` (sin instalar) o `PdFOL_v5.4.6_instalador.exe`.
+
 ## PdFOL v5.4.5 · by Meneses999
 
 - **Buscar** encuentra en todas las páginas: sin importar **tildes**, mayúsculas ni **espacios raros** (portadas de Canva/Word, renglones en pedazos).
