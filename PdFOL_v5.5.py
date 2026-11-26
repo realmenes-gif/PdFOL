@@ -363,12 +363,18 @@ ICONO_PNG_B64 = (
 )
 
 NOMBRE = "PdFOL"
-VERSION = "v5.4.7"
-VERSION_INTERNA = "5.4.7"
+VERSION = "v5.5"
+VERSION_INTERNA = "5.5"
 AUTOR = "Meneses999"
 
 # Historial de cambios (se ve en «Acerca de» y en «Novedades», sin entrar a GitHub)
 CAMBIOS = [
+    ("v5.5", [
+        "Convertir a Excel mantiene el formato del PDF: una hoja por página, tablas con celdas combinadas, "
+        "anchos de columna y alto de filas, colores de fondo, bordes, letra (fuente, tamaño, negrita, cursiva, "
+        "color) y alineación; el texto suelto en su lugar, con los espacios de la hoja; los logos, firmas y "
+        "sellos como imágenes en su sitio; y se imprime vertical u horizontal como la página.",
+    ]),
     ("v5.4.7", [
         "Arreglado: en un monitor externo, las ventanitas (Guardar, avisos) salían grandes y después se "
         "achicaban. Ahora nacen ya con el tamaño de ese monitor y encima de PdFOL.",
@@ -1961,71 +1967,264 @@ def _poner_celda(ws, fila, col, valor):
     return ws.cell(row=fila, column=col, value=valor)
 
 
+def _nombre_fuente_excel(nf):
+    """'ABCDEF+Calibri-Bold' -> 'Calibri' (el nombre que entiende Excel)."""
+    import re
+    n_ = (nf or "").split("+")[-1]
+    n_ = re.sub(r"[-,](Bold|Italic|Oblique|BoldItalic|BoldOblique|Regular|Roman|Semibold|Light|Medium|Black)+.*$", "", n_)
+    n_ = re.sub(r"(PSMT|MT|PS)$", "", n_)
+    n_ = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", n_) if " " not in n_ and len(n_) > 3 else n_
+    return {"Times New Roman": "Times New Roman", "Arial": "Arial"}.get(n_.strip(), n_.strip()) or "Calibri"
+
+
+def _hex_color(c_):
+    return "%02X%02X%02X" % ((c_ >> 16) & 255, (c_ >> 8) & 255, c_ & 255)
+
+
 def convertir_a_excel(origen, destino, avance=None):
-    """PDF -> .xlsx: las tablas de cada pagina (con sus cifras como numeros). Si una pagina no tiene tablas, su
-    texto va renglon por renglon, separado en columnas donde hay espacios grandes."""
+    """v5.5: PDF -> .xlsx manteniendo el formato lo mas parecido posible (como Acrobat/Nitro): una hoja de
+    Excel por pagina; las tablas con sus celdas combinadas, anchos de columna, alto de filas, colores de fondo,
+    bordes, letra (fuente, tamaño, negrita, cursiva, color) y alineacion; las cifras como numeros con su formato.
+    El texto fuera de las tablas va en su lugar (fila por renglon, columna por posicion)."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
     from openpyxl.utils import get_column_letter
     d_ = fitz.open(origen)
     wb = Workbook()
-    ws = wb.active
-    ws.title = "PDF"
-    fila = 1
-    negrita = Font(bold=True)
-    fondo_t = PatternFill("solid", fgColor="DCE6F1")
-    fino = Side(style="thin", color="A6A6A6")
+    wb.remove(wb.active)
+    fino = Side(style="thin", color="808080")
     borde = Border(left=fino, right=fino, top=fino, bottom=fino)
-    anchos = {}
     hojas_tablas = 0
-    for n_, pg in enumerate(d_):
+
+    def estilo_de(pg, rect):
+        """Letra, color y alineacion del texto dentro de un recuadro."""
+        sps = []
+        try:
+            for b_ in pg.get_text("dict", clip=rect)["blocks"]:
+                for l_ in b_.get("lines", []):
+                    for sp in l_["spans"]:
+                        if sp["text"].strip() and fitz.Rect(sp["bbox"]).intersects(rect):
+                            sps.append(sp)
+        except Exception:
+            pass
+        if not sps:
+            return None, None, 0
+        sp0 = max(sps, key=lambda x_: len(x_["text"]))
+        caja = fitz.Rect(sps[0]["bbox"])
+        for sp in sps[1:]:
+            caja |= fitz.Rect(sp["bbox"])
+        f_ = Font(name=_nombre_fuente_excel(sp0["font"]), size=round(sp0["size"] * 2) / 2,
+                  bold=bool(sp0["flags"] & 16) or "bold" in sp0["font"].lower(),
+                  italic=bool(sp0["flags"] & 2) or "italic" in sp0["font"].lower(), color=_hex_color(sp0["color"]))
+        gl, gr = caja.x0 - rect.x0, rect.x1 - caja.x1
+        horiz = "center" if abs(gl - gr) < max(3.0, rect.width * 0.08) and gl > 2 else ("right" if gr < gl else "left")
+        n_lin = len({round(sp["origin"][1]) for sp in sps})
+        return f_, horiz, n_lin
+
+    for n_p, pg in enumerate(d_):
         if avance:
-            avance(n_, len(d_))
+            avance(n_p, len(d_))
+        ws = wb.create_sheet(f"Pág {n_p + 1}"[:31])
+        ws.sheet_view.showGridLines = False
         try:
             tablas = list(pg.find_tables().tables)
         except Exception:
             tablas = []
-        ws.cell(row=fila, column=1, value=f"Página {n_ + 1}").font = Font(bold=True, size=12, color="1F4E79")
-        fila += 1
-        if tablas:
-            for t_ in tablas:
-                # el texto de cada celda por su recuadro (extract() a veces desordena puntos y espacios)
-                datos = [[" ".join(pg.get_text("text", clip=fitz.Rect(c__)).split()) if c__ else ""
-                          for c__ in r__.cells] for r__ in t_.rows]
-                for k_, reng in enumerate(datos):
-                    for c_, v_ in enumerate(reng):
-                        txt_ = (v_ or "").replace("\n", " ").strip()
-                        cel = _poner_celda(ws, fila, c_ + 1, _numero_celda(txt_) if k_ else (txt_ or None))
-                        cel.border = borde
-                        if k_ == 0:
-                            cel.font, cel.fill = negrita, fondo_t
-                            cel.alignment = Alignment(wrap_text=True, vertical="center")
-                        anchos[c_ + 1] = max(anchos.get(c_ + 1, 8), min(60, len(txt_) + 2))
-                    fila += 1
+        rellenos = []  # rectangulos pintados (fondos de celdas)
+        try:
+            for dr_ in pg.get_drawings():
+                if dr_.get("fill") and dr_.get("rect") is not None:
+                    r_ = fitz.Rect(dr_["rect"])
+                    if r_.width > 2 and r_.height > 2:
+                        c_ = dr_["fill"]
+                        hx_ = "%02X%02X%02X" % tuple(int(round(v_ * 255)) for v_ in c_[:3])
+                        if hx_ != "FFFFFF":
+                            rellenos.append((r_, hx_))
+        except Exception:
+            rellenos = []
+
+        def fondo_de(rect):
+            c_ = rect.tl + (rect.br - rect.tl) * 0.5
+            mejores = [(abs(r_), hx_) for r_, hx_ in rellenos if r_.contains(c_) and abs(r_) < abs(pg.rect) * 0.5]
+            return min(mejores)[1] if mejores else None
+
+        # columnas de la hoja: los bordes de las celdas y donde empiezan los renglones sueltos
+        xs = []
+        cajas_t = [fitz.Rect(t_.bbox) for t_ in tablas]
+        for t_ in tablas:
+            for c__ in t_.cells:
+                if c__:
+                    xs += [c__[0], c__[2]]
+        sueltos = []
+        for b_ in renglones_de_letras(pg):  # (renglones enteros aunque esten escritos en pedazos)
+            for l_ in b_.get("lines", []):
+                r_ = fitz.Rect(l_["bbox"])
+                if not "".join(sp["text"] for sp in l_["spans"]).strip():
+                    continue
+                if any(abs(r_ & t__) > abs(r_) * 0.5 for t__ in cajas_t):
+                    continue
+                trozos, ult = [], None
+                for sp in l_["spans"]:
+                    if not sp["text"].strip():
+                        continue
+                    if ult is not None and sp["bbox"][0] - ult > sp["size"] * 1.5:
+                        trozos.append([sp])
+                    elif trozos:
+                        trozos[-1].append(sp)
+                    else:
+                        trozos.append([sp])
+                    ult = sp["bbox"][2]
+                for tr in trozos:
+                    xs.append(tr[0]["bbox"][0])
+                sueltos.append((r_, trozos))
+        xs += [0, pg.rect.width]
+        xs.sort()
+        bordes = []
+        for x_ in xs:
+            if not bordes or x_ - bordes[-1] > 3:
+                bordes.append(x_)
+            else:
+                bordes[-1] = min(bordes[-1], x_)
+
+        def col_de(x_):
+            k_ = 0
+            for i_, b_ in enumerate(bordes):
+                if b_ <= x_ + 3:
+                    k_ = i_
+            return k_ + 1
+        for i_ in range(len(bordes) - 1):
+            ws.column_dimensions[get_column_letter(i_ + 1)].width = max(1.5, (bordes[i_ + 1] - bordes[i_]) / 5.6)
+
+        elementos = [(fitz.Rect(t_.bbox).y0, "t", t_) for t_ in tablas] + [(r_.y0, "l", (r_, tr)) for r_, tr in sueltos]
+        elementos.sort(key=lambda e_: e_[0])
+        fila = 1
+        ocupado = set()
+        filas_y = []  # (y en la pagina, fila de Excel): para poner las imagenes en su lugar
+        y_prev = 0.0
+        for k_e, (_y, tipo, el) in enumerate(elementos):
+            if _y - y_prev > 4 and fila > 1 or (fila == 1 and _y > 4):
+                # el espacio en blanco de arriba (como en la hoja): una fila vacia de ese alto
+                ws.row_dimensions[fila].height = min(400.0, max(2.0, (_y - y_prev) * 0.95))
+                filas_y.append((y_prev, fila))
                 fila += 1
-                hojas_tablas += 1
-        else:  # sin tablas: el texto, con columnas donde hay espacios grandes
-            for b_ in pg.get_text("dict")["blocks"]:
-                for l_ in b_.get("lines", []):
-                    celdas, ult_x = [], None
-                    for sp in l_["spans"]:
-                        if not sp["text"].strip():
-                            continue
-                        if ult_x is not None and sp["bbox"][0] - ult_x > sp["size"] * 1.5:
-                            celdas.append(sp["text"].strip())
-                        elif celdas:
-                            celdas[-1] += sp["text"]
-                        else:
-                            celdas.append(sp["text"].strip())
-                        ult_x = sp["bbox"][2]
-                    for c_, txt_ in enumerate(celdas):
-                        _poner_celda(ws, fila, c_ + 1, _numero_celda(txt_.strip()))
-                        anchos[c_ + 1] = max(anchos.get(c_ + 1, 8), min(60, len(txt_) + 2))
-                    if celdas:
-                        fila += 1
-        fila += 1
-    for c_, w_ in anchos.items():
-        ws.column_dimensions[get_column_letter(c_)].width = w_
+            if tipo == "l":
+                r_, trozos = el
+                for k_t, tr in enumerate(trozos):
+                    txt_ = "".join(sp["text"] for sp in tr).strip()
+                    col = col_de(tr[0]["bbox"][0])
+                    if (fila, col) in ocupado:
+                        continue
+                    cel = _poner_celda(ws, fila, col, _numero_celda(txt_))
+                    sp0 = max(tr, key=lambda x_: len(x_["text"]))
+                    cel.font = Font(name=_nombre_fuente_excel(sp0["font"]), size=round(sp0["size"] * 2) / 2,
+                                    bold=bool(sp0["flags"] & 16) or "bold" in sp0["font"].lower(),
+                                    italic=bool(sp0["flags"] & 2), color=_hex_color(sp0["color"]))
+                    # que el texto quede en su lugar: se combinan las columnas que ocupa en la hoja
+                    x1_ = max(sp["bbox"][2] for sp in tr)
+                    c1 = max(col, col_de(x1_ - 3))
+                    if k_t + 1 < len(trozos):
+                        c1 = min(c1, col_de(trozos[k_t + 1][0]["bbox"][0]) - 1)
+                    if c1 > col and not any((fila, c__) in ocupado for c__ in range(col, c1 + 1)):
+                        ws.merge_cells(start_row=fila, start_column=col, end_row=fila, end_column=c1)
+                    for c__ in range(col, c1 + 1):
+                        ocupado.add((fila, c__))
+                    if isinstance(_numero_celda(txt_), float):
+                        cel.alignment = Alignment(horizontal="right", vertical="bottom")
+                ws.row_dimensions[fila].height = max(10.0, r_.height * 1.1)
+                filas_y.append((r_.y0, fila))
+                y_prev = r_.y1
+                fila += 1
+                continue
+            t_ = el
+            hojas_tablas += 1
+            ys = []
+            for r__ in t_.rows:
+                ys.append(r__.bbox[1])
+            ys.append(t_.bbox[3])
+
+            def fila_de(y_, base=fila):
+                k_ = 0
+                for i_, v_ in enumerate(ys):
+                    if v_ <= y_ + 2:
+                        k_ = i_
+                return base + k_
+            for ri, r__ in enumerate(t_.rows):
+                ws.row_dimensions[fila + ri].height = max(12.0, (ys[ri + 1] - ys[ri]))
+                for c__ in r__.cells:
+                    if not c__:
+                        continue
+                    rc = fitz.Rect(c__)
+                    f0, f1 = fila_de(rc.y0), max(fila_de(rc.y0), fila_de(rc.y1 - 2))
+                    c0, c1 = col_de(rc.x0), max(col_de(rc.x0), col_de(rc.x1 - 3))
+                    if any((f__, c__2) in ocupado for f__ in range(f0, f1 + 1) for c__2 in range(c0, c1 + 1)):
+                        continue
+                    txt_ = " ".join(pg.get_text("text", clip=rc).split())
+                    cel = _poner_celda(ws, f0, c0, _numero_celda(txt_) if txt_ else None)
+                    f_, horiz, n_lin = estilo_de(pg, rc)
+                    if f_ is not None:
+                        cel.font = f_
+                    cel.alignment = Alignment(horizontal=horiz or "left", vertical="center",
+                                              wrap_text=n_lin > 1 or len(txt_) > 40)
+                    hx_ = fondo_de(rc)
+                    for f__ in range(f0, f1 + 1):
+                        for c__2 in range(c0, c1 + 1):
+                            ocupado.add((f__, c__2))
+                            cc_ = ws.cell(row=f__, column=c__2)
+                            cc_.border = borde
+                            if hx_:
+                                cc_.fill = PatternFill("solid", fgColor=hx_)
+                    if f1 > f0 or c1 > c0:
+                        ws.merge_cells(start_row=f0, start_column=c0, end_row=f1, end_column=c1)
+            filas_y.append((t_.bbox[1], fila))
+            y_prev = t_.bbox[3]
+            fila += len(t_.rows)
+        if pg.rect.height - y_prev > 4:  # hasta el pie de la hoja (para las imagenes de abajo)
+            ws.row_dimensions[fila].height = min(400.0, (pg.rect.height - y_prev) * 0.95)
+            filas_y.append((y_prev, fila))
+            fila += 1
+        # las imagenes (logos, firmas, sellos) en su lugar y con su tamaño
+        try:
+            from openpyxl.drawing.image import Image as XLImage
+            from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor, AnchorMarker
+            from openpyxl.drawing.xdr import XDRPositiveSize2D
+            from openpyxl.utils.units import pixels_to_EMU
+            vistos = set()
+            for inf in pg.get_image_info(xrefs=True):
+                r_ = fitz.Rect(inf["bbox"]) & pg.rect
+                if r_.is_empty or r_.width < 8 or r_.height < 8 or abs(r_) > abs(pg.rect) * 0.6:
+                    continue
+                k_v = tuple(round(v_) for v_ in r_)
+                if k_v in vistos:
+                    continue
+                vistos.add(k_v)
+                pix = pg.get_pixmap(clip=r_, dpi=150, alpha=False)
+                bio = io.BytesIO(pix.tobytes("png"))
+                xl = XLImage(bio)
+                w_px, h_px = int(r_.width * 96 / 72), int(r_.height * 96 / 72)
+                xl.width, xl.height = w_px, h_px
+                f_img, y_f = 1, 0.0
+                for y_, f__ in filas_y:
+                    if y_ <= r_.y0 + 1:
+                        f_img, y_f = f__, y_
+                c_img = col_de(r_.x0)
+                off_x = int(max(0.0, r_.x0 - bordes[c_img - 1]) * 96 / 72)
+                off_y = int(max(0.0, min(r_.y0 - y_f, (ws.row_dimensions[f_img].height or 15) - 1)) * 96 / 72)
+                xl.anchor = OneCellAnchor(_from=AnchorMarker(col=c_img - 1, colOff=pixels_to_EMU(off_x), row=f_img - 1,
+                                                             rowOff=pixels_to_EMU(off_y)),
+                                          ext=XDRPositiveSize2D(pixels_to_EMU(w_px), pixels_to_EMU(h_px)))
+                ws.add_image(xl)
+        except Exception:
+            pass
+        # que se imprima como la pagina (vertical u horizontal, ajustada al ancho)
+        try:
+            ws.page_setup.orientation = "landscape" if pg.rect.width > pg.rect.height else "portrait"
+            ws.page_setup.fitToWidth = 1
+            ws.page_setup.fitToHeight = 0
+            ws.sheet_properties.pageSetUpPr.fitToPage = True
+        except Exception:
+            pass
+    if not wb.worksheets:
+        wb.create_sheet("PDF")
     d_.close()
     tmp = destino + ".tmp.xlsx"
     wb.save(tmp)

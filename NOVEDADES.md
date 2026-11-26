@@ -1,3 +1,10 @@
+## PdFOL v5.5 · by Meneses999
+
+- **Convertir a Excel con el formato del PDF**: una hoja por página, celdas combinadas, anchos y altos, colores de fondo, bordes, letra y alineación; el texto en su lugar; logos y sellos como imágenes.
+- (v5.4.7) Las ventanitas ya no salen grandes y luego chicas en un monitor externo.
+
+**Descarga:** `PdFOL_v5.5_portable.zip` (sin instalar) o `PdFOL_v5.5_instalador.exe`.
+
 ## PdFOL v5.4.7 · by Meneses999
 
 - Arreglado: en un **monitor externo** las ventanitas (Guardar, avisos) salían grandes y luego se achicaban.
